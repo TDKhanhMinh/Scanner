@@ -31,6 +31,11 @@ from attendance_scanner.events import (
     deserialize_event,
     serialize_event,
 )
+from attendance_scanner.pipeline import (
+    LoadedImage,
+    LoadedImageMetadata,
+    load_image,
+)
 
 __version__ = "0.1.0"
 
@@ -42,6 +47,7 @@ __all__ = [
     "ScannerErrorCode",
     "ScannerError",
     "InvalidInputRootError",
+    "ImageDecodeError",
     "DiscoveredFile",
     "DiscoveryResult",
     "ScanPlan",
@@ -60,4 +66,7 @@ __all__ = [
     "ScannerEvent",
     "serialize_event",
     "deserialize_event",
+    "load_image",
+    "LoadedImage",
+    "LoadedImageMetadata",
 ]

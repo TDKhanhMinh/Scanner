@@ -189,6 +189,17 @@ class InvalidInputRootError(ScannerError):
         self.path = path
 
 
+class ImageDecodeError(ScannerError):
+    """Raised when an image file fails to read or decode."""
+
+    def __init__(self, path: str, reason: str = "Unable to decode image") -> None:
+        super().__init__(
+            ScannerErrorCode.IMAGE_DECODE_FAILED,
+            f"Failed to decode image '{path}': {reason}",
+        )
+        self.path = path
+
+
 class DiscoveryResult(BaseContract):
     """Inventory result of employee folder discovery."""
 
