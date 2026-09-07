@@ -21,24 +21,28 @@ def create_test_image_with_exif(
     color: tuple[int, int, int],
     orientation: int,
 ) -> None:
-    """Helper to create a JPEG image with a specific EXIF orientation tag."""
+    """Helper to create a JPEG image with a specific EXIF orientation tag and distinct landmark."""
     img = Image.new("RGB", size, color=color)
-    # Mark top-left pixel with a distinct color to test orientation landmark
-    img.putpixel((0, 0), (0, 255, 0))  # Green landmark
+    # Mark top-left 3x3 block with a distinct green landmark (R=0, G=255, B=0)
+    for y in range(3):
+        for x in range(3):
+            img.putpixel((x, y), (0, 255, 0))
 
     exif = img.getexif()
     exif[0x0112] = orientation
-    img.save(path, "JPEG", exif=exif)
+    img.save(path, "JPEG", quality=100, exif=exif)
 
 
 def test_load_exif_orientations(tmp_path: Path):
-    """Verify EXIF orientations 1, 3, 6, and 8 are properly transposed upright."""
-    # Test case: original image is 100 wide x 60 high
+    """Verify EXIF orientations 1, 3, 6, and 8 are transposed upright with pixel landmarks."""
+    # Test case: original image is 100 wide x 60 high with dark background
     orig_w, orig_h = 100, 60
+    base_color = (10, 10, 10)
 
     # Orientation 1: Normal (0 deg rotation)
+    # Landmark at original top-left (x=0..2, y=0..2) remains at top-left (y=1, x=1)
     p1 = tmp_path / "img_exif_1.jpg"
-    create_test_image_with_exif(p1, (orig_w, orig_h), (200, 100, 50), orientation=1)
+    create_test_image_with_exif(p1, (orig_w, orig_h), base_color, orientation=1)
     res1 = load_image(p1)
     assert isinstance(res1, LoadedImage)
     assert res1.width == orig_w
@@ -48,19 +52,32 @@ def test_load_exif_orientations(tmp_path: Path):
     assert res1.metadata.exif_orientation == 1
     assert res1.shape == (orig_h, orig_w, 3)
     assert res1.channels == 3
+    # Pixel landmark check: top-left is green (high G, low B and R)
+    pix1_landmark = res1.image[1, 1]
+    assert pix1_landmark[1] > 180 and pix1_landmark[0] < 80 and pix1_landmark[2] < 80
+    # Opposite corner (bottom-right) should be base dark color
+    pix1_opposite = res1.image[orig_h - 2, orig_w - 2]
+    assert pix1_opposite[1] < 50
 
     # Orientation 3: 180 degree rotation
+    # Landmark at original top-left rotates 180 deg to bottom-right (y=orig_h - 2, x=orig_w - 2)
     p3 = tmp_path / "img_exif_3.jpg"
-    create_test_image_with_exif(p3, (orig_w, orig_h), (200, 100, 50), orientation=3)
+    create_test_image_with_exif(p3, (orig_w, orig_h), base_color, orientation=3)
     res3 = load_image(p3)
     assert res3.width == orig_w
     assert res3.height == orig_h
     assert res3.metadata.exif_orientation == 3
     assert res3.shape == (orig_h, orig_w, 3)
+    pix3_landmark = res3.image[orig_h - 2, orig_w - 2]
+    assert pix3_landmark[1] > 180 and pix3_landmark[0] < 80 and pix3_landmark[2] < 80
+    pix3_opposite = res3.image[1, 1]
+    assert pix3_opposite[1] < 50
 
-    # Orientation 6: Rotated 90 CW in camera -> upright transpose swaps dimensions
+    # Orientation 6: Rotated 90 CW in camera -> upright transpose rotates 90 CCW
+    # Dimensions swap: 100x60 becomes 60x100
+    # Original top-left landmark moves to top-right: y=1, x=norm_w - 2 (58)
     p6 = tmp_path / "img_exif_6.jpg"
-    create_test_image_with_exif(p6, (orig_w, orig_h), (200, 100, 50), orientation=6)
+    create_test_image_with_exif(p6, (orig_w, orig_h), base_color, orientation=6)
     res6 = load_image(p6)
     assert res6.metadata.original_width == orig_w
     assert res6.metadata.original_height == orig_h
@@ -68,10 +85,16 @@ def test_load_exif_orientations(tmp_path: Path):
     assert res6.height == orig_w  # Dimensions swapped: 100
     assert res6.metadata.exif_orientation == 6
     assert res6.shape == (orig_w, orig_h, 3)
+    pix6_landmark = res6.image[1, orig_h - 2]  # y=1, x=58
+    assert pix6_landmark[1] > 180 and pix6_landmark[0] < 80 and pix6_landmark[2] < 80
+    pix6_opposite = res6.image[orig_w - 2, 1]  # y=98, x=1
+    assert pix6_opposite[1] < 50
 
-    # Orientation 8: Rotated 270 CW in camera -> upright transpose swaps dimensions
+    # Orientation 8: Rotated 270 CW in camera -> upright transpose rotates 90 CW
+    # Dimensions swap: 100x60 becomes 60x100
+    # Original top-left landmark moves to bottom-left: y=norm_h - 2 (98), x=1
     p8 = tmp_path / "img_exif_8.jpg"
-    create_test_image_with_exif(p8, (orig_w, orig_h), (200, 100, 50), orientation=8)
+    create_test_image_with_exif(p8, (orig_w, orig_h), base_color, orientation=8)
     res8 = load_image(p8)
     assert res8.metadata.original_width == orig_w
     assert res8.metadata.original_height == orig_h
@@ -79,6 +102,10 @@ def test_load_exif_orientations(tmp_path: Path):
     assert res8.height == orig_w  # Dimensions swapped: 100
     assert res8.metadata.exif_orientation == 8
     assert res8.shape == (orig_w, orig_h, 3)
+    pix8_landmark = res8.image[orig_w - 2, 1]  # y=98, x=1
+    assert pix8_landmark[1] > 180 and pix8_landmark[0] < 80 and pix8_landmark[2] < 80
+    pix8_opposite = res8.image[1, orig_h - 2]  # y=1, x=58
+    assert pix8_opposite[1] < 50
 
 
 def test_alpha_transparency_composited_onto_white(tmp_path: Path):
