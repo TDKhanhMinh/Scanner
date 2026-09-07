@@ -360,4 +360,3 @@ def test_scan_one_enhancement_failure_raises_typed_process_error():
 
         assert exc_info.value.code == ScannerErrorCode.UNEXPECTED_ERROR
         assert "Enhancement failed" in str(exc_info.value)
-

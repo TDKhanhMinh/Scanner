@@ -226,6 +226,23 @@ class ImageProcessError(ScannerError):
         self.path = path
 
 
+class PdfWriteError(ScannerError):
+    """Raised when PDF generation or filesystem commitment fails."""
+
+    def __init__(
+        self,
+        path: str,
+        reason: str = "Failed to write PDF",
+        code: ScannerErrorCode = ScannerErrorCode.PDF_WRITE_FAILED,
+    ) -> None:
+        super().__init__(
+            code,
+            f"Failed to write PDF to '{path}': {reason}",
+        )
+        self.path = path
+        self.reason = reason
+
+
 class DiscoveryResult(BaseContract):
     """Inventory result of employee folder discovery."""
 

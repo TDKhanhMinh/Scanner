@@ -11,6 +11,7 @@ from attendance_scanner.contracts import (
     ImageDecodeError,
     ImageProcessError,
     InvalidInputRootError,
+    PdfWriteError,
     ScanBatchRequest,
     ScanMode,
     ScannerError,
@@ -33,6 +34,11 @@ from attendance_scanner.events import (
     ScanPlanEvent,
     deserialize_event,
     serialize_event,
+)
+from attendance_scanner.pdf_export import (
+    PdfExportConfig,
+    PdfExportResult,
+    export_single_page_pdf,
 )
 from attendance_scanner.pipeline import (
     DegenerateCornersError,
@@ -72,6 +78,7 @@ __all__ = [
     "InvalidInputRootError",
     "ImageDecodeError",
     "ImageProcessError",
+    "PdfWriteError",
     "DiscoveredFile",
     "DiscoveryResult",
     "ScanPlan",
@@ -112,4 +119,7 @@ __all__ = [
     "SingleScanDiagnostics",
     "SingleScanResult",
     "scan_one",
+    "PdfExportConfig",
+    "PdfExportResult",
+    "export_single_page_pdf",
 ]
