@@ -47,14 +47,18 @@ def test_contracts_models_instantiation():
     plan = ScanPlan(
         input_root="/input",
         output_root="/output",
-        total_employees=5,
+        employees=5,
         total_images=20,
-        new_count=18,
-        modified_count=2,
-        unchanged_count=0,
+        new=18,
+        modified=2,
+        unchanged=0,
         files_to_process=20,
         collisions=[],
     )
+    assert plan.employees == 5
+    assert plan.total_employees == 5
+    assert plan.new == 18
+    assert plan.new_count == 18
     assert plan.files_to_process == 20
 
     req = ScanBatchRequest(
@@ -108,7 +112,7 @@ def test_serialize_event_single_line():
 
 def test_deserialize_all_event_types():
     """Verify deserialization of all 5 event types into concrete models."""
-    # 1. scan_plan
+    # 1. scan_plan with System Design canonical fields
     plan_json = json.dumps(
         {
             "protocolVersion": 1,
@@ -116,17 +120,20 @@ def test_deserialize_all_event_types():
             "timestamp": "2026-09-07T00:00:00Z",
             "inputRoot": "/input",
             "outputRoot": "/output",
-            "totalEmployees": 3,
+            "employees": 3,
             "totalImages": 12,
-            "newCount": 10,
-            "modifiedCount": 2,
-            "unchangedCount": 0,
+            "new": 10,
+            "modified": 2,
+            "unchanged": 0,
             "filesToProcess": 12,
             "collisions": [],
         }
     )
     plan_event = deserialize_event(plan_json)
     assert isinstance(plan_event, ScanPlanEvent)
+    assert plan_event.employees == 3
+    assert plan_event.total_employees == 3
+    assert plan_event.new == 10
     assert plan_event.total_images == 12
 
     # 2. file_started
@@ -225,11 +232,95 @@ def test_deserialize_validation_error():
     with pytest.raises(ValueError):
         deserialize_event("   ")
 
+    # Missing protocolVersion on wire
     with pytest.raises(ValidationError):
-        deserialize_event(json.dumps({"type": "file_started", "index": 1}))
+        deserialize_event(
+            json.dumps(
+                {
+                    "type": "file_started",
+                    "timestamp": "2026-09-07T00:00:00Z",
+                    "relativePath": "A/1.jpg",
+                    "employeeName": "A",
+                    "index": 1,
+                    "total": 1,
+                }
+            )
+        )
 
+    # Invalid protocolVersion (e.g. 2)
     with pytest.raises(ValidationError):
-        deserialize_event(json.dumps({"type": "unknown_event_type"}))
+        deserialize_event(
+            json.dumps(
+                {
+                    "protocolVersion": 2,
+                    "type": "file_started",
+                    "timestamp": "2026-09-07T00:00:00Z",
+                    "relativePath": "A/1.jpg",
+                    "employeeName": "A",
+                    "index": 1,
+                    "total": 1,
+                }
+            )
+        )
+
+    # Missing timestamp on wire
+    with pytest.raises(ValidationError):
+        deserialize_event(
+            json.dumps(
+                {
+                    "protocolVersion": 1,
+                    "type": "file_started",
+                    "relativePath": "A/1.jpg",
+                    "employeeName": "A",
+                    "index": 1,
+                    "total": 1,
+                }
+            )
+        )
+
+    # Empty timestamp
+    with pytest.raises(ValidationError):
+        deserialize_event(
+            json.dumps(
+                {
+                    "protocolVersion": 1,
+                    "timestamp": "   ",
+                    "type": "file_started",
+                    "relativePath": "A/1.jpg",
+                    "employeeName": "A",
+                    "index": 1,
+                    "total": 1,
+                }
+            )
+        )
+
+    # Invalid errorCode
+    with pytest.raises(ValidationError):
+        deserialize_event(
+            json.dumps(
+                {
+                    "protocolVersion": 1,
+                    "timestamp": "2026-09-07T00:00:00Z",
+                    "type": "file_failed",
+                    "relativePath": "A/1.jpg",
+                    "employeeName": "A",
+                    "errorCode": "INVALID_ERROR_CODE",
+                    "message": "err",
+                }
+            )
+        )
+
+    # Unknown event type
+    with pytest.raises(ValidationError):
+        deserialize_event(
+            json.dumps(
+                {
+                    "protocolVersion": 1,
+                    "timestamp": "2026-09-07T00:00:00Z",
+                    "type": "unknown_event_type",
+                }
+            )
+        )
 
 
 def test_load_all_fixture_files():

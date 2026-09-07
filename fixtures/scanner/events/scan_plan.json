@@ -4,11 +4,11 @@
   "timestamp": "2026-09-07T00:00:00Z",
   "inputRoot": "D:/ChamCong/all",
   "outputRoot": "D:/ChamCong/output",
-  "totalEmployees": 12,
+  "employees": 12,
   "totalImages": 48,
-  "newCount": 40,
-  "modifiedCount": 8,
-  "unchangedCount": 0,
+  "new": 40,
+  "modified": 8,
+  "unchanged": 0,
   "filesToProcess": 48,
   "collisions": []
 }

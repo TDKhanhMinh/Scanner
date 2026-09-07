@@ -17,18 +17,18 @@ import {
 } from "@/types/scanner";
 
 describe("eventParser", () => {
-  it("parses valid scan_plan event", () => {
+  it("parses valid scan_plan event with System Design canonical fields", () => {
     const json = JSON.stringify({
       protocolVersion: PROTOCOL_VERSION,
       type: "scan_plan",
       timestamp: "2026-09-07T00:00:00Z",
       inputRoot: "D:/ChamCong/all",
       outputRoot: "D:/ChamCong/output",
-      totalEmployees: 12,
+      employees: 12,
       totalImages: 48,
-      newCount: 40,
-      modifiedCount: 8,
-      unchangedCount: 0,
+      new: 40,
+      modified: 8,
+      unchanged: 0,
       filesToProcess: 48,
       collisions: [],
     });
@@ -38,7 +38,12 @@ describe("eventParser", () => {
     if (event && isScanPlanEvent(event)) {
       expect(event.type).toBe("scan_plan");
       expect(event.inputRoot).toBe("D:/ChamCong/all");
+      expect(event.employees).toBe(12);
       expect(event.totalEmployees).toBe(12);
+      expect(event.new).toBe(40);
+      expect(event.newCount).toBe(40);
+      expect(event.modified).toBe(8);
+      expect(event.unchanged).toBe(0);
       expect(event.filesToProcess).toBe(48);
     } else {
       throw new Error("Expected ScanPlanEvent");
@@ -141,12 +146,13 @@ describe("eventParser", () => {
 
   it("safely ignores unknown extra fields for forward compatibility", () => {
     const json = JSON.stringify({
-      protocolVersion: 2,
+      protocolVersion: 1,
       type: "file_completed",
       timestamp: "2026-09-07T00:00:02Z",
       relativePath: "NV01/img.jpg",
       employeeName: "NV01",
       outputRelativePath: "NV01/img.pdf",
+      documentDetected: false,
       durationMs: 120,
       futureMetricA: 99.5,
       futureMetadata: { isCloudSynced: false },
@@ -158,21 +164,77 @@ describe("eventParser", () => {
     expect((event as unknown as Record<string, unknown>).futureMetricA).toBe(99.5);
   });
 
+  it("strictly validates protocolVersion, timestamp, and enum errorCode (P2)", () => {
+    const baseValid = {
+      protocolVersion: 1,
+      timestamp: "2026-09-07T00:00:00Z",
+      type: "file_started",
+      relativePath: "A/1.jpg",
+      employeeName: "A",
+      index: 1,
+      total: 10,
+    };
+
+    // Missing protocolVersion
+    const noProto = { ...baseValid };
+    delete (noProto as Record<string, unknown>).protocolVersion;
+    expect(parseScannerEvent(JSON.stringify(noProto))).toBeNull();
+
+    // Invalid protocolVersion
+    expect(
+      parseScannerEvent(JSON.stringify({ ...baseValid, protocolVersion: 2 }))
+    ).toBeNull();
+    expect(
+      parseScannerEvent(JSON.stringify({ ...baseValid, protocolVersion: "1" }))
+    ).toBeNull();
+
+    // Missing timestamp
+    const noTs = { ...baseValid };
+    delete (noTs as Record<string, unknown>).timestamp;
+    expect(parseScannerEvent(JSON.stringify(noTs))).toBeNull();
+
+    // Empty timestamp
+    expect(
+      parseScannerEvent(JSON.stringify({ ...baseValid, timestamp: "   " }))
+    ).toBeNull();
+
+    // Invalid errorCode
+    const invalidErrEvent = {
+      protocolVersion: 1,
+      timestamp: "2026-09-07T00:00:00Z",
+      type: "file_failed",
+      relativePath: "A/1.jpg",
+      employeeName: "A",
+      errorCode: "NOT_AN_ENUM_ERROR_CODE",
+      message: "some err",
+    };
+    expect(parseScannerEvent(JSON.stringify(invalidErrEvent))).toBeNull();
+
+    // Incomplete counter fields in scan_plan
+    const incompletePlan = {
+      protocolVersion: 1,
+      timestamp: "2026-09-07T00:00:00Z",
+      type: "scan_plan",
+      inputRoot: "/in",
+      outputRoot: "/out",
+      employees: 5,
+      // missing totalImages, new, modified, unchanged
+    };
+    expect(parseScannerEvent(JSON.stringify(incompletePlan))).toBeNull();
+  });
+
   it("returns null for malformed or empty inputs", () => {
     expect(parseScannerEvent("")).toBeNull();
     expect(parseScannerEvent("   \n  ")).toBeNull();
     expect(parseScannerEvent("not a json")).toBeNull();
     expect(parseScannerEvent("123")).toBeNull();
     expect(parseScannerEvent("[]")).toBeNull();
-    expect(parseScannerEvent(JSON.stringify({ type: "unknown_type" }))).toBeNull();
-    // Missing required relativePath for file_started
     expect(
       parseScannerEvent(
         JSON.stringify({
-          type: "file_started",
-          employeeName: "A",
-          index: 1,
-          total: 10,
+          protocolVersion: 1,
+          timestamp: "2026-09-07T00:00:00Z",
+          type: "unknown_type",
         })
       )
     ).toBeNull();
@@ -213,7 +275,7 @@ describe("eventParser", () => {
     const part1 =
       '{"protocolVersion":1,"type":"file_started","timestamp":"t1","relativePath":"A/1.jpg","employeeName":"A","index":1,"total":2}\n{"protocolVersion":1,"type":"file_comp';
     const part2 =
-      'leted","timestamp":"t2","relativePath":"A/1.jpg","employeeName":"A","outputRelativePath":"A/1.pdf","durationMs":300}\n';
+      'leted","timestamp":"t2","relativePath":"A/1.jpg","employeeName":"A","outputRelativePath":"A/1.pdf","documentDetected":true,"durationMs":300}\n';
 
     const firstResult = parseEventChunk(part1, "");
     expect(firstResult.events).toHaveLength(1);

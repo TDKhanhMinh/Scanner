@@ -23,6 +23,17 @@ export type FileProcessingStatus =
   | "failed"
   | "skipped";
 
+export const VALID_SCANNER_ERROR_CODES = new Set<string>([
+  "INVALID_INPUT_ROOT",
+  "OUTPUT_NOT_WRITABLE",
+  "IMAGE_DECODE_FAILED",
+  "PDF_WRITE_FAILED",
+  "STATE_READ_FAILED",
+  "STATE_WRITE_FAILED",
+  "OUTPUT_COLLISION",
+  "UNEXPECTED_ERROR",
+]);
+
 export type ScannerErrorCode =
   | "INVALID_INPUT_ROOT"
   | "OUTPUT_NOT_WRITABLE"
@@ -48,13 +59,18 @@ export interface DiscoveredFile {
 export interface ScanPlan {
   inputRoot: string;
   outputRoot: string;
-  totalEmployees: number;
+  employees: number;
   totalImages: number;
-  newCount: number;
-  modifiedCount: number;
-  unchangedCount: number;
+  new: number;
+  modified: number;
+  unchanged: number;
   filesToProcess: number;
   collisions: string[];
+  // Backward-compatible aliases
+  totalEmployees?: number;
+  newCount?: number;
+  modifiedCount?: number;
+  unchangedCount?: number;
 }
 
 export interface ScanBatchRequest {
@@ -100,13 +116,18 @@ export interface ScanPlanEvent extends BaseEvent {
   type: "scan_plan";
   inputRoot: string;
   outputRoot: string;
-  totalEmployees: number;
+  employees: number;
   totalImages: number;
-  newCount: number;
-  modifiedCount: number;
-  unchangedCount: number;
+  new: number;
+  modified: number;
+  unchanged: number;
   filesToProcess: number;
   collisions: string[];
+  // Backward-compatible aliases
+  totalEmployees?: number;
+  newCount?: number;
+  modifiedCount?: number;
+  unchangedCount?: number;
 }
 
 export interface FileStartedEvent extends BaseEvent {

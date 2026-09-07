@@ -96,11 +96,11 @@ def handle_plan(args: argparse.Namespace) -> int:
     event = ScanPlanEvent(
         input_root=args.input,
         output_root=output_dir,
-        total_employees=0,
+        employees=0,
         total_images=0,
-        new_count=0,
-        modified_count=0,
-        unchanged_count=0,
+        new=0,
+        modified=0,
+        unchanged=0,
         files_to_process=0,
         collisions=[],
     )
@@ -115,11 +115,11 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
     plan_event = ScanPlanEvent(
         input_root=args.input,
         output_root=output_dir,
-        total_employees=0,
+        employees=0,
         total_images=0,
-        new_count=0,
-        modified_count=0,
-        unchanged_count=0,
+        new=0,
+        modified=0,
+        unchanged=0,
         files_to_process=0,
         collisions=[],
     )

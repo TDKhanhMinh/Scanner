@@ -2,9 +2,9 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 # Canonical protocol version for all JSONL events
@@ -78,17 +78,58 @@ class DiscoveredFile(BaseContract):
 
 
 class ScanPlan(BaseContract):
-    """Overall summary plan before executing scan batch."""
+    """Overall summary plan before executing scan batch, matching System Design fields."""
 
     input_root: str
     output_root: str
-    total_employees: int = 0
+    employees: int = 0
     total_images: int = 0
-    new_count: int = 0
-    modified_count: int = 0
-    unchanged_count: int = 0
+    new: int = 0
+    modified: int = 0
+    unchanged: int = 0
     files_to_process: int = 0
     collisions: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "employees" not in data and "total_employees" in data:
+                data["employees"] = data["total_employees"]
+            elif "employees" not in data and "totalEmployees" in data:
+                data["employees"] = data["totalEmployees"]
+
+            if "new" not in data and "new_count" in data:
+                data["new"] = data["new_count"]
+            elif "new" not in data and "newCount" in data:
+                data["new"] = data["newCount"]
+
+            if "modified" not in data and "modified_count" in data:
+                data["modified"] = data["modified_count"]
+            elif "modified" not in data and "modifiedCount" in data:
+                data["modified"] = data["modifiedCount"]
+
+            if "unchanged" not in data and "unchanged_count" in data:
+                data["unchanged"] = data["unchanged_count"]
+            elif "unchanged" not in data and "unchangedCount" in data:
+                data["unchanged"] = data["unchangedCount"]
+        return data
+
+    @property
+    def total_employees(self) -> int:
+        return self.employees
+
+    @property
+    def new_count(self) -> int:
+        return self.new
+
+    @property
+    def modified_count(self) -> int:
+        return self.modified
+
+    @property
+    def unchanged_count(self) -> int:
+        return self.unchanged
 
 
 class ScanBatchRequest(BaseContract):
