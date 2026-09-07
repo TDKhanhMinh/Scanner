@@ -210,3 +210,63 @@ def test_cli_plan_integration(tmp_path: Path, capsys):
     assert event.new == 2
     assert event.files_to_process == 2
     assert event.collisions == []
+
+
+def test_windows_hidden_and_system_attributes(tmp_path: Path):
+    """Verify that files/folders with Windows Hidden or System attributes are ignored (P1)."""
+    import os
+    import subprocess
+
+    emp = tmp_path / "NV01"
+    emp.mkdir()
+
+    # 1. Normal image
+    (emp / "visible.jpg").write_bytes(b"visible")
+
+    # 2. Image with Windows Hidden attribute
+    hidden_img = emp / "hidden_by_attr.jpg"
+    hidden_img.write_bytes(b"hidden")
+
+    # 3. Hidden employee folder
+    hidden_emp = tmp_path / "HiddenEmployee"
+    hidden_emp.mkdir()
+    (hidden_emp / "img.jpg").write_bytes(b"data")
+
+    if os.name == "nt":
+        subprocess.run(["attrib", "+h", str(hidden_img)], check=True)
+        subprocess.run(["attrib", "+h", str(hidden_emp)], check=True)
+
+    result = discover_employee_folders(tmp_path)
+    # The hidden folder and hidden file must be completely excluded
+    assert result.employee_count == 1
+    assert result.employees == ["NV01"]
+    assert result.image_count == 1
+    assert result.files[0].file_name == "visible.jpg"
+
+
+def test_collision_metadata_deterministic_ordering(tmp_path: Path):
+    """Verify collision list is deterministically sorted regardless of creation order (P2)."""
+    emp = tmp_path / "NV01"
+    emp.mkdir()
+
+    # Create collisions in reverse alphabetical / natural order: z, b, a, 10, 2
+    (emp / "z.jpg").write_bytes(b"z1")
+    (emp / "z.png").write_bytes(b"z2")
+    (emp / "b.jpg").write_bytes(b"b1")
+    (emp / "b.png").write_bytes(b"b2")
+    (emp / "a.jpg").write_bytes(b"a1")
+    (emp / "a.png").write_bytes(b"a2")
+    (emp / "10.jpg").write_bytes(b"10_1")
+    (emp / "10.png").write_bytes(b"10_2")
+    (emp / "2.jpg").write_bytes(b"2_1")
+    (emp / "2.png").write_bytes(b"2_2")
+
+    result = discover_employee_folders(tmp_path)
+    expected_collisions = [
+        "NV01/2",
+        "NV01/10",
+        "NV01/a",
+        "NV01/b",
+        "NV01/z",
+    ]
+    assert result.collisions == expected_collisions

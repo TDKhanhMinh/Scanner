@@ -1,6 +1,7 @@
 """Employee folder discovery and deterministic scan planning for Attendance Scanner."""
 
 import re
+import stat
 from collections import defaultdict
 from pathlib import Path
 from typing import List, Set, Union
@@ -22,6 +23,10 @@ IGNORE_FILENAMES: Set[str] = {
     ".ds_store",
 }
 
+# Windows attribute flags (safely resolved for cross-platform support)
+FILE_ATTRIBUTE_HIDDEN: int = getattr(stat, "FILE_ATTRIBUTE_HIDDEN", 0x02)
+FILE_ATTRIBUTE_SYSTEM: int = getattr(stat, "FILE_ATTRIBUTE_SYSTEM", 0x04)
+
 
 def natural_sort_key(s: str) -> List[Union[int, str]]:
     """Generate a deterministic key for natural sorting (e.g., '2.jpg' before '10.jpg').
@@ -31,12 +36,28 @@ def natural_sort_key(s: str) -> List[Union[int, str]]:
     return [int(text) if text.isdigit() else text.casefold() for text in re.split(r"(\d+)", s)]
 
 
-def is_hidden_or_system(name: str) -> bool:
-    """Check if a file or folder name is considered hidden or system metadata."""
+def is_hidden_or_system(entry: Union[str, Path]) -> bool:
+    """Check if a file or folder is considered hidden or system metadata.
+
+    Checks:
+    1. Name-based conventions (starts with '.' or '~$', or matches known ignore names).
+    2. OS file attributes (Windows FILE_ATTRIBUTE_HIDDEN and FILE_ATTRIBUTE_SYSTEM).
+    """
+    path = Path(entry) if not isinstance(entry, Path) else entry
+    name = path.name
     lowered = name.lower()
-    if name.startswith(".") or name.startswith("~$"):
+    if name.startswith(".") or name.startswith("~$") or lowered in IGNORE_FILENAMES:
         return True
-    return lowered in IGNORE_FILENAMES
+
+    # Windows file attributes check
+    try:
+        attrs = getattr(path.stat(), "st_file_attributes", 0)
+        if attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM):
+            return True
+    except (OSError, ValueError):
+        pass
+
+    return False
 
 
 def resolve_target_pdf(file_name: str, is_collision: bool) -> str:
@@ -71,9 +92,10 @@ def discover_employee_folders(input_root: Union[str, Path]) -> DiscoveryResult:
         raise InvalidInputRootError(str(input_root), "Path is not a directory")
 
     # Discover direct child directories (each represents an employee)
+    # Ignore hidden directories by name and OS attributes
     employee_dirs: List[Path] = []
     for entry in resolved_root.iterdir():
-        if entry.is_dir() and not is_hidden_or_system(entry.name):
+        if entry.is_dir() and not is_hidden_or_system(entry):
             employee_dirs.append(entry)
 
     # Deterministic natural sort of employee directories
@@ -86,10 +108,10 @@ def discover_employee_folders(input_root: Union[str, Path]) -> DiscoveryResult:
     for emp_dir in employee_dirs:
         emp_name = emp_dir.name
 
-        # Gather direct child files; ignore nested directories and hidden files
+        # Gather direct child files; ignore nested directories and hidden/system files
         valid_images: List[Path] = []
         for child in emp_dir.iterdir():
-            if is_hidden_or_system(child.name):
+            if is_hidden_or_system(child):
                 continue
             if child.is_dir():
                 # Nested directories are explicitly ignored in MVP
@@ -107,8 +129,10 @@ def discover_employee_folders(input_root: Union[str, Path]) -> DiscoveryResult:
         for img in valid_images:
             stem_groups[img.stem.lower()].append(img)
 
+        # Sort collision stem keys deterministically
         collision_stems: Set[str] = set()
-        for stem_key, group in stem_groups.items():
+        for stem_key in sorted(stem_groups.keys(), key=lambda s: (natural_sort_key(s), s)):
+            group = stem_groups[stem_key]
             if len(group) > 1:
                 collision_stems.add(stem_key)
                 all_collisions.append(f"{emp_name}/{stem_key}")
@@ -122,19 +146,22 @@ def discover_employee_folders(input_root: Union[str, Path]) -> DiscoveryResult:
             rel_pdf = f"{emp_name}/{target_pdf_name}"
             rel_path = f"{emp_name}/{img.name}"
 
-            stat = img.stat()
+            stat_res = img.stat()
             discovered_files.append(
                 DiscoveredFile(
                     employee_name=emp_name,
                     file_name=img.name,
                     relative_path=rel_path,
                     absolute_path=str(img),
-                    size=stat.st_size,
-                    mtime_ns=stat.st_mtime_ns,
+                    size=stat_res.st_size,
+                    mtime_ns=stat_res.st_mtime_ns,
                     classification=FileClassification.NEW,
                     target_relative_pdf=rel_pdf,
                 )
             )
+
+    # Ensure overall collisions list is sorted deterministically
+    all_collisions.sort(key=lambda c: (natural_sort_key(c), c))
 
     return DiscoveryResult(
         input_root=str(resolved_root),
