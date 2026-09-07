@@ -34,7 +34,7 @@ def test_main_plan_subcommand(capsys):
     output_line = captured.out.strip().split("\n")[-1]
     data = json.loads(output_line)
     assert data["type"] == "scan_plan"
-    assert data["input"] == "test_input"
+    assert data["inputRoot"] == "test_input"
 
 
 def test_main_scan_batch_subcommand(capsys):

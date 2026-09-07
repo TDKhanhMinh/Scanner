@@ -1,0 +1,11 @@
+{
+  "protocolVersion": 1,
+  "type": "file_completed",
+  "timestamp": "2026-09-07T00:00:02Z",
+  "relativePath": "NguyenVanA/2026-03-01.jpg",
+  "employeeName": "NguyenVanA",
+  "outputRelativePath": "NguyenVanA/2026-03-01.pdf",
+  "documentDetected": true,
+  "warning": null,
+  "durationMs": 420
+}

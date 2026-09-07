@@ -1,9 +1,14 @@
 """CLI entrypoint for Attendance Scanner sidecar."""
 
 import argparse
-import json
 import sys
 from typing import List, Optional
+
+from attendance_scanner.events import (
+    ScanCompletedEvent,
+    ScanPlanEvent,
+    serialize_event,
+)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -86,52 +91,49 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def handle_plan(args: argparse.Namespace) -> int:
-    """Placeholder execution for plan subcommand."""
-    # MVP skeleton output in JSONL
-    event = {
-        "type": "scan_plan",
-        "input": args.input,
-        "output": args.output or f"{args.input}_pdf",
-        "employees": 0,
-        "totalImages": 0,
-        "new": 0,
-        "modified": 0,
-        "unchanged": 0,
-        "filesToProcess": 0,
-        "collisions": [],
-        "status": "skeleton_ready",
-    }
-    sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
+    """Placeholder execution for plan subcommand using canonical ScanPlanEvent."""
+    output_dir = args.output or f"{args.input}_pdf"
+    event = ScanPlanEvent(
+        input_root=args.input,
+        output_root=output_dir,
+        total_employees=0,
+        total_images=0,
+        new_count=0,
+        modified_count=0,
+        unchanged_count=0,
+        files_to_process=0,
+        collisions=[],
+    )
+    sys.stdout.write(serialize_event(event) + "\n")
     sys.stdout.flush()
     return 0
 
 
 def handle_scan_batch(args: argparse.Namespace) -> int:
-    """Placeholder execution for scan-batch subcommand."""
-    # Emit plan event
+    """Placeholder execution for scan-batch subcommand using canonical events."""
     output_dir = args.output or f"{args.input}_pdf"
-    plan_event = {
-        "type": "scan_plan",
-        "input": args.input,
-        "output": output_dir,
-        "employees": 0,
-        "totalImages": 0,
-        "new": 0,
-        "modified": 0,
-        "unchanged": 0,
-        "status": "skeleton_ready",
-    }
-    sys.stdout.write(json.dumps(plan_event, ensure_ascii=False) + "\n")
+    plan_event = ScanPlanEvent(
+        input_root=args.input,
+        output_root=output_dir,
+        total_employees=0,
+        total_images=0,
+        new_count=0,
+        modified_count=0,
+        unchanged_count=0,
+        files_to_process=0,
+        collisions=[],
+    )
+    sys.stdout.write(serialize_event(plan_event) + "\n")
 
-    # Emit completed event
-    complete_event = {
-        "type": "scan_completed",
-        "success": 0,
-        "failed": 0,
-        "warning": 0,
-        "skipped": 0,
-    }
-    sys.stdout.write(json.dumps(complete_event, ensure_ascii=False) + "\n")
+    complete_event = ScanCompletedEvent(
+        total_processed=0,
+        success=0,
+        failed=0,
+        warning=0,
+        skipped=0,
+        duration_ms=0,
+    )
+    sys.stdout.write(serialize_event(complete_event) + "\n")
     sys.stdout.flush()
     return 0
 

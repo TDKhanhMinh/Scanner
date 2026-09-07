@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 1,
+  "type": "file_failed",
+  "timestamp": "2026-09-07T00:00:03Z",
+  "relativePath": "TranVanB/corrupted.png",
+  "employeeName": "TranVanB",
+  "errorCode": "IMAGE_DECODE_FAILED",
+  "message": "Failed to decode image: corrupted header"
+}

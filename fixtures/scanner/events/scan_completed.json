@@ -1,0 +1,11 @@
+{
+  "protocolVersion": 1,
+  "type": "scan_completed",
+  "timestamp": "2026-09-07T00:00:10Z",
+  "totalProcessed": 48,
+  "success": 47,
+  "failed": 1,
+  "warning": 0,
+  "skipped": 0,
+  "durationMs": 9500
+}
