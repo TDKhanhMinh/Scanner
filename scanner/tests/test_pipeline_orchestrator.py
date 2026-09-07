@@ -23,10 +23,12 @@ from PIL import Image
 from attendance_scanner.contracts import (
     FileProcessingStatus,
     ImageDecodeError,
+    ImageProcessError,
     ScanMode,
     ScannerErrorCode,
     ScannerWarningCode,
 )
+from attendance_scanner.pipeline.detect import DetectionResult
 from attendance_scanner.pipeline.load import load_image
 from attendance_scanner.pipeline.orchestrator import (
     PipelineConfig,
@@ -34,7 +36,7 @@ from attendance_scanner.pipeline.orchestrator import (
     SingleScanResult,
     scan_one,
 )
-from attendance_scanner.pipeline.perspective import DegenerateCornersError
+from attendance_scanner.pipeline.perspective import DegenerateCornersError, WarpedDocument
 
 
 def _create_synthetic_document_image(
@@ -274,3 +276,88 @@ def test_scan_one_input_immutability():
     _ = scan_one(bgr, mode=ScanMode.COLOR)
 
     assert hashlib.sha256(bgr.tobytes()).hexdigest() == original_hash
+
+
+def test_scan_one_mocked_detector_isolation_found():
+    """Verify orchestration isolation when detector explicitly finds a document."""
+    bgr = np.full((300, 400, 3), 200, dtype=np.uint8)
+    corners_list = [(10.0, 10.0), (390.0, 10.0), (390.0, 290.0), (10.0, 290.0)]
+    dummy_corners = np.array(corners_list, dtype=np.float32)
+    fake_detection = DetectionResult(
+        corners=corners_list,
+        confidence=0.95,
+        area_ratio=0.85,
+        scale_factor=1.0,
+    )
+    fake_warped = WarpedDocument(
+        image=np.full((280, 380, 3), 220, dtype=np.uint8),
+        width=380,
+        height=280,
+        transform_matrix=np.eye(3, dtype=np.float64),
+        source_corners=dummy_corners,
+    )
+
+    with (
+        patch(
+            "attendance_scanner.pipeline.orchestrator.detect_document_boundary",
+            return_value=fake_detection,
+        ) as mock_detect,
+        patch(
+            "attendance_scanner.pipeline.orchestrator.warp_perspective",
+            return_value=fake_warped,
+        ) as mock_warp,
+    ):
+        result = scan_one(bgr, mode=ScanMode.GRAY)
+
+        mock_detect.assert_called_once()
+        mock_warp.assert_called_once()
+        assert result.document_detected is True
+        assert result.diagnostics.document_detected is True
+        assert result.warning_codes == []
+        assert result.diagnostics.warning_codes == []
+        assert result.diagnostics.warning is None
+        assert result.output_width == 380
+        assert result.output_height == 280
+
+
+def test_scan_one_mocked_detector_isolation_not_found():
+    """Verify orchestration isolation when detector explicitly returns None."""
+    bgr = np.full((300, 400, 3), 150, dtype=np.uint8)
+
+    with (
+        patch(
+            "attendance_scanner.pipeline.orchestrator.detect_document_boundary",
+            return_value=None,
+        ) as mock_detect,
+        patch(
+            "attendance_scanner.pipeline.orchestrator.warp_perspective",
+        ) as mock_warp,
+    ):
+        result = scan_one(bgr, mode=ScanMode.GRAY)
+
+        mock_detect.assert_called_once()
+        mock_warp.assert_not_called()
+        assert result.document_detected is False
+        assert result.diagnostics.document_detected is False
+        assert result.warning_codes == [ScannerWarningCode.DOCUMENT_NOT_DETECTED.value]
+        assert result.diagnostics.warning_codes == [ScannerWarningCode.DOCUMENT_NOT_DETECTED.value]
+        assert result.diagnostics.warning == ScannerWarningCode.DOCUMENT_NOT_DETECTED.value
+        assert result.warning == ScannerWarningCode.DOCUMENT_NOT_DETECTED.value
+        assert result.output_width == 400
+        assert result.output_height == 300
+
+
+def test_scan_one_enhancement_failure_raises_typed_process_error():
+    """Verify internal enhancement/OpenCV exceptions are wrapped in typed ImageProcessError."""
+    bgr = np.full((100, 100, 3), 100, dtype=np.uint8)
+
+    with patch(
+        "attendance_scanner.pipeline.orchestrator.enhance_image",
+        side_effect=cv2.error("Simulated OpenCV enhancement error"),
+    ):
+        with pytest.raises(ImageProcessError) as exc_info:
+            scan_one(bgr)
+
+        assert exc_info.value.code == ScannerErrorCode.UNEXPECTED_ERROR
+        assert "Enhancement failed" in str(exc_info.value)
+

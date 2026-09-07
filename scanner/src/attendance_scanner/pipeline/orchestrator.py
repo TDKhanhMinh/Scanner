@@ -23,6 +23,8 @@ from attendance_scanner.contracts import (
     BaseContract,
     FileProcessingStatus,
     FileResult,
+    ImageDecodeError,
+    ImageProcessError,
     ScanMode,
     ScannerWarningCode,
 )
@@ -78,8 +80,16 @@ class SingleScanDiagnostics(BaseContract):
     output_width: int = 0
     output_height: int = 0
     downscale_ratio: float = 1.0
+    warning_codes: List[str] = Field(default_factory=list)
     stage_durations_ms: Dict[str, float] = Field(default_factory=dict)
     total_duration_ms: float = 0.0
+
+    @property
+    def warning(self) -> Optional[str]:
+        """Joined string of warning codes or None if clean."""
+        if not self.warning_codes:
+            return None
+        return ", ".join(self.warning_codes)
 
 
 @dataclass
@@ -304,16 +314,34 @@ def scan_one(
 
     # Stage 4: Scan enhancement filters
     t_enhance_start = time.perf_counter()
-    enhanced = enhance_image(
-        warped_or_full,
-        mode=scan_mode,
-        config=pipeline_cfg.enhancement,
-    )
+    try:
+        enhanced = enhance_image(
+            warped_or_full,
+            mode=scan_mode,
+            config=pipeline_cfg.enhancement,
+        )
+    except Exception as exc:
+        if isinstance(exc, (ImageDecodeError, ImageProcessError)):
+            raise
+        source_str = str(getattr(loaded, "path", "<image>"))
+        raise ImageProcessError(
+            f"Enhancement failed ({type(exc).__name__}): {exc}",
+            path=source_str,
+        ) from exc
     stage_durations["enhance_ms"] = (time.perf_counter() - t_enhance_start) * 1000.0
 
     # Stage 5: Size normalization (no-upscale, downscale oversized)
     t_resize_start = time.perf_counter()
-    final_image, downscale_ratio = _normalize_size(enhanced, pipeline_cfg.resize)
+    try:
+        final_image, downscale_ratio = _normalize_size(enhanced, pipeline_cfg.resize)
+    except Exception as exc:
+        if isinstance(exc, (ImageDecodeError, ImageProcessError)):
+            raise
+        source_str = str(getattr(loaded, "path", "<image>"))
+        raise ImageProcessError(
+            f"Size normalization failed ({type(exc).__name__}): {exc}",
+            path=source_str,
+        ) from exc
     if downscale_ratio < 1.0 and pipeline_cfg.resize.warn_on_downscale:
         warning_codes.append(ScannerWarningCode.IMAGE_DOWNSCALED.value)
     stage_durations["resize_ms"] = (time.perf_counter() - t_resize_start) * 1000.0
@@ -333,6 +361,7 @@ def scan_one(
         output_width=out_w,
         output_height=out_h,
         downscale_ratio=downscale_ratio,
+        warning_codes=unique_warnings,
         stage_durations_ms=stage_durations,
         total_duration_ms=total_duration_ms,
     )

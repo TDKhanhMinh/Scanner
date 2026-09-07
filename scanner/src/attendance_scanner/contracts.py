@@ -208,6 +208,24 @@ class ImageDecodeError(ScannerError):
         self.path = path
 
 
+class ImageProcessError(ScannerError):
+    """Raised when an image processing pipeline stage fails."""
+
+    def __init__(
+        self,
+        reason: str,
+        path: Optional[str] = None,
+        code: ScannerErrorCode = ScannerErrorCode.UNEXPECTED_ERROR,
+    ) -> None:
+        target = f" on '{path}'" if path else ""
+        super().__init__(
+            code,
+            f"Image processing failed{target}: {reason}",
+        )
+        self.reason = reason
+        self.path = path
+
+
 class DiscoveryResult(BaseContract):
     """Inventory result of employee folder discovery."""
 
