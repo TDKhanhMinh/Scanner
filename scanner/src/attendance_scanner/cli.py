@@ -4,6 +4,8 @@ import argparse
 import sys
 from typing import List, Optional
 
+from attendance_scanner.contracts import InvalidInputRootError
+from attendance_scanner.discovery import discover_employee_folders
 from attendance_scanner.events import (
     ScanCompletedEvent,
     ScanPlanEvent,
@@ -91,51 +93,43 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def handle_plan(args: argparse.Namespace) -> int:
-    """Placeholder execution for plan subcommand using canonical ScanPlanEvent."""
-    output_dir = args.output or f"{args.input}_pdf"
-    event = ScanPlanEvent(
-        input_root=args.input,
-        output_root=output_dir,
-        employees=0,
-        total_images=0,
-        new=0,
-        modified=0,
-        unchanged=0,
-        files_to_process=0,
-        collisions=[],
-    )
-    sys.stdout.write(serialize_event(event) + "\n")
-    sys.stdout.flush()
-    return 0
+    """Execute plan subcommand by discovering employee folders and emitting ScanPlanEvent."""
+    try:
+        discovery = discover_employee_folders(args.input)
+        plan = discovery.to_scan_plan(output_root=args.output)
+        event = ScanPlanEvent.from_plan(plan)
+        sys.stdout.write(serialize_event(event) + "\n")
+        sys.stdout.flush()
+        return 0
+    except InvalidInputRootError as exc:
+        sys.stderr.write(f"Error: {exc.message}\n")
+        sys.stderr.flush()
+        return 1
 
 
 def handle_scan_batch(args: argparse.Namespace) -> int:
-    """Placeholder execution for scan-batch subcommand using canonical events."""
-    output_dir = args.output or f"{args.input}_pdf"
-    plan_event = ScanPlanEvent(
-        input_root=args.input,
-        output_root=output_dir,
-        employees=0,
-        total_images=0,
-        new=0,
-        modified=0,
-        unchanged=0,
-        files_to_process=0,
-        collisions=[],
-    )
-    sys.stdout.write(serialize_event(plan_event) + "\n")
+    """Execute scan-batch subcommand by planning and streaming events."""
+    try:
+        discovery = discover_employee_folders(args.input)
+        plan = discovery.to_scan_plan(output_root=args.output)
+        plan_event = ScanPlanEvent.from_plan(plan)
+        sys.stdout.write(serialize_event(plan_event) + "\n")
 
-    complete_event = ScanCompletedEvent(
-        total_processed=0,
-        success=0,
-        failed=0,
-        warning=0,
-        skipped=0,
-        duration_ms=0,
-    )
-    sys.stdout.write(serialize_event(complete_event) + "\n")
-    sys.stdout.flush()
-    return 0
+        complete_event = ScanCompletedEvent(
+            total_processed=0,
+            success=0,
+            failed=0,
+            warning=0,
+            skipped=0,
+            duration_ms=0,
+        )
+        sys.stdout.write(serialize_event(complete_event) + "\n")
+        sys.stdout.flush()
+        return 0
+    except InvalidInputRootError as exc:
+        sys.stderr.write(f"Error: {exc.message}\n")
+        sys.stderr.flush()
+        return 1
 
 
 def main(argv: Optional[List[str]] = None) -> int:

@@ -24,9 +24,9 @@ def test_parser_help(capsys):
     assert "scan-batch" in captured.out
 
 
-def test_main_plan_subcommand(capsys):
+def test_main_plan_subcommand(capsys, tmp_path):
     """Test plan subcommand output."""
-    test_args = ["plan", "--input", "test_input"]
+    test_args = ["plan", "--input", str(tmp_path)]
     exit_code = main(test_args)
     assert exit_code == 0
 
@@ -34,12 +34,12 @@ def test_main_plan_subcommand(capsys):
     output_line = captured.out.strip().split("\n")[-1]
     data = json.loads(output_line)
     assert data["type"] == "scan_plan"
-    assert data["inputRoot"] == "test_input"
+    assert data["inputRoot"] == str(tmp_path.resolve())
 
 
-def test_main_scan_batch_subcommand(capsys):
+def test_main_scan_batch_subcommand(capsys, tmp_path):
     """Test scan-batch subcommand output stream."""
-    test_args = ["scan-batch", "--input", "test_input", "--mode", "gray", "--workers", "2"]
+    test_args = ["scan-batch", "--input", str(tmp_path), "--mode", "gray", "--workers", "2"]
     exit_code = main(test_args)
     assert exit_code == 0
 

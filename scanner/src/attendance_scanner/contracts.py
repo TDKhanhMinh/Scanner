@@ -165,3 +165,52 @@ class BatchSummary(BaseContract):
     warning: int = 0
     skipped: int = 0
     duration_ms: Optional[int] = None
+
+
+class ScannerError(Exception):
+    """Base exception for Attendance Scanner operations."""
+
+    def __init__(self, code: ScannerErrorCode, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class InvalidInputRootError(ScannerError):
+    """Raised when the input root directory is non-existent or invalid."""
+
+    def __init__(
+        self, path: str, reason: str = "Path does not exist or is not a directory"
+    ) -> None:
+        super().__init__(
+            ScannerErrorCode.INVALID_INPUT_ROOT,
+            f"Invalid input root: '{path}' ({reason})",
+        )
+        self.path = path
+
+
+class DiscoveryResult(BaseContract):
+    """Inventory result of employee folder discovery."""
+
+    input_root: str
+    employees: List[str] = Field(default_factory=list)
+    files: List[DiscoveredFile] = Field(default_factory=list)
+    employee_count: int = 0
+    image_count: int = 0
+    unsupported_count: int = 0
+    collisions: List[str] = Field(default_factory=list)
+
+    def to_scan_plan(self, output_root: Optional[str] = None) -> ScanPlan:
+        """Convert discovery result into an initial ScanPlan."""
+        out_root = output_root or f"{self.input_root}_pdf"
+        return ScanPlan(
+            input_root=self.input_root,
+            output_root=out_root,
+            employees=self.employee_count,
+            total_images=self.image_count,
+            new=self.image_count,
+            modified=0,
+            unchanged=0,
+            files_to_process=self.image_count,
+            collisions=list(self.collisions),
+        )

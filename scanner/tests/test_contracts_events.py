@@ -344,22 +344,22 @@ def test_load_all_fixture_files():
         assert event.protocol_version == PROTOCOL_VERSION
 
 
-def test_cli_emits_valid_jsonl(capsys):
+def test_cli_emits_valid_jsonl(capsys, tmp_path):
     """Verify CLI subcommands output valid JSONL parseable by deserialize_event."""
     from attendance_scanner.cli import main
 
     # Plan
-    ret = main(["plan", "--input", "test_input", "--output", "test_output"])
+    ret = main(["plan", "--input", str(tmp_path), "--output", "test_output"])
     assert ret == 0
     captured = capsys.readouterr()
     lines = [line for line in captured.out.strip().split("\n") if line.strip()]
     assert len(lines) == 1
     plan_event = deserialize_event(lines[0])
     assert isinstance(plan_event, ScanPlanEvent)
-    assert plan_event.input_root == "test_input"
+    assert plan_event.input_root == str(tmp_path.resolve())
 
     # Scan-batch
-    ret = main(["scan-batch", "--input", "test_input", "--output", "test_output"])
+    ret = main(["scan-batch", "--input", str(tmp_path), "--output", "test_output"])
     assert ret == 0
     captured = capsys.readouterr()
     lines = [line for line in captured.out.strip().split("\n") if line.strip()]
