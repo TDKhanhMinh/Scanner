@@ -6,7 +6,9 @@ from typing import List, Tuple
 
 import cv2
 import numpy as np
+import pytest
 from PIL import Image
+from pydantic import ValidationError
 
 from attendance_scanner.pipeline.detect import (
     DetectionConfig,
@@ -233,3 +235,53 @@ def test_detection_result_serialization_and_contract():
     arr = res.corners_array
     assert arr.shape == (4, 2)
     assert arr.dtype == np.float32
+
+
+def test_detection_config_validation_invalid_bounds():
+    """Verify DetectionConfig rejects invalid parameter bounds and conflicting thresholds."""
+    # Invalid max_dimension (must be >= 100)
+    with pytest.raises(ValidationError):
+        DetectionConfig(max_dimension=0)
+
+    with pytest.raises(ValidationError):
+        DetectionConfig(max_dimension=-50)
+
+    # Invalid morph_kernel_size (must be >= 1)
+    with pytest.raises(ValidationError):
+        DetectionConfig(morph_kernel_size=0)
+
+    # Invalid blur_kernel_size (must be >= 1)
+    with pytest.raises(ValidationError):
+        DetectionConfig(blur_kernel_size=0)
+
+    # Invalid area ratio bounds
+    with pytest.raises(ValidationError):
+        DetectionConfig(min_area_ratio=0.0)
+
+    with pytest.raises(ValidationError):
+        DetectionConfig(max_area_ratio=1.5)
+
+    # Conflicting area ratios: min >= max
+    with pytest.raises(ValidationError):
+        DetectionConfig(min_area_ratio=0.8, max_area_ratio=0.2)
+
+    # Conflicting angles: min >= max
+    with pytest.raises(ValidationError):
+        DetectionConfig(min_angle_deg=150.0, max_angle_deg=30.0)
+
+    # Conflicting Canny thresholds: threshold1 > threshold2
+    with pytest.raises(ValidationError):
+        DetectionConfig(canny_threshold1=200, canny_threshold2=50)
+
+
+def test_detect_document_boundary_with_degenerate_config_safely_returns_none():
+    """Verify detect_document_boundary safely returns None when given degenerate/raw config."""
+    canvas = np.full((400, 400, 3), 30, dtype=np.uint8)
+    cv2.rectangle(canvas, (50, 50), (350, 350), (250, 250, 250), -1)
+
+    # Construct degenerate config bypassing standard validation
+    degenerate_dim = DetectionConfig.model_construct(max_dimension=0)
+    assert detect_document_boundary(canvas, config=degenerate_dim) is None
+
+    degenerate_morph = DetectionConfig.model_construct(morph_kernel_size=0)
+    assert detect_document_boundary(canvas, config=degenerate_morph) is None

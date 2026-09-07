@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from attendance_scanner.contracts import BaseContract
 from attendance_scanner.pipeline.load import LoadedImage
@@ -21,18 +21,38 @@ from attendance_scanner.pipeline.load import LoadedImage
 class DetectionConfig(BaseContract):
     """Configurable thresholds and parameters for document contour detection."""
 
-    max_dimension: int = 1200
-    blur_kernel_size: int = 5
-    canny_threshold1: int = 50
-    canny_threshold2: int = 150
-    morph_kernel_size: int = 3
-    morph_iterations: int = 2
-    min_area_ratio: float = 0.05
-    max_area_ratio: float = 0.98
+    max_dimension: int = Field(default=1200, ge=100, le=8000)
+    blur_kernel_size: int = Field(default=5, ge=1, le=31)
+    canny_threshold1: int = Field(default=50, ge=0, le=255)
+    canny_threshold2: int = Field(default=150, ge=0, le=255)
+    morph_kernel_size: int = Field(default=3, ge=1, le=31)
+    morph_iterations: int = Field(default=2, ge=0, le=10)
+    min_area_ratio: float = Field(default=0.05, gt=0.0, lt=1.0)
+    max_area_ratio: float = Field(default=0.98, gt=0.0, le=1.0)
     approx_epsilon_ratios: List[float] = Field(default_factory=lambda: [0.015, 0.02, 0.03, 0.04])
-    min_side_ratio: float = 0.05
-    min_angle_deg: float = 45.0
-    max_angle_deg: float = 135.0
+    min_side_ratio: float = Field(default=0.05, gt=0.0, lt=1.0)
+    min_angle_deg: float = Field(default=45.0, ge=0.0, lt=180.0)
+    max_angle_deg: float = Field(default=135.0, gt=0.0, le=180.0)
+
+    @model_validator(mode="after")
+    def validate_threshold_relationships(self) -> "DetectionConfig":
+        """Validate logical relationships between configuration parameters."""
+        if self.min_area_ratio >= self.max_area_ratio:
+            raise ValueError(
+                f"min_area_ratio ({self.min_area_ratio}) must be strictly less than "
+                f"max_area_ratio ({self.max_area_ratio})"
+            )
+        if self.min_angle_deg >= self.max_angle_deg:
+            raise ValueError(
+                f"min_angle_deg ({self.min_angle_deg}) must be strictly less than "
+                f"max_angle_deg ({self.max_angle_deg})"
+            )
+        if self.canny_threshold1 > self.canny_threshold2:
+            raise ValueError(
+                f"canny_threshold1 ({self.canny_threshold1}) must be <= "
+                f"canny_threshold2 ({self.canny_threshold2})"
+            )
+        return self
 
 
 class DetectionResult(BaseContract):
@@ -216,6 +236,8 @@ def detect_document_boundary(
     """
     if config is None:
         config = DetectionConfig()
+    elif isinstance(config, dict):
+        config = DetectionConfig(**config)
 
     # 1. Extract BGR image
     if isinstance(image, LoadedImage):
@@ -232,111 +254,115 @@ def detect_document_boundary(
     if orig_h < 10 or orig_w < 10:
         return None
 
-    # 2. Scale down to detection size (never upscale)
-    max_dim = max(orig_w, orig_h)
-    if max_dim > config.max_dimension:
-        scale_factor = float(config.max_dimension / max_dim)
-        det_w = int(round(orig_w * scale_factor))
-        det_h = int(round(orig_h * scale_factor))
-        det_image = cv2.resize(bgr, (det_w, det_h), interpolation=cv2.INTER_AREA)
-    else:
-        scale_factor = 1.0
-        det_w, det_h = orig_w, orig_h
-        det_image = bgr.copy()  # Ensure input is never mutated
+    try:
+        # 2. Scale down to detection size (never upscale)
+        max_dim = max(orig_w, orig_h)
+        if max_dim > config.max_dimension:
+            scale_factor = float(config.max_dimension / max_dim)
+            det_w = int(round(orig_w * scale_factor))
+            det_h = int(round(orig_h * scale_factor))
+            det_image = cv2.resize(bgr, (det_w, det_h), interpolation=cv2.INTER_AREA)
+        else:
+            scale_factor = 1.0
+            det_w, det_h = orig_w, orig_h
+            det_image = bgr.copy()  # Ensure input is never mutated
 
-    # 3. Preprocessing: grayscale, blur, edge detection, morphology
-    gray = cv2.cvtColor(det_image, cv2.COLOR_BGR2GRAY)
-    ksize = config.blur_kernel_size
-    if ksize % 2 == 0:
-        ksize += 1
-    blurred = cv2.GaussianBlur(gray, (ksize, ksize), 0)
+        # 3. Preprocessing: grayscale, blur, edge detection, morphology
+        gray = cv2.cvtColor(det_image, cv2.COLOR_BGR2GRAY)
+        ksize = config.blur_kernel_size
+        if ksize % 2 == 0:
+            ksize += 1
+        blurred = cv2.GaussianBlur(gray, (ksize, ksize), 0)
 
-    # Multi-pass edge extraction: Canny edges + Otsu threshold fallback
-    edges = cv2.Canny(blurred, config.canny_threshold1, config.canny_threshold2)
-    morph_k = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (config.morph_kernel_size, config.morph_kernel_size)
-    )
-    dilated = cv2.dilate(edges, morph_k, iterations=config.morph_iterations)
-    closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, morph_k)
+        # Multi-pass edge extraction: Canny edges + Otsu threshold fallback
+        edges = cv2.Canny(blurred, config.canny_threshold1, config.canny_threshold2)
+        morph_k = cv2.getStructuringElement(
+            cv2.MORPH_RECT, (config.morph_kernel_size, config.morph_kernel_size)
+        )
+        dilated = cv2.dilate(edges, morph_k, iterations=config.morph_iterations)
+        closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, morph_k)
 
-    # 4. Find contours
-    contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    contour_list = list(contours)
+        # 4. Find contours
+        contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contour_list = list(contours)
 
-    # If few contours found, try Otsu thresholding fallback for high-contrast white pages
-    if len(contour_list) < 2:
-        _, otsu_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        otsu_contours, _ = cv2.findContours(otsu_thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        contour_list.extend(otsu_contours)
+        # If few contours found, try Otsu thresholding fallback for high-contrast white pages
+        if len(contour_list) < 2:
+            _, otsu_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            otsu_contours, _ = cv2.findContours(otsu_thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+            contour_list.extend(otsu_contours)
 
-    if not contour_list:
+        if not contour_list:
+            return None
+
+        # 5. Sort contours by area descending
+        contour_list.sort(key=cv2.contourArea, reverse=True)
+
+        img_area = float(det_w * det_h)
+        min_area = img_area * config.min_area_ratio
+        max_area = img_area * config.max_area_ratio
+
+        candidates: List[Tuple[float, np.ndarray, float, Dict[str, Any]]] = []
+
+        # 6. Evaluate candidate contours
+        for c in contour_list:
+            area = float(cv2.contourArea(c))
+            if area < min_area:
+                # Since contours are sorted descending, subsequent contours are also too small
+                break
+            if area > max_area:
+                continue
+
+            peri = cv2.arcLength(c, True)
+            if peri < 1e-6:
+                continue
+
+            for eps_ratio in config.approx_epsilon_ratios:
+                approx = cv2.approxPolyDP(c, eps_ratio * peri, True)
+                if len(approx) == 4:
+                    ordered = order_corners(approx)
+                    is_valid, conf, diag = _validate_quadrilateral(ordered, det_w, det_h, config)
+                    if is_valid:
+                        area_ratio = float(cv2.contourArea(ordered) / img_area)
+                        # Candidate score balances area and confidence
+                        score = conf * (0.6 + 0.4 * area_ratio)
+                        candidates.append((score, ordered, area_ratio, diag))
+                        break  # Found best approximation for this contour
+
+        if not candidates:
+            return None
+
+        # 7. Select candidate with highest score
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        best_score, best_det_corners, best_area_ratio, best_diag = candidates[0]
+
+        # 8. Map corners back to original image space
+        inv_scale = 1.0 / scale_factor
+        orig_corners_arr = best_det_corners * inv_scale
+
+        # Clamp coordinates to original image bounds
+        orig_corners_arr[:, 0] = np.clip(orig_corners_arr[:, 0], 0.0, float(orig_w - 1))
+        orig_corners_arr[:, 1] = np.clip(orig_corners_arr[:, 1], 0.0, float(orig_h - 1))
+
+        # Convert to list of (x, y) tuples
+        orig_corners_list: List[Tuple[float, float]] = [
+            (float(orig_corners_arr[i, 0]), float(orig_corners_arr[i, 1])) for i in range(4)
+        ]
+
+        return DetectionResult(
+            detected=True,
+            corners=orig_corners_list,
+            confidence=best_score,
+            area_ratio=best_area_ratio,
+            scale_factor=scale_factor,
+            diagnostics={
+                **best_diag,
+                "total_contours": len(contour_list),
+                "candidates_found": len(candidates),
+                "detection_size": [det_w, det_h],
+                "original_size": [orig_w, orig_h],
+            },
+        )
+    except Exception:
+        # Classical CV errors (e.g. cv2.error on degenerate dimensions) must never crash caller
         return None
-
-    # 5. Sort contours by area descending
-    contour_list.sort(key=cv2.contourArea, reverse=True)
-
-    img_area = float(det_w * det_h)
-    min_area = img_area * config.min_area_ratio
-    max_area = img_area * config.max_area_ratio
-
-    candidates: List[Tuple[float, np.ndarray, float, Dict[str, Any]]] = []
-
-    # 6. Evaluate candidate contours
-    for c in contour_list:
-        area = float(cv2.contourArea(c))
-        if area < min_area:
-            # Since contours are sorted descending, subsequent contours are also too small
-            break
-        if area > max_area:
-            continue
-
-        peri = cv2.arcLength(c, True)
-        if peri < 1e-6:
-            continue
-
-        for eps_ratio in config.approx_epsilon_ratios:
-            approx = cv2.approxPolyDP(c, eps_ratio * peri, True)
-            if len(approx) == 4:
-                ordered = order_corners(approx)
-                is_valid, conf, diag = _validate_quadrilateral(ordered, det_w, det_h, config)
-                if is_valid:
-                    area_ratio = float(cv2.contourArea(ordered) / img_area)
-                    # Candidate score balances area and confidence
-                    score = conf * (0.6 + 0.4 * area_ratio)
-                    candidates.append((score, ordered, area_ratio, diag))
-                    break  # Found best approximation for this contour
-
-    if not candidates:
-        return None
-
-    # 7. Select candidate with highest score
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    best_score, best_det_corners, best_area_ratio, best_diag = candidates[0]
-
-    # 8. Map corners back to original image space
-    inv_scale = 1.0 / scale_factor
-    orig_corners_arr = best_det_corners * inv_scale
-
-    # Clamp coordinates to original image bounds
-    orig_corners_arr[:, 0] = np.clip(orig_corners_arr[:, 0], 0.0, float(orig_w - 1))
-    orig_corners_arr[:, 1] = np.clip(orig_corners_arr[:, 1], 0.0, float(orig_h - 1))
-
-    # Convert to list of (x, y) tuples
-    orig_corners_list: List[Tuple[float, float]] = [
-        (float(orig_corners_arr[i, 0]), float(orig_corners_arr[i, 1])) for i in range(4)
-    ]
-
-    return DetectionResult(
-        detected=True,
-        corners=orig_corners_list,
-        confidence=best_score,
-        area_ratio=best_area_ratio,
-        scale_factor=scale_factor,
-        diagnostics={
-            **best_diag,
-            "total_contours": len(contour_list),
-            "candidates_found": len(candidates),
-            "detection_size": [det_w, det_h],
-            "original_size": [orig_w, orig_h],
-        },
-    )
