@@ -32,13 +32,17 @@ from attendance_scanner.events import (
     serialize_event,
 )
 from attendance_scanner.pipeline import (
+    DegenerateCornersError,
     DetectionConfig,
     DetectionResult,
     LoadedImage,
     LoadedImageMetadata,
+    WarpedDocument,
+    compute_destination_dimensions,
     detect_document_boundary,
     load_image,
     order_corners,
+    warp_perspective,
 )
 
 __version__ = "0.1.0"
@@ -77,4 +81,8 @@ __all__ = [
     "DetectionResult",
     "detect_document_boundary",
     "order_corners",
+    "DegenerateCornersError",
+    "WarpedDocument",
+    "compute_destination_dimensions",
+    "warp_perspective",
 ]

@@ -11,6 +11,12 @@ from attendance_scanner.pipeline.load import (
     LoadedImageMetadata,
     load_image,
 )
+from attendance_scanner.pipeline.perspective import (
+    DegenerateCornersError,
+    WarpedDocument,
+    compute_destination_dimensions,
+    warp_perspective,
+)
 
 __all__ = [
     "load_image",
@@ -20,4 +26,8 @@ __all__ = [
     "DetectionResult",
     "detect_document_boundary",
     "order_corners",
+    "DegenerateCornersError",
+    "WarpedDocument",
+    "compute_destination_dimensions",
+    "warp_perspective",
 ]
