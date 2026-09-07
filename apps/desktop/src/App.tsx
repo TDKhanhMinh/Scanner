@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Sparkles, Scan, FileText, Info } from "lucide-react";
 import { AppHeader } from "@/components/scanner/AppHeader";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
@@ -7,6 +7,60 @@ import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/Sc
 import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
 import { FileResultList, type FileResultItem } from "@/components/scanner/FileResultList";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  listenScannerDiagnostics,
+  listenScannerEvents,
+  planScan,
+  scannerErrorMessage,
+  startScan,
+} from "@/lib/scannerBridge";
+import type {
+  FileCompletedEvent,
+  FileFailedEvent,
+  ScanPlanEvent,
+  ScannerEvent,
+} from "@/types/scanner";
+
+function toPlanStats(plan: ScanPlanEvent): ScanPlanStats {
+  return {
+    totalEmployees: plan.employees,
+    totalImages: plan.totalImages,
+    newFiles: plan.new,
+    modifiedFiles: plan.modified,
+    unchangedFiles: plan.unchanged,
+    rebuildFiles: plan.rebuild,
+  };
+}
+
+function sourceFileName(relativePath: string): string {
+  return relativePath.split(/[\\/]/).pop() ?? relativePath;
+}
+
+function completedResultItem(event: FileCompletedEvent): FileResultItem {
+  return {
+    id: `${event.relativePath}:${event.timestamp}`,
+    employeeName: event.employeeName,
+    sourceFile: sourceFileName(event.relativePath),
+    targetPdf: event.outputRelativePath,
+    status: event.warning ? "warning" : "success",
+    documentDetected: event.documentDetected,
+    message: event.warning ?? undefined,
+    timestamp: event.timestamp,
+  };
+}
+
+function failedResultItem(event: FileFailedEvent): FileResultItem {
+  return {
+    id: `${event.relativePath}:${event.timestamp}`,
+    employeeName: event.employeeName,
+    sourceFile: sourceFileName(event.relativePath),
+    targetPdf: "",
+    status: "failed",
+    documentDetected: false,
+    message: `${event.errorCode}: ${event.message}`,
+    timestamp: event.timestamp,
+  };
+}
 
 export function App() {
   const [inputPath, setInputPath] = useState<string>("");
@@ -14,7 +68,7 @@ export function App() {
   const [scanMode, setScanMode] = useState<ScanFilterMode>("gray");
   const [activeTab, setActiveTab] = useState<string>("config");
 
-  // Mock initial scan plan state (sẽ tích hợp Tauri IPC ở Task AS-14/15)
+  // Incremental scan plan state loaded from the Tauri scanner bridge.
   const [planStats, setPlanStats] = useState<ScanPlanStats>({
     totalEmployees: 0,
     totalImages: 0,
@@ -30,27 +84,73 @@ export function App() {
   const [processedCount, setProcessedCount] = useState<number>(0);
   const [currentFile, setCurrentFile] = useState<string>("");
   const [results, setResults] = useState<FileResultItem[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const planRequestId = useRef(0);
+  const scanRequestId = useRef(0);
+  const planDebounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const requestPlan = (path: string, nextOutputPath: string) => {
+    const requestId = ++planRequestId.current;
+    setIsPlanning(true);
+    setErrorMessage("");
+
+    void planScan({
+      inputRoot: path,
+      outputRoot: nextOutputPath,
+      mode: scanMode,
+    })
+      .then((plan) => {
+        if (requestId === planRequestId.current) {
+          setPlanStats(toPlanStats(plan));
+        }
+      })
+      .catch((error: unknown) => {
+        if (requestId === planRequestId.current) {
+          setPlanStats({
+            totalEmployees: 0,
+            totalImages: 0,
+            newFiles: 0,
+            modifiedFiles: 0,
+            unchangedFiles: 0,
+            rebuildFiles: 0,
+          });
+          setErrorMessage(scannerErrorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (requestId === planRequestId.current) {
+          setIsPlanning(false);
+        }
+      });
+  };
+
+  const schedulePlan = (path: string, nextOutputPath: string) => {
+    if (planDebounceTimer.current !== undefined) {
+      clearTimeout(planDebounceTimer.current);
+    }
+    planDebounceTimer.current = setTimeout(() => {
+      planDebounceTimer.current = undefined;
+      requestPlan(path, nextOutputPath);
+    }, 250);
+  };
 
   // Cập nhật thư mục nhập từ người dùng và tính toán kế hoạch quét
   const handleInputChange = (path: string) => {
     setInputPath(path);
     const trimmed = path.trim();
-    setOutputPath(trimmed ? `${trimmed}_pdf` : "");
+    const nextOutputPath = trimmed ? `${trimmed}_pdf` : "";
+    setOutputPath(nextOutputPath);
 
     if (trimmed) {
-      setIsPlanning(true);
-      setTimeout(() => {
-        setPlanStats({
-          totalEmployees: 4,
-          totalImages: 12,
-          newFiles: 3,
-          modifiedFiles: 1,
-          unchangedFiles: 8,
-          rebuildFiles: 0,
-        });
-        setIsPlanning(false);
-      }, 300);
+      schedulePlan(trimmed, nextOutputPath);
     } else {
+      if (planDebounceTimer.current !== undefined) {
+        clearTimeout(planDebounceTimer.current);
+        planDebounceTimer.current = undefined;
+      }
+      planRequestId.current += 1;
+      setIsPlanning(false);
+      setErrorMessage("");
       setPlanStats({
         totalEmployees: 0,
         totalImages: 0,
@@ -71,67 +171,77 @@ export function App() {
 
   const handleRefreshPlan = () => {
     if (!inputPath) return;
-    setIsPlanning(true);
-    setTimeout(() => {
-      setIsPlanning(false);
-    }, 300);
+    if (planDebounceTimer.current !== undefined) {
+      clearTimeout(planDebounceTimer.current);
+      planDebounceTimer.current = undefined;
+    }
+    requestPlan(inputPath, outputPath || `${inputPath}_pdf`);
+  };
+
+  const handleScannerEvent = (event: ScannerEvent) => {
+    switch (event.type) {
+      case "scan_plan":
+        setPlanStats(toPlanStats(event));
+        break;
+      case "file_started":
+        setCurrentFile(event.relativePath);
+        break;
+      case "file_completed":
+        setResults((previous) => [...previous, completedResultItem(event)]);
+        setProcessedCount((count) => count + 1);
+        break;
+      case "file_failed":
+        setResults((previous) => [...previous, failedResultItem(event)]);
+        setProcessedCount((count) => count + 1);
+        break;
+      case "scan_completed":
+        break;
+    }
   };
 
   const handleStartScan = () => {
+    if (!inputPath || isScanning) return;
+
+    if (planDebounceTimer.current !== undefined) {
+      clearTimeout(planDebounceTimer.current);
+      planDebounceTimer.current = undefined;
+    }
+    const requestId = ++scanRequestId.current;
     setIsScanning(true);
     setProcessedCount(0);
     setResults([]);
+    setCurrentFile("");
+    setErrorMessage("");
 
-    const demoItems: FileResultItem[] = [
-      {
-        id: "1",
-        employeeName: "Nguyen Van A",
-        sourceFile: "2026-09.jpg",
-        targetPdf: "Nguyen Van A/2026-09.pdf",
-        status: "success",
-        documentDetected: true,
-      },
-      {
-        id: "2",
-        employeeName: "Tran Thi B",
-        sourceFile: "2026-09.png",
-        targetPdf: "Tran Thi B/2026-09.pdf",
-        status: "warning",
-        documentDetected: false,
-        message: "Không nhận diện đủ 4 góc tài liệu, fallback sang xử lý toàn bộ ảnh nguồn.",
-      },
-      {
-        id: "3",
-        employeeName: "Le Van C",
-        sourceFile: "2026-08_modified.jpg",
-        targetPdf: "Le Van C/2026-08_modified.pdf",
-        status: "success",
-        documentDetected: true,
-      },
-      {
-        id: "4",
-        employeeName: "Pham Thi D",
-        sourceFile: "2026-09.jpeg",
-        targetPdf: "Pham Thi D/2026-09.pdf",
-        status: "success",
-        documentDetected: true,
-      },
-    ];
-
-    let currentStep = 0;
-    const interval = setInterval(() => {
-      if (currentStep < demoItems.length) {
-        const item = demoItems[currentStep];
-        setCurrentFile(`${item.employeeName}/${item.sourceFile}`);
-        setResults((prev) => [...prev, item]);
-        setProcessedCount(currentStep + 1);
-        currentStep++;
-      } else {
-        clearInterval(interval);
-        setIsScanning(false);
-        setCurrentFile("");
+    void (async () => {
+      let unlistenEvents: (() => void) | undefined;
+      let unlistenDiagnostics: (() => void) | undefined;
+      try {
+        unlistenEvents = await listenScannerEvents(handleScannerEvent);
+        unlistenDiagnostics = await listenScannerDiagnostics((diagnostic) => {
+          if (requestId === scanRequestId.current) {
+            setErrorMessage(diagnostic.message);
+          }
+        });
+        await startScan({
+          inputRoot: inputPath,
+          outputRoot: outputPath || `${inputPath}_pdf`,
+          mode: scanMode,
+          workers: 3,
+        });
+      } catch (error: unknown) {
+        if (requestId === scanRequestId.current) {
+          setErrorMessage(scannerErrorMessage(error));
+        }
+      } finally {
+        unlistenEvents?.();
+        unlistenDiagnostics?.();
+        if (requestId === scanRequestId.current) {
+          setIsScanning(false);
+          setCurrentFile("");
+        }
       }
-    }, 500);
+    })();
   };
 
   const handleOpenOutputFolder = () => {
@@ -157,6 +267,15 @@ export function App() {
             Chỉ xử lý các ảnh mới thêm hoặc ảnh nguồn đã bị chỉnh sửa, tự động bỏ qua các ảnh đã tạo PDF thành công trước đó để tối ưu thời gian.
           </div>
         </div>
+
+        {errorMessage && (
+          <div
+            role="alert"
+            className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive"
+          >
+            {errorMessage}
+          </div>
+        )}
 
         {/* Tab Navigation */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
