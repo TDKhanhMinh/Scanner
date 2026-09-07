@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Production & Build outputs
+dist/
+dist_sidecar/
+build/
+*.egg-info/
+.eggs/
+
+# Rust / Tauri
+apps/desktop/src-tauri/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Environment variables & local configs
+.env
+.env.local
+.env.*.local
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

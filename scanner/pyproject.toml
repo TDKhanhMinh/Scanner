@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "attendance-scanner"
+version = "0.1.0"
+description = "High-performance offline document scanner engine for attendance records"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Attendance Scanner Team" }
+]
+dependencies = [
+    "opencv-python>=4.9.0",
+    "numpy>=1.26.0",
+    "pillow>=10.2.0",
+    "pydantic>=2.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.9.0",
+    "ruff>=0.3.0",
+    "pyinstaller>=6.5.0",
+]
+
+[project.scripts]
+attendance-scanner-sidecar = "attendance_scanner.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

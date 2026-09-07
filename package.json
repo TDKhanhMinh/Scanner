@@ -1,0 +1,15 @@
+{
+  "name": "attendance-scanner-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Attendance Scanner Desktop monorepo",
+  "scripts": {
+    "dev:desktop": "npm --prefix apps/desktop run tauri dev",
+    "build:desktop": "npm --prefix apps/desktop run build",
+    "test:desktop": "npm --prefix apps/desktop test",
+    "typecheck:desktop": "npm --prefix apps/desktop run typecheck"
+  },
+  "workspaces": [
+    "apps/desktop"
+  ]
+}
