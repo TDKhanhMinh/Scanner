@@ -15,7 +15,7 @@ from typing import Optional, Tuple, Union
 
 import cv2
 import numpy as np
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from attendance_scanner.contracts import BaseContract, ScanMode
 from attendance_scanner.pipeline.load import LoadedImage
@@ -43,6 +43,14 @@ class EnhancementConfig(BaseContract):
     color_clahe_tile_grid: Tuple[int, int] = (8, 8)
     color_sharpen_amount: float = Field(default=0.2, ge=0.0, le=2.0)
     color_sharpen_sigma: float = Field(default=1.0, gt=0.0, le=5.0)
+
+    @field_validator("gray_clahe_tile_grid", "color_clahe_tile_grid")
+    @classmethod
+    def validate_tile_grid(cls, v: Tuple[int, int]) -> Tuple[int, int]:
+        """Ensure CLAHE tile grid dimensions are positive integers > 0."""
+        if len(v) != 2 or v[0] <= 0 or v[1] <= 0:
+            raise ValueError(f"CLAHE tile grid dimensions must be positive integers > 0, got {v}")
+        return v
 
     @model_validator(mode="after")
     def validate_odd_kernel_sizes(self) -> "EnhancementConfig":

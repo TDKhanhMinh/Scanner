@@ -129,6 +129,16 @@ def test_enhancement_config_validation():
     with pytest.raises(ValidationError):
         EnhancementConfig(gray_denoise_d=0)
 
+    # Invalid CLAHE tile grid (must have positive dimensions > 0)
+    with pytest.raises(ValidationError):
+        EnhancementConfig(gray_clahe_tile_grid=(0, 0))
+
+    with pytest.raises(ValidationError):
+        EnhancementConfig(gray_clahe_tile_grid=(0, 8))
+
+    with pytest.raises(ValidationError):
+        EnhancementConfig(color_clahe_tile_grid=(8, -1))
+
 
 def test_source_image_is_not_mutated():
     """Verify enhancement functions do not mutate the input image array."""
