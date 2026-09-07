@@ -32,9 +32,13 @@ from attendance_scanner.events import (
     serialize_event,
 )
 from attendance_scanner.pipeline import (
+    DetectionConfig,
+    DetectionResult,
     LoadedImage,
     LoadedImageMetadata,
+    detect_document_boundary,
     load_image,
+    order_corners,
 )
 
 __version__ = "0.1.0"
@@ -69,4 +73,8 @@ __all__ = [
     "load_image",
     "LoadedImage",
     "LoadedImageMetadata",
+    "DetectionConfig",
+    "DetectionResult",
+    "detect_document_boundary",
+    "order_corners",
 ]
