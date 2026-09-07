@@ -20,7 +20,7 @@ reprocess during the default “Scan New Files” flow.
 
 ```bash
 # Plan scan without processing
-python -m attendance_scanner.cli plan --input "<path_to_input_images>"
+python -m attendance_scanner.cli plan --input "<path_to_input_images>" --output "<path_to_output_pdf>" --mode gray
 
 # Run batch processing
 python -m attendance_scanner.cli scan-batch --input "<path_to_input_images>" --output "<path_to_output_pdf>" --mode gray --workers 3
