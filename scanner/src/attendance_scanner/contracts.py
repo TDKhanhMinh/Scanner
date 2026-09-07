@@ -243,6 +243,19 @@ class PdfWriteError(ScannerError):
         self.reason = reason
 
 
+class StateError(ScannerError):
+    """Raised when manifest state reading, parsing, or writing fails."""
+
+    def __init__(
+        self,
+        code: ScannerErrorCode,
+        message: str,
+        path: Optional[str] = None,
+    ) -> None:
+        super().__init__(code, message)
+        self.path = path
+
+
 class DiscoveryResult(BaseContract):
     """Inventory result of employee folder discovery."""
 

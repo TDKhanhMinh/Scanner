@@ -18,6 +18,7 @@ from attendance_scanner.contracts import (
     ScannerErrorCode,
     ScannerWarningCode,
     ScanPlan,
+    StateError,
 )
 from attendance_scanner.discovery import (
     discover_employee_folders,
@@ -34,6 +35,11 @@ from attendance_scanner.events import (
     ScanPlanEvent,
     deserialize_event,
     serialize_event,
+)
+from attendance_scanner.fingerprint import (
+    FileFingerprint,
+    compute_fast_fingerprint,
+    compute_sha256,
 )
 from attendance_scanner.pdf_export import (
     PdfExportConfig,
@@ -64,6 +70,14 @@ from attendance_scanner.pipeline import (
     scan_one,
     warp_perspective,
 )
+from attendance_scanner.state import (
+    CURRENT_SCHEMA_VERSION,
+    Manifest,
+    ManifestEntry,
+    ManifestStore,
+    compute_root_id,
+    get_default_state_dir,
+)
 
 __version__ = "0.1.0"
 
@@ -79,6 +93,7 @@ __all__ = [
     "ImageDecodeError",
     "ImageProcessError",
     "PdfWriteError",
+    "StateError",
     "DiscoveredFile",
     "DiscoveryResult",
     "ScanPlan",
@@ -122,4 +137,13 @@ __all__ = [
     "PdfExportConfig",
     "PdfExportResult",
     "export_single_page_pdf",
+    "compute_fast_fingerprint",
+    "compute_sha256",
+    "FileFingerprint",
+    "compute_root_id",
+    "get_default_state_dir",
+    "CURRENT_SCHEMA_VERSION",
+    "ManifestEntry",
+    "Manifest",
+    "ManifestStore",
 ]
