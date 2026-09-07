@@ -102,6 +102,20 @@ class Manifest(BaseContract):
     updated_at: str
     entries: Dict[str, ManifestEntry] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_files_or_entries(cls, data: Any) -> Any:
+        """Allow 'files' as an alias for 'entries' in incoming data."""
+        if isinstance(data, dict):
+            if "entries" not in data and "files" in data:
+                data["entries"] = data["files"]
+        return data
+
+    @property
+    def files(self) -> Dict[str, ManifestEntry]:
+        """Convenience property matching System Design naming."""
+        return self.entries
+
     def get_entry(self, relative_path: str) -> Optional[ManifestEntry]:
         """Look up an entry by relative path with separator normalization."""
         key = relative_path.replace("\\", "/")
@@ -139,6 +153,9 @@ class ManifestStore:
     def get_manifest_path(self, input_root: Union[str, Path]) -> Path:
         """Get the filesystem path for the manifest corresponding to an input root."""
         root_id = compute_root_id(input_root)
+        subdir_manifest = self.state_dir / root_id / "manifest.json"
+        if subdir_manifest.exists():
+            return subdir_manifest
         return self.state_dir / f"{root_id}.json"
 
     def load_manifest(
@@ -150,8 +167,9 @@ class ManifestStore:
         """Load an existing manifest, or create an initial empty one.
 
         If the manifest file exists but is corrupted (malformed JSON, invalid schema,
-        or unsupported version), it is quarantined to `{root_id}.json.corrupt.{timestamp}`
-        and a fresh manifest is returned (or `StateError` is raised if `raise_on_corrupt=True`).
+        unsupported version, or root identity mismatch), it is quarantined to
+        `{name}.corrupt.{timestamp}` and a fresh manifest is returned (or `StateError`
+        is raised if `raise_on_corrupt=True`).
 
         Args:
             input_root: Root directory of employee input images.
@@ -171,7 +189,12 @@ class ManifestStore:
         root_id = compute_root_id(input_root)
         manifest_path = self.get_manifest_path(input_root)
 
-        if not manifest_path.exists():
+        try:
+            path_exists = manifest_path.exists()
+        except OSError:
+            path_exists = False
+
+        if not path_exists:
             now_iso = datetime.now(timezone.utc).isoformat()
             return Manifest(
                 schema_version=CURRENT_SCHEMA_VERSION,
@@ -195,6 +218,18 @@ class ManifestStore:
                 )
 
             manifest = Manifest.model_validate(raw_data)
+
+            # Validate root identity integrity (P1)
+            if manifest.root_id != root_id:
+                raise ValueError(
+                    f"Manifest root_id mismatch: expected '{root_id}', got '{manifest.root_id}'"
+                )
+            if Path(manifest.input_root).resolve() != Path(canonical_input).resolve():
+                raise ValueError(
+                    f"Manifest input_root mismatch: expected '{canonical_input}', "
+                    f"got '{manifest.input_root}'"
+                )
+
             return manifest
 
         except Exception as err:
@@ -207,7 +242,7 @@ class ManifestStore:
 
             # Deterministic corrupt state quarantine
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-            corrupt_path = self.state_dir / f"{root_id}.json.corrupt.{timestamp}"
+            corrupt_path = manifest_path.parent / f"{manifest_path.name}.corrupt.{timestamp}"
             try:
                 os.replace(manifest_path, corrupt_path)
                 logger.warning(
@@ -248,13 +283,14 @@ class ManifestStore:
             Path to the saved manifest file.
 
         Raises:
-            StateError: If writing or atomic replacement fails.
+            StateError: If writing, directory creation, or atomic replacement fails.
         """
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        target_path = self.state_dir / f"{manifest.root_id}.json"
-        temp_path = self.state_dir / f"{manifest.root_id}.json.tmp.{uuid.uuid4().hex}"
+        target_path = self.get_manifest_path(manifest.input_root)
+        target_dir = target_path.parent
+        temp_path = target_dir / f"{target_path.name}.tmp.{uuid.uuid4().hex}"
 
         try:
+            target_dir.mkdir(parents=True, exist_ok=True)
             manifest.updated_at = datetime.now(timezone.utc).isoformat()
             serialized = manifest.model_dump_json(by_alias=True, indent=2)
 

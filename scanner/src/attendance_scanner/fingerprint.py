@@ -30,15 +30,19 @@ def compute_sha256(path: Union[str, Path], chunk_size: int = 65536) -> str:
 
     Args:
         path: Path to the target file.
-        chunk_size: Number of bytes to read per buffer chunk. Default 64KB.
+        chunk_size: Number of bytes to read per buffer chunk. Default 64KB. Must be > 0.
 
     Returns:
         64-character lowercase hexadecimal SHA-256 digest string.
 
     Raises:
+        ValueError: If chunk_size is less than or equal to 0.
         FileNotFoundError: If the file does not exist.
         OSError: If reading the file fails.
     """
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be a positive integer, got {chunk_size}")
+
     hasher = hashlib.sha256()
     with open(path, "rb") as f:
         while True:

@@ -426,3 +426,115 @@ def test_get_default_state_dir_resolution() -> None:
     assert isinstance(d, Path)
     assert "attendance-scanner" in str(d)
     assert "state" in str(d)
+
+
+# ============================================================================
+# 9. Regression Tests for Findings P1 & P2
+# ============================================================================
+
+
+def test_compute_sha256_invalid_chunk_size(tmp_path: Path) -> None:
+    """compute_sha256 must reject chunk_size <= 0 with ValueError."""
+    sample = tmp_path / "data.bin"
+    sample.write_bytes(b"some content")
+
+    with pytest.raises(ValueError, match="chunk_size must be a positive integer"):
+        compute_sha256(sample, chunk_size=0)
+
+    with pytest.raises(ValueError, match="chunk_size must be a positive integer"):
+        compute_sha256(sample, chunk_size=-1)
+
+
+def test_load_manifest_rejects_wrong_root_identity(tmp_path: Path) -> None:
+    """load_manifest must reject and quarantine a manifest containing
+    a different root's identity.
+    """
+    state_dir = tmp_path / "state"
+    store = ManifestStore(state_dir=state_dir)
+
+    root_a = tmp_path / "employees_a"
+    root_b = tmp_path / "employees_b"
+    root_a.mkdir()
+    root_b.mkdir()
+
+    # Save a valid manifest for root_b
+    manifest_b = store.load_manifest(root_b)
+    entry_b = ManifestEntry(
+        relative_path="EmpB/doc.jpg",
+        size=100,
+        mtime_ns=500,
+        processed_at="2026-09-07T00:00:00Z",
+    )
+    manifest_b.set_entry(entry_b)
+    path_b = store.save_manifest(manifest_b)
+
+    # Place manifest_b content at root_a's manifest path
+    path_a = store.get_manifest_path(root_a)
+    path_a.write_text(path_b.read_text(encoding="utf-8"), encoding="utf-8")
+
+    # Strict load should raise StateError
+    with pytest.raises(StateError) as exc_info:
+        store.load_manifest(root_a, raise_on_corrupt=True)
+    assert exc_info.value.code == ScannerErrorCode.STATE_READ_FAILED
+    assert "Manifest root_id mismatch" in str(exc_info.value)
+
+    # Default load should quarantine and return a fresh clean manifest for root_a
+    loaded_a = store.load_manifest(root_a)
+    assert loaded_a.root_id == compute_root_id(root_a)
+    assert loaded_a.input_root == str(root_a.resolve())
+    assert len(loaded_a.entries) == 0
+
+    # Old file is quarantined
+    assert not path_a.exists()
+    corrupt_files = list(state_dir.glob(f"{compute_root_id(root_a)}.json.corrupt.*"))
+    assert len(corrupt_files) == 1
+
+
+def test_save_manifest_state_dir_as_file_raises_state_error(tmp_path: Path) -> None:
+    """When state_dir is a file rather than a directory, save_manifest
+    raises StateError(STATE_WRITE_FAILED).
+    """
+    fake_state_file = tmp_path / "not_a_dir.txt"
+    fake_state_file.write_text("i am a file", encoding="utf-8")
+
+    store = ManifestStore(state_dir=fake_state_file)
+    input_root = tmp_path / "employees"
+    input_root.mkdir()
+
+    manifest = Manifest(
+        schema_version=1,
+        root_id="123456789012345678901234",
+        input_root=str(input_root.resolve()),
+        output_root=f"{input_root.resolve()}_pdf",
+        created_at="2026-09-07T00:00:00Z",
+        updated_at="2026-09-07T00:00:00Z",
+    )
+
+    with pytest.raises(StateError) as exc_info:
+        store.save_manifest(manifest)
+
+    assert exc_info.value.code == ScannerErrorCode.STATE_WRITE_FAILED
+
+
+def test_manifest_files_alias_support() -> None:
+    """Manifest must accept 'files' alias and provide .files property matching System Design."""
+    raw = {
+        "schemaVersion": 1,
+        "rootId": "123456789012345678901234",
+        "inputRoot": "/input",
+        "outputRoot": "/output",
+        "createdAt": "2026-09-07T00:00:00Z",
+        "updatedAt": "2026-09-07T00:00:00Z",
+        "files": {
+            "NV01/card.jpg": {
+                "relativePath": "NV01/card.jpg",
+                "size": 500,
+                "mtimeNs": 1000,
+                "processedAt": "2026-09-07T00:00:00Z",
+            }
+        },
+    }
+    manifest = Manifest.model_validate(raw)
+    assert len(manifest.entries) == 1
+    assert "NV01/card.jpg" in manifest.entries
+    assert manifest.files is manifest.entries
