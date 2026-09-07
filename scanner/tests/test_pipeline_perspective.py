@@ -97,6 +97,40 @@ def test_warp_perspective_synthetic_grid_rectification():
     center_roi = warped.image[h_start:h_end, w_start:w_end]
     assert np.mean(center_roi) > 100
 
+    # Geometric assertion 1: Verify destination corner re-projection MAE
+    reprojected_corners = cv2.perspectiveTransform(
+        warped.source_corners.reshape(1, 4, 2), warped.transform_matrix
+    ).reshape(4, 2)
+    expected_dst = np.array(
+        [
+            [0.0, 0.0],
+            [float(warped.width - 1), 0.0],
+            [float(warped.width - 1), float(warped.height - 1)],
+            [0.0, float(warped.height - 1)],
+        ],
+        dtype=np.float32,
+    )
+    corner_mae = float(np.mean(np.abs(reprojected_corners - expected_dst)))
+    assert corner_mae < 1e-3
+
+    # Geometric assertion 2: Sample interior grid points and verify unwarped landmark MAE
+    grid_pts = np.array(
+        [
+            [float(x), float(y)]
+            for y in range(30, orig_h - 30, 30)
+            for x in range(40, orig_w - 40, 40)
+        ],
+        dtype=np.float32,
+    ).reshape(-1, 1, 2)
+    canvas_pts = cv2.perspectiveTransform(grid_pts, h_mat)
+    rectified_pts = cv2.perspectiveTransform(canvas_pts, warped.transform_matrix).reshape(-1, 2)
+    scale_norm = np.array(
+        [(orig_w - 1) / float(warped.width - 1), (orig_h - 1) / float(warped.height - 1)]
+    )
+    mapped_back = rectified_pts * scale_norm
+    geometric_mae = float(np.mean(np.abs(mapped_back - grid_pts.reshape(-1, 2))))
+    assert geometric_mae < 5.0  # Tight sub-pixel/geometric tolerance to prevent regression
+
 
 def test_warp_perspective_scrambled_corner_order():
     """Verify warp_perspective automatically orders corners into canonical [TL, TR, BR, BL]."""
