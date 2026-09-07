@@ -1,219 +1,232 @@
 import { useState } from "react";
-import {
-  FolderOpen,
-  Scan,
-  FileCheck2,
-  AlertCircle,
-  ShieldCheck,
-  Cpu,
-  Layers,
-  Sparkles,
-} from "lucide-react";
+import { Sparkles, Scan, FileText, Info } from "lucide-react";
+import { AppHeader } from "@/components/scanner/AppHeader";
+import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
+import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
+import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/ScanPlanSummaryCard";
+import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
+import { FileResultList, type FileResultItem } from "@/components/scanner/FileResultList";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export function App() {
   const [inputPath, setInputPath] = useState<string>("");
-  const [outputPath] = useState<string>("");
-  const [scanMode, setScanMode] = useState<"gray" | "bw" | "color">("gray");
+  const [outputPath, setOutputPath] = useState<string>("");
+  const [scanMode, setScanMode] = useState<ScanFilterMode>("gray");
+  const [activeTab, setActiveTab] = useState<string>("config");
+
+  // Mock initial scan plan state (sẽ tích hợp Tauri IPC ở Task AS-14/15)
+  const [planStats, setPlanStats] = useState<ScanPlanStats>({
+    totalEmployees: 0,
+    totalImages: 0,
+    newFiles: 0,
+    modifiedFiles: 0,
+    unchangedFiles: 0,
+  });
+
+  // Batch progress state
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [isPlanning, setIsPlanning] = useState<boolean>(false);
+  const [processedCount, setProcessedCount] = useState<number>(0);
+  const [currentFile, setCurrentFile] = useState<string>("");
+  const [results, setResults] = useState<FileResultItem[]>([]);
+
+  // Giả lập chọn thư mục demo cho frontend
+  const handleSelectFolder = () => {
+    const demoPath = "D:\\ChamCong\\all";
+    setInputPath(demoPath);
+    setOutputPath(`${demoPath}_pdf`);
+
+    // Phân tích scan plan mẫu
+    setIsPlanning(true);
+    setTimeout(() => {
+      setPlanStats({
+        totalEmployees: 4,
+        totalImages: 12,
+        newFiles: 3,
+        modifiedFiles: 1,
+        unchangedFiles: 8,
+      });
+      setIsPlanning(false);
+    }, 400);
+  };
+
+  const handleRefreshPlan = () => {
+    if (!inputPath) return;
+    setIsPlanning(true);
+    setTimeout(() => {
+      setIsPlanning(false);
+    }, 300);
+  };
+
+  const handleStartScan = () => {
+    setIsScanning(true);
+    setProcessedCount(0);
+    setResults([]);
+
+    const demoItems: FileResultItem[] = [
+      {
+        id: "1",
+        employeeName: "Nguyen Van A",
+        sourceFile: "2026-09.jpg",
+        targetPdf: "Nguyen Van A/2026-09.pdf",
+        status: "success",
+        documentDetected: true,
+      },
+      {
+        id: "2",
+        employeeName: "Tran Thi B",
+        sourceFile: "2026-09.png",
+        targetPdf: "Tran Thi B/2026-09.pdf",
+        status: "warning",
+        documentDetected: false,
+        message: "Không nhận diện đủ 4 góc tài liệu, fallback sang xử lý toàn bộ ảnh nguồn.",
+      },
+      {
+        id: "3",
+        employeeName: "Le Van C",
+        sourceFile: "2026-08_modified.jpg",
+        targetPdf: "Le Van C/2026-08_modified.pdf",
+        status: "success",
+        documentDetected: true,
+      },
+      {
+        id: "4",
+        employeeName: "Pham Thi D",
+        sourceFile: "2026-09.jpeg",
+        targetPdf: "Pham Thi D/2026-09.pdf",
+        status: "success",
+        documentDetected: true,
+      },
+    ];
+
+    let currentStep = 0;
+    const interval = setInterval(() => {
+      if (currentStep < demoItems.length) {
+        const item = demoItems[currentStep];
+        setCurrentFile(`${item.employeeName}/${item.sourceFile}`);
+        setResults((prev) => [...prev, item]);
+        setProcessedCount(currentStep + 1);
+        currentStep++;
+      } else {
+        clearInterval(interval);
+        setIsScanning(false);
+        setCurrentFile("");
+      }
+    }, 500);
+  };
+
+  const handleOpenOutputFolder = () => {
+    alert(`Mở thư mục: ${outputPath || `${inputPath}_pdf`}`);
+  };
+
+  const successCount = results.filter((r) => r.status === "success").length;
+  const warningCount = results.filter((r) => r.status === "warning").length;
+  const failedCount = results.filter((r) => r.status === "failed").length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col antialiased selection:bg-blue-600 selection:text-white">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md px-6 py-4 sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20 ring-1 ring-white/20">
-              <Scan className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                Attendance Scanner Desktop
-                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                  v0.1.0 MVP
-                </span>
-              </h1>
-              <p className="text-xs text-slate-400">
-                Tự động hóa số hóa bảng chấm công theo nhân viên • 1 ảnh → 1 PDF
-              </p>
-            </div>
-          </div>
+    <div className="min-h-screen bg-background text-foreground flex flex-col antialiased selection:bg-primary/20 selection:text-primary">
+      {/* Header Bar */}
+      <AppHeader />
 
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              100% Local-First
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
-              <Cpu className="w-3.5 h-3.5 text-blue-400" />
-              Python 3.11 Sidecar
-            </span>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-6 space-y-6">
+      {/* Main Body */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         {/* Banner Informational Notice */}
-        <div className="rounded-xl border border-blue-500/20 bg-blue-950/20 p-4 flex items-start gap-3">
-          <Sparkles className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-          <div className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-            <strong className="text-blue-300 font-semibold">Cơ chế quét thông minh (Incremental Scan): </strong>
-            Hệ thống chỉ quét và chuyển đổi các ảnh mới thêm hoặc ảnh bị thay đổi, tự động bỏ qua các ảnh đã tạo PDF thành công trước đó để tối ưu thời gian.
+        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 flex items-start gap-3 backdrop-blur-sm">
+          <Sparkles className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+          <div className="text-xs sm:text-sm text-foreground/90 leading-relaxed">
+            <strong className="text-primary font-semibold">Cơ chế quét thông minh (Incremental Scan): </strong>
+            Chỉ xử lý các ảnh mới thêm hoặc ảnh nguồn đã bị chỉnh sửa, tự động bỏ qua các ảnh đã tạo PDF thành công trước đó để tối ưu thời gian.
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column: Configuration & Folder Pickers (2 cols wide on desktop) */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Step 1: Input Folder */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 backdrop-blur-sm shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center text-xs font-bold">1</span>
-                  Thư mục gốc chứa ảnh nhân viên (Input Root)
-                </h2>
-                <span className="text-xs text-slate-400">Yêu cầu thư mục con trực tiếp là tên nhân viên</span>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-300 font-mono truncate focus-within:border-blue-500">
-                  {inputPath || <span className="text-slate-500 font-sans">Chưa chọn thư mục (ví dụ: D:\ChamCong\all)...</span>}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setInputPath("D:\\ChamCong\\all")}
-                  className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2 shadow-sm min-h-[44px]"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                  Chọn thư mục
-                </button>
-              </div>
-
-              {inputPath && (
-                <div className="text-xs text-slate-400 flex items-center gap-2">
-                  <span>Thư mục PDF đầu ra mặc định:</span>
-                  <code className="text-blue-400 font-mono">{outputPath || `${inputPath}_pdf`}</code>
-                </div>
+        {/* Tab Navigation */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full sm:w-auto grid-cols-2 max-w-md">
+            <TabsTrigger value="config" className="flex items-center gap-2">
+              <Scan className="w-4 h-4" />
+              Cấu hình & Quét
+            </TabsTrigger>
+            <TabsTrigger value="results" className="flex items-center gap-2">
+              <FileText className="w-4 h-4" />
+              Kết quả chi tiết
+              {results.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-primary text-primary-foreground font-mono">
+                  {results.length}
+                </span>
               )}
-            </div>
+            </TabsTrigger>
+          </TabsList>
 
-            {/* Step 2: Scan Enhancement Mode */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 backdrop-blur-sm shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm sm:text-base font-semibold text-white flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-blue-600/20 text-blue-400 flex items-center justify-center text-xs font-bold">2</span>
-                  Chế độ xử lý ảnh (Scan Mode)
-                </h2>
-                <span className="text-xs text-slate-400">OpenCV document enhancement</span>
+          {/* TAB 1: CẤU HÌNH & TIẾN ĐỘ QUÉT */}
+          <TabsContent value="config" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+              {/* Cột trái (2 cột trên lg/desktop): Thư mục + Chế độ quét */}
+              <div className="lg:col-span-2 space-y-6 min-w-0">
+                <FolderSelectorCard
+                  inputPath={inputPath}
+                  outputPath={outputPath}
+                  onSelectInputFolder={handleSelectFolder}
+                  disabled={isScanning}
+                />
+
+                <ScanModeSelector
+                  mode={scanMode}
+                  onSelectMode={setScanMode}
+                  disabled={isScanning}
+                />
+
+                {(isScanning || processedCount > 0) && (
+                  <BatchProgressCard
+                    currentFile={currentFile}
+                    processedCount={processedCount}
+                    totalCount={planStats.newFiles + planStats.modifiedFiles}
+                    successCount={successCount}
+                    warningCount={warningCount}
+                    failedCount={failedCount}
+                    isScanning={isScanning}
+                    onOpenOutputFolder={handleOpenOutputFolder}
+                  />
+                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setScanMode("gray")}
-                  className={`p-4 rounded-xl border text-left transition-all min-h-[44px] ${
-                    scanMode === "gray"
-                      ? "border-blue-500 bg-blue-500/10 text-white shadow-sm ring-1 ring-blue-500/30"
-                      : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700 hover:text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold text-sm flex items-center justify-between">
-                    Grayscale
-                    {scanMode === "gray" && <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded">Mặc định</span>}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                    Giữ sắc nét nét bảng, độ tương phản mượt mà, phù hợp mực bút bi nhạt.
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setScanMode("bw")}
-                  className={`p-4 rounded-xl border text-left transition-all min-h-[44px] ${
-                    scanMode === "bw"
-                      ? "border-blue-500 bg-blue-500/10 text-white shadow-sm ring-1 ring-blue-500/30"
-                      : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700 hover:text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold text-sm">B&W (Nhị phân)</div>
-                  <div className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                    Adaptive threshold lọc sạch nền xám, tạo trang trắng chữ đen sắc nét.
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setScanMode("color")}
-                  className={`p-4 rounded-xl border text-left transition-all min-h-[44px] ${
-                    scanMode === "color"
-                      ? "border-blue-500 bg-blue-500/10 text-white shadow-sm ring-1 ring-blue-500/30"
-                      : "border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700 hover:text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold text-sm">Color Enhanced</div>
-                  <div className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                    Giữ nguyên màu mực chữ ký và con dấu đỏ, tăng tương phản màu nền.
-                  </div>
-                </button>
+              {/* Cột phải (1 cột trên lg/desktop): Thống kê Scan Plan & CTA */}
+              <div className="lg:col-span-1 min-w-0">
+                <ScanPlanSummaryCard
+                  stats={planStats}
+                  isPlanning={isPlanning}
+                  isScanning={isScanning}
+                  canScan={Boolean(inputPath)}
+                  onRefreshPlan={handleRefreshPlan}
+                  onStartScan={handleStartScan}
+                />
               </div>
             </div>
-          </div>
+          </TabsContent>
 
-          {/* Right Column: Scan Plan Summary & Action */}
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 backdrop-blur-sm shadow-sm space-y-5">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Layers className="w-4 h-4 text-blue-400" />
-                Tổng quan Lập kế hoạch (Scan Plan)
-              </h3>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs py-2 border-b border-slate-800">
-                  <span className="text-slate-400">Nhân viên phát hiện:</span>
-                  <span className="font-semibold text-white">0</span>
-                </div>
-                <div className="flex items-center justify-between text-xs py-2 border-b border-slate-800">
-                  <span className="text-slate-400">Tổng số file ảnh:</span>
-                  <span className="font-semibold text-white">0</span>
-                </div>
-                <div className="flex items-center justify-between text-xs py-2 border-b border-slate-800">
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <FileCheck2 className="w-3.5 h-3.5" /> File mới (New):
-                  </span>
-                  <span className="font-semibold text-emerald-400">0</span>
-                </div>
-                <div className="flex items-center justify-between text-xs py-2 border-b border-slate-800">
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> Sửa đổi (Modified):
-                  </span>
-                  <span className="font-semibold text-amber-400">0</span>
-                </div>
-                <div className="flex items-center justify-between text-xs py-2">
-                  <span className="text-slate-400">Bỏ qua (Unchanged):</span>
-                  <span className="font-semibold text-slate-400">0</span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                disabled={!inputPath}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 min-h-[44px]"
-              >
-                <Scan className="w-4 h-4" />
-                Quét các file mới (Scan New Files)
-              </button>
-
-              <p className="text-[11px] text-slate-500 text-center leading-relaxed">
-                Quá trình quét chạy trên tiến trình Python nền độc lập, hỗ trợ tự phục hồi và tiếp tục khi có lỗi.
-              </p>
+          {/* TAB 2: KẾT QUẢ QUÉT CHI TIẾT */}
+          <TabsContent value="results" className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                <FileText className="w-4 h-4 text-primary" />
+                Danh sách tài liệu đã quét
+              </h2>
+              <span className="text-xs text-muted-foreground">
+                Tổng số đã xử lý: {results.length} file
+              </span>
             </div>
-          </div>
-        </div>
+
+            <FileResultList items={results} />
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/60 bg-slate-950 py-4 px-6 mt-auto">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2">
-          <span>Attendance Scanner Desktop • Tauri 2 + React TS + OpenCV Sidecar</span>
+      <footer className="border-t border-border/80 bg-background/90 py-4 px-4 sm:px-6 mt-auto backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between text-xs text-muted-foreground gap-2">
+          <div className="flex items-center gap-2">
+            <Info className="w-3.5 h-3.5 text-primary" />
+            <span>Attendance Scanner Desktop • Kiến trúc Tauri 2 + Python 3.11 Sidecar + OpenCV</span>
+          </div>
           <span>Định dạng hỗ trợ: .jpg, .jpeg, .png, .webp</span>
         </div>
       </footer>
@@ -222,3 +235,9 @@ export function App() {
 }
 
 export default App;
+
+// --- Hybrid Responsive Summary ---
+// mobile  (default / sm):  layout 1 cột liền mạch, tabs full width, các card xếp chồng tự nhiên
+// tablet  (md / lg):       layout 2 cột linh hoạt (65% cấu hình bên trái / 35% tóm tắt bên phải)
+// desktop (xl / 2xl):      tối đa max-w-7xl căn giữa, bảng dữ liệu kết quả chi tiết, animation mượt mà
+// Interaction:             touch target >= 44px trên tất cả các nút, focus ring rõ ràng, hover states đầy đủ
