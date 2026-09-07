@@ -21,6 +21,9 @@ from attendance_scanner.contracts import (
     StateError,
 )
 from attendance_scanner.discovery import (
+    DEFAULT_PIPELINE_VERSION,
+    build_incremental_scan_plan,
+    classify_discovered_files,
     discover_employee_folders,
     natural_sort_key,
     resolve_target_pdf,
@@ -101,6 +104,9 @@ __all__ = [
     "FileResult",
     "BatchSummary",
     "discover_employee_folders",
+    "classify_discovered_files",
+    "build_incremental_scan_plan",
+    "DEFAULT_PIPELINE_VERSION",
     "natural_sort_key",
     "resolve_target_pdf",
     "BaseEvent",

@@ -5,12 +5,16 @@ import sys
 from typing import List, Optional
 
 from attendance_scanner.contracts import InvalidInputRootError
-from attendance_scanner.discovery import discover_employee_folders
+from attendance_scanner.discovery import (
+    build_incremental_scan_plan,
+    discover_employee_folders,
+)
 from attendance_scanner.events import (
     ScanCompletedEvent,
     ScanPlanEvent,
     serialize_event,
 )
+from attendance_scanner.state import ManifestStore
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -96,7 +100,17 @@ def handle_plan(args: argparse.Namespace) -> int:
     """Execute plan subcommand by discovering employee folders and emitting ScanPlanEvent."""
     try:
         discovery = discover_employee_folders(args.input)
-        plan = discovery.to_scan_plan(output_root=args.output)
+        store = ManifestStore()
+        manifest = store.load_manifest(args.input, output_root=args.output)
+        previous_updated_at = manifest.updated_at
+        effective_output_root = args.output or manifest.output_root
+        plan = build_incremental_scan_plan(
+            discovery=discovery,
+            manifest=manifest,
+            output_root=effective_output_root,
+        )
+        if manifest.updated_at != previous_updated_at:
+            store.save_manifest(manifest)
         event = ScanPlanEvent.from_plan(plan)
         sys.stdout.write(serialize_event(event) + "\n")
         sys.stdout.flush()
@@ -111,7 +125,17 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
     """Execute scan-batch subcommand by planning and streaming events."""
     try:
         discovery = discover_employee_folders(args.input)
-        plan = discovery.to_scan_plan(output_root=args.output)
+        store = ManifestStore()
+        manifest = store.load_manifest(args.input, output_root=args.output)
+        previous_updated_at = manifest.updated_at
+        effective_output_root = args.output or manifest.output_root
+        plan = build_incremental_scan_plan(
+            discovery=discovery,
+            manifest=manifest,
+            output_root=effective_output_root,
+        )
+        if manifest.updated_at != previous_updated_at:
+            store.save_manifest(manifest)
         plan_event = ScanPlanEvent.from_plan(plan)
         sys.stdout.write(serialize_event(plan_event) + "\n")
 

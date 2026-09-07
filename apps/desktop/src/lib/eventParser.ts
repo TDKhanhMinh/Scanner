@@ -94,6 +94,13 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
           ? raw.modifiedCount
           : undefined;
 
+      const rebuild =
+        typeof raw.rebuild === "number"
+          ? raw.rebuild
+          : typeof raw.rebuildCount === "number"
+          ? raw.rebuildCount
+          : 0;
+
       const unchanged =
         typeof raw.unchanged === "number"
           ? raw.unchanged
@@ -114,8 +121,19 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         newCount < 0 ||
         modified === undefined ||
         modified < 0 ||
+        rebuild < 0 ||
         unchanged === undefined ||
         unchanged < 0
+      ) {
+        return null;
+      }
+
+      const expectedFilesToProcess = newCount + modified + rebuild;
+      if (
+        raw.filesToProcess !== undefined &&
+        (typeof raw.filesToProcess !== "number" ||
+          raw.filesToProcess < 0 ||
+          raw.filesToProcess !== expectedFilesToProcess)
       ) {
         return null;
       }
@@ -128,12 +146,16 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
       raw.newCount = newCount;
       raw.modified = modified;
       raw.modifiedCount = modified;
+      raw.rebuild = rebuild;
+      raw.rebuildCount = rebuild;
       raw.unchanged = unchanged;
       raw.unchangedCount = unchanged;
-      raw.filesToProcess =
-        typeof raw.filesToProcess === "number" && raw.filesToProcess >= 0
-          ? raw.filesToProcess
-          : newCount + modified;
+      raw.filesToProcess = expectedFilesToProcess;
+      raw.outdatedPipelineCount =
+        typeof raw.outdatedPipelineCount === "number" &&
+        raw.outdatedPipelineCount >= 0
+          ? raw.outdatedPipelineCount
+          : 0;
       raw.collisions = Array.isArray(raw.collisions) ? raw.collisions : [];
 
       return raw as unknown as ScannerEvent;

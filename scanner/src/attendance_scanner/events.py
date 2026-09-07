@@ -56,8 +56,10 @@ class ScanPlanEvent(BaseEvent):
     total_images: int = Field(default=0, ge=0)
     new: int = Field(default=0, ge=0)
     modified: int = Field(default=0, ge=0)
+    rebuild: int = Field(default=0, ge=0)
     unchanged: int = Field(default=0, ge=0)
     files_to_process: int = Field(default=0, ge=0)
+    outdated_pipeline_count: int = Field(default=0, ge=0)
     collisions: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -80,11 +82,35 @@ class ScanPlanEvent(BaseEvent):
             elif "modified" not in data and "modifiedCount" in data:
                 data["modified"] = data["modifiedCount"]
 
+            if "rebuild" not in data and "rebuild_count" in data:
+                data["rebuild"] = data["rebuild_count"]
+            elif "rebuild" not in data and "rebuildCount" in data:
+                data["rebuild"] = data["rebuildCount"]
+
+            if "files_to_process" not in data and "filesToProcess" not in data:
+                counts = (data.get("new", 0), data.get("modified", 0), data.get("rebuild", 0))
+                if all(
+                    isinstance(value, (int, float)) and not isinstance(value, bool)
+                    for value in counts
+                ):
+                    data["files_to_process"] = sum(counts)
+
             if "unchanged" not in data and "unchanged_count" in data:
                 data["unchanged"] = data["unchanged_count"]
             elif "unchanged" not in data and "unchangedCount" in data:
                 data["unchanged"] = data["unchangedCount"]
         return data
+
+    @model_validator(mode="after")
+    def validate_process_count(self) -> "ScanPlanEvent":
+        """Reject a scan-plan event whose process count disagrees with counters."""
+        expected = self.new + self.modified + self.rebuild
+        if self.files_to_process != expected:
+            raise ValueError(
+                "files_to_process must equal new + modified + rebuild "
+                f"({expected}), got {self.files_to_process}"
+            )
+        return self
 
     @property
     def total_employees(self) -> int:
@@ -97,6 +123,10 @@ class ScanPlanEvent(BaseEvent):
     @property
     def modified_count(self) -> int:
         return self.modified
+
+    @property
+    def rebuild_count(self) -> int:
+        return self.rebuild
 
     @property
     def unchanged_count(self) -> int:
@@ -113,8 +143,10 @@ class ScanPlanEvent(BaseEvent):
                 total_images=plan.total_images,
                 new=plan.new,
                 modified=plan.modified,
+                rebuild=plan.rebuild,
                 unchanged=plan.unchanged,
                 files_to_process=plan.files_to_process,
+                outdated_pipeline_count=plan.outdated_pipeline_count,
                 collisions=list(plan.collisions),
                 timestamp=timestamp,
             )
@@ -125,8 +157,10 @@ class ScanPlanEvent(BaseEvent):
             total_images=plan.total_images,
             new=plan.new,
             modified=plan.modified,
+            rebuild=plan.rebuild,
             unchanged=plan.unchanged,
             files_to_process=plan.files_to_process,
+            outdated_pipeline_count=plan.outdated_pipeline_count,
             collisions=list(plan.collisions),
         )
 

@@ -21,6 +21,7 @@ export function App() {
     newFiles: 0,
     modifiedFiles: 0,
     unchangedFiles: 0,
+    rebuildFiles: 0,
   });
 
   // Batch progress state
@@ -45,6 +46,7 @@ export function App() {
           newFiles: 3,
           modifiedFiles: 1,
           unchangedFiles: 8,
+          rebuildFiles: 0,
         });
         setIsPlanning(false);
       }, 300);
@@ -55,6 +57,7 @@ export function App() {
         newFiles: 0,
         modifiedFiles: 0,
         unchangedFiles: 0,
+        rebuildFiles: 0,
       });
     }
   };
@@ -196,7 +199,11 @@ export function App() {
                   <BatchProgressCard
                     currentFile={currentFile}
                     processedCount={processedCount}
-                    totalCount={planStats.newFiles + planStats.modifiedFiles}
+                    totalCount={
+                      planStats.newFiles +
+                      planStats.modifiedFiles +
+                      (planStats.rebuildFiles ?? 0)
+                    }
                     successCount={successCount}
                     warningCount={warningCount}
                     failedCount={failedCount}

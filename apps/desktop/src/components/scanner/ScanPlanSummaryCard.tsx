@@ -25,6 +25,7 @@ export interface ScanPlanStats {
   newFiles: number;
   modifiedFiles: number;
   unchangedFiles: number;
+  rebuildFiles?: number;
   collisions?: string[];
 }
 
@@ -45,7 +46,8 @@ export function ScanPlanSummaryCard({
   onRefreshPlan,
   onStartScan,
 }: ScanPlanSummaryCardProps) {
-  const filesToProcess = stats.newFiles + stats.modifiedFiles;
+  const rebuildFiles = stats.rebuildFiles ?? 0;
+  const filesToProcess = stats.newFiles + stats.modifiedFiles + rebuildFiles;
 
   return (
     <Card className="border-border/80 flex flex-col justify-between h-full">
@@ -111,6 +113,16 @@ export function ScanPlanSummaryCard({
             </span>
             <Badge variant="warning" className="font-mono text-xs">
               {stats.modifiedFiles}
+            </Badge>
+          </div>
+
+          {/* Missing output files */}
+          <div className="flex items-center justify-between py-2 border-b border-border/40 text-xs">
+            <span className="text-sky-400 flex items-center gap-1.5 font-medium">
+              <RefreshCw className="w-3.5 h-3.5" /> Dựng lại (Rebuild):
+            </span>
+            <Badge variant="secondary" className="font-mono text-xs">
+              {rebuildFiles}
             </Badge>
           </div>
 

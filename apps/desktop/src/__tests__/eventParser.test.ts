@@ -50,6 +50,26 @@ describe("eventParser", () => {
     }
   });
 
+  it("rejects a scan_plan with inconsistent process counters", () => {
+    const json = JSON.stringify({
+      protocolVersion: PROTOCOL_VERSION,
+      type: "scan_plan",
+      timestamp: "2026-09-07T00:00:00Z",
+      inputRoot: "D:/ChamCong/all",
+      outputRoot: "D:/ChamCong/output",
+      employees: 1,
+      totalImages: 1,
+      new: 1,
+      modified: 0,
+      rebuild: 0,
+      unchanged: 0,
+      filesToProcess: 0,
+      collisions: [],
+    });
+
+    expect(parseScannerEvent(json)).toBeNull();
+  });
+
   it("parses valid file_started event", () => {
     const json = JSON.stringify({
       protocolVersion: PROTOCOL_VERSION,

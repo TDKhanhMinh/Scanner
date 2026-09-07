@@ -94,8 +94,10 @@ class ScanPlan(BaseContract):
     total_images: int = 0
     new: int = 0
     modified: int = 0
+    rebuild: int = 0
     unchanged: int = 0
     files_to_process: int = 0
+    outdated_pipeline_count: int = 0
     collisions: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -117,11 +119,35 @@ class ScanPlan(BaseContract):
             elif "modified" not in data and "modifiedCount" in data:
                 data["modified"] = data["modifiedCount"]
 
+            if "rebuild" not in data and "rebuild_count" in data:
+                data["rebuild"] = data["rebuild_count"]
+            elif "rebuild" not in data and "rebuildCount" in data:
+                data["rebuild"] = data["rebuildCount"]
+
+            if "files_to_process" not in data and "filesToProcess" not in data:
+                counts = (data.get("new", 0), data.get("modified", 0), data.get("rebuild", 0))
+                if all(
+                    isinstance(value, (int, float)) and not isinstance(value, bool)
+                    for value in counts
+                ):
+                    data["files_to_process"] = sum(counts)
+
             if "unchanged" not in data and "unchanged_count" in data:
                 data["unchanged"] = data["unchanged_count"]
             elif "unchanged" not in data and "unchangedCount" in data:
                 data["unchanged"] = data["unchangedCount"]
         return data
+
+    @model_validator(mode="after")
+    def validate_process_count(self) -> "ScanPlan":
+        """Keep the aggregate process count consistent with classifications."""
+        expected = self.new + self.modified + self.rebuild
+        if self.files_to_process != expected:
+            raise ValueError(
+                "files_to_process must equal new + modified + rebuild "
+                f"({expected}), got {self.files_to_process}"
+            )
+        return self
 
     @property
     def total_employees(self) -> int:
@@ -134,6 +160,10 @@ class ScanPlan(BaseContract):
     @property
     def modified_count(self) -> int:
         return self.modified
+
+    @property
+    def rebuild_count(self) -> int:
+        return self.rebuild
 
     @property
     def unchanged_count(self) -> int:
@@ -266,18 +296,40 @@ class DiscoveryResult(BaseContract):
     image_count: int = 0
     unsupported_count: int = 0
     collisions: List[str] = Field(default_factory=list)
+    outdated_pipeline_count: int = 0
+
+    @property
+    def files_to_process(self) -> List[DiscoveredFile]:
+        """Return the exact discovered files selected for processing."""
+        processable = {
+            FileClassification.NEW,
+            FileClassification.MODIFIED,
+            FileClassification.REBUILD,
+        }
+        return [file for file in self.files if file.classification in processable]
 
     def to_scan_plan(self, output_root: Optional[str] = None) -> ScanPlan:
-        """Convert discovery result into an initial ScanPlan."""
+        """Convert discovery result, including classifications, into a ScanPlan."""
         out_root = output_root or f"{self.input_root}_pdf"
+        counts = {
+            classification: sum(1 for file in self.files if file.classification == classification)
+            for classification in FileClassification
+        }
+        files_to_process = (
+            counts[FileClassification.NEW]
+            + counts[FileClassification.MODIFIED]
+            + counts[FileClassification.REBUILD]
+        )
         return ScanPlan(
             input_root=self.input_root,
             output_root=out_root,
             employees=self.employee_count,
             total_images=self.image_count,
-            new=self.image_count,
-            modified=0,
-            unchanged=0,
-            files_to_process=self.image_count,
+            new=counts[FileClassification.NEW],
+            modified=counts[FileClassification.MODIFIED],
+            rebuild=counts[FileClassification.REBUILD],
+            unchanged=counts[FileClassification.UNCHANGED],
+            files_to_process=files_to_process,
+            outdated_pipeline_count=self.outdated_pipeline_count,
             collisions=list(self.collisions),
         )

@@ -4,14 +4,25 @@ import re
 import stat
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Set, Union
+from typing import List, Optional, Set, Union
 
 from attendance_scanner.contracts import (
     DiscoveredFile,
     DiscoveryResult,
     FileClassification,
+    FileProcessingStatus,
     InvalidInputRootError,
+    ScanPlan,
 )
+from attendance_scanner.fingerprint import compute_sha256
+from attendance_scanner.state import Manifest, ManifestEntry
+
+DEFAULT_PIPELINE_VERSION = "0.1.0"
+
+_COMPLETED_STATUSES = {
+    FileProcessingStatus.SUCCESS,
+    FileProcessingStatus.WARNING,
+}
 
 # Supported image file extensions (case-insensitive)
 SUPPORTED_EXTENSIONS: Set[str] = {".jpg", ".jpeg", ".png", ".webp"}
@@ -172,3 +183,126 @@ def discover_employee_folders(input_root: Union[str, Path]) -> DiscoveryResult:
         unsupported_count=unsupported_count,
         collisions=all_collisions,
     )
+
+
+def _output_paths_exist(output_root: Union[str, Path], entry: ManifestEntry) -> bool:
+    """Return whether every artifact recorded by an entry still exists as a file.
+
+    Manifest paths are treated as relative paths rooted at ``output_root``. Any
+    absolute or escaping path is considered missing so a corrupt/stale manifest
+    cannot make the planner accept an output outside the selected directory.
+    """
+    recorded_paths = list(entry.output_relative_paths)
+    if not recorded_paths and entry.output_relative_path:
+        recorded_paths = [entry.output_relative_path]
+    if not recorded_paths:
+        return False
+
+    root = Path(output_root).resolve()
+    for relative_path in recorded_paths:
+        normalized = str(relative_path).replace("\\", "/")
+        candidate = (root / Path(normalized)).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return False
+        if not candidate.is_file():
+            return False
+    return True
+
+
+def _classify_file(
+    file: DiscoveredFile,
+    entry: Optional[ManifestEntry],
+    output_root: Union[str, Path],
+    manifest: Manifest,
+) -> FileClassification:
+    """Classify one discovered file according to the AS-11 state rules."""
+    if entry is None:
+        return FileClassification.NEW
+
+    output_exists = _output_paths_exist(output_root, entry)
+    if not output_exists:
+        return FileClassification.REBUILD
+
+    # Warning means the file was exported successfully with a non-fatal scan
+    # warning. All other non-completed statuses are retryable after an
+    # interrupted/failed batch. If an artifact exists, modified is the most
+    # useful retry classification; if it did not exist, the rule above returned
+    # rebuild.
+    if entry.status not in _COMPLETED_STATUSES:
+        return FileClassification.MODIFIED
+
+    if entry.size == file.size and entry.mtime_ns == file.mtime_ns:
+        return FileClassification.UNCHANGED
+
+    # Metadata changed: hash the source before deciding whether it needs work.
+    current_hash = compute_sha256(file.absolute_path)
+    file.sha256 = current_hash
+    if entry.sha256 is not None and current_hash == entry.sha256:
+        # Keep the successful artifact and advance only the source metadata. The
+        # caller may persist this in-memory update atomically after planning.
+        entry.size = file.size
+        entry.mtime_ns = file.mtime_ns
+        entry.sha256 = current_hash
+        manifest.set_entry(entry)
+        return FileClassification.UNCHANGED
+
+    return FileClassification.MODIFIED
+
+
+def classify_discovered_files(
+    discovery: DiscoveryResult,
+    manifest: Manifest,
+    output_root: Optional[Union[str, Path]] = None,
+    pipeline_version: str = DEFAULT_PIPELINE_VERSION,
+) -> DiscoveryResult:
+    """Apply manifest-backed incremental classifications to a discovery result.
+
+    The returned object is the same discovery result with each file annotated by
+    ``new``, ``modified``, ``unchanged`` or ``rebuild``. New files are not added
+    to the manifest here; their state is committed only after a later batch
+    successfully exports them. Existing manifest entries for deleted sources are
+    intentionally retained and never cause PDF deletion in the MVP.
+
+    ``pipeline_version`` is counted through ``outdated_pipeline_count`` but does
+    not force reprocessing when the source and all recorded outputs are unchanged.
+    """
+    effective_output_root = output_root or manifest.output_root
+    outdated_count = 0
+
+    for file in discovery.files:
+        entry = manifest.get_entry(file.relative_path)
+        if entry is not None and entry.pipeline_version != pipeline_version:
+            outdated_count += 1
+
+        file.classification = _classify_file(
+            file=file,
+            entry=entry,
+            output_root=effective_output_root,
+            manifest=manifest,
+        )
+
+    discovery.outdated_pipeline_count = outdated_count
+    return discovery
+
+
+def build_incremental_scan_plan(
+    discovery: DiscoveryResult,
+    manifest: Manifest,
+    output_root: Optional[Union[str, Path]] = None,
+    pipeline_version: str = DEFAULT_PIPELINE_VERSION,
+) -> ScanPlan:
+    """Classify a discovery inventory and return its aggregate scan plan.
+
+    The exact process set remains available as ``discovery.files_to_process``;
+    the returned ``ScanPlan`` carries the counters used by JSONL/UI consumers.
+    """
+    classify_discovered_files(
+        discovery=discovery,
+        manifest=manifest,
+        output_root=output_root,
+        pipeline_version=pipeline_version,
+    )
+    effective_output_root = output_root or manifest.output_root
+    return discovery.to_scan_plan(output_root=str(effective_output_root))
