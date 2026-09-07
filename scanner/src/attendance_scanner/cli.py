@@ -4,17 +4,24 @@ import argparse
 import sys
 from typing import List, Optional
 
-from attendance_scanner.contracts import InvalidInputRootError
+from attendance_scanner.batch import run_batch
+from attendance_scanner.contracts import InvalidInputRootError, StateError
 from attendance_scanner.discovery import (
     build_incremental_scan_plan,
     discover_employee_folders,
 )
 from attendance_scanner.events import (
-    ScanCompletedEvent,
+    BaseEvent,
     ScanPlanEvent,
     serialize_event,
 )
 from attendance_scanner.state import ManifestStore
+
+
+def emit_jsonl_event(event: BaseEvent) -> None:
+    """Write one scanner event to stdout without mixing human logs into JSONL."""
+    sys.stdout.write(serialize_event(event) + "\n")
+    sys.stdout.flush()
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -115,8 +122,9 @@ def handle_plan(args: argparse.Namespace) -> int:
         sys.stdout.write(serialize_event(event) + "\n")
         sys.stdout.flush()
         return 0
-    except InvalidInputRootError as exc:
-        sys.stderr.write(f"Error: {exc.message}\n")
+    except (InvalidInputRootError, StateError, ValueError) as exc:
+        message = exc.message if isinstance(exc, (InvalidInputRootError, StateError)) else str(exc)
+        sys.stderr.write(f"Error: {message}\n")
         sys.stderr.flush()
         return 1
 
@@ -139,19 +147,20 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
         plan_event = ScanPlanEvent.from_plan(plan)
         sys.stdout.write(serialize_event(plan_event) + "\n")
 
-        complete_event = ScanCompletedEvent(
-            total_processed=0,
-            success=0,
-            failed=0,
-            warning=0,
-            skipped=0,
-            duration_ms=0,
+        result = run_batch(
+            discovery=discovery,
+            manifest=manifest,
+            output_root=effective_output_root,
+            mode=args.mode,
+            workers=args.workers,
+            manifest_store=store,
+            emit=emit_jsonl_event,
         )
-        sys.stdout.write(serialize_event(complete_event) + "\n")
         sys.stdout.flush()
-        return 0
-    except InvalidInputRootError as exc:
-        sys.stderr.write(f"Error: {exc.message}\n")
+        return result.exit_code
+    except (InvalidInputRootError, StateError, ValueError) as exc:
+        message = exc.message if isinstance(exc, (InvalidInputRootError, StateError)) else str(exc)
+        sys.stderr.write(f"Error: {message}\n")
         sys.stderr.flush()
         return 1
 

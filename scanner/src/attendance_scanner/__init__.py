@@ -1,5 +1,11 @@
 """Attendance Scanner Engine - Local document scanner for employee attendance sheets."""
 
+from attendance_scanner.batch import (
+    BatchRunResult,
+    clamp_worker_count,
+    default_worker_count,
+    run_batch,
+)
 from attendance_scanner.contracts import (
     PROTOCOL_VERSION,
     BatchSummary,
@@ -103,6 +109,10 @@ __all__ = [
     "ScanBatchRequest",
     "FileResult",
     "BatchSummary",
+    "BatchRunResult",
+    "run_batch",
+    "default_worker_count",
+    "clamp_worker_count",
     "discover_employee_folders",
     "classify_discovered_files",
     "build_incremental_scan_plan",
