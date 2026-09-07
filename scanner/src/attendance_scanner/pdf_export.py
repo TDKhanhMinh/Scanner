@@ -131,6 +131,7 @@ def export_single_page_pdf(
             resolution=cfg.dpi,
             quality=cfg.quality,
             optimize=cfg.optimize,
+            title=dest.stem,
         )
 
         # 4. Verify temporary file was created and has non-zero size

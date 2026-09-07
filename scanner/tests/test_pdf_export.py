@@ -223,3 +223,15 @@ def test_export_single_page_pdf_invalid_input_raises_pdf_write_error(tmp_path: P
     with pytest.raises(PdfWriteError) as exc_info:
         export_single_page_pdf(12345, target_pdf)  # type: ignore
     assert exc_info.value.code == ScannerErrorCode.PDF_WRITE_FAILED
+
+
+def test_export_single_page_pdf_title_metadata(tmp_path: Path):
+    """Verify PDF Title metadata matches destination filename rather than temp file."""
+    target_pdf = tmp_path / "final_report.pdf"
+    arr = np.full((100, 100), 200, dtype=np.uint8)
+
+    export_single_page_pdf(arr, target_pdf)
+
+    content = target_pdf.read_bytes()
+    assert "final_report".encode("utf-16-be") in content
+    assert b".tmp" not in content
