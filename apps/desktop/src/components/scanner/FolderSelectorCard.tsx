@@ -11,6 +11,7 @@ import {
 export interface FolderSelectorCardProps {
   inputPath: string;
   outputPath: string;
+  onInputChange?: (path: string) => void;
   onSelectInputFolder: () => void;
   disabled?: boolean;
 }
@@ -18,6 +19,7 @@ export interface FolderSelectorCardProps {
 export function FolderSelectorCard({
   inputPath,
   outputPath,
+  onInputChange,
   onSelectInputFolder,
   disabled = false,
 }: FolderSelectorCardProps) {
@@ -45,24 +47,23 @@ export function FolderSelectorCard({
       <CardContent className="space-y-4">
         {/* Input folder selector row */}
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 min-w-0 bg-secondary/50 border border-border rounded-xl px-3.5 py-2.5 text-sm text-foreground font-mono truncate flex items-center gap-2">
+          <div className="flex-1 min-w-0 bg-secondary/50 border border-border rounded-xl px-3.5 py-2 text-sm text-foreground font-mono flex items-center gap-2 focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent transition-all">
             <FolderOpen className="w-4 h-4 text-muted-foreground shrink-0" />
-            {inputPath ? (
-              <span className="truncate" title={inputPath}>
-                {inputPath}
-              </span>
-            ) : (
-              <span className="text-muted-foreground font-sans truncate">
-                Chưa chọn thư mục (ví dụ: D:\ChamCong\all)...
-              </span>
-            )}
+            <input
+              type="text"
+              value={inputPath}
+              onChange={(e) => onInputChange?.(e.target.value)}
+              placeholder="Nhập hoặc chọn đường dẫn thư mục ảnh nhân viên..."
+              disabled={disabled}
+              className="flex-1 min-w-0 bg-transparent text-sm text-foreground font-mono focus:outline-none placeholder:text-muted-foreground/60 placeholder:font-sans"
+            />
           </div>
 
           <Button
             type="button"
             onClick={onSelectInputFolder}
             disabled={disabled}
-            className="shrink-0 w-full sm:w-auto"
+            className="shrink-0 w-full sm:w-auto min-h-[44px]"
             variant="default"
           >
             <FolderOpen className="w-4 h-4 mr-2" />
@@ -84,7 +85,7 @@ export function FolderSelectorCard({
         ) : (
           <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 flex items-start gap-2.5 text-xs text-amber-300">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <span>Vui lòng chọn thư mục gốc để hệ thống tự động phân tích scan plan.</span>
+            <span>Vui lòng nhập hoặc chọn thư mục gốc để hệ thống tự động phân tích scan plan.</span>
           </div>
         )}
       </CardContent>
@@ -93,7 +94,7 @@ export function FolderSelectorCard({
 }
 
 // --- Hybrid Responsive Summary ---
-// mobile  (default / sm):  layout xếp dọc, nút "Chọn thư mục" full width min-h-[44px]
+// mobile  (default / sm):  layout xếp dọc, ô nhập path và nút "Chọn thư mục" full width min-h-[44px]
 // tablet  (md / lg):       hàng ngang linh hoạt flex-row, input box co giãn min-w-0
 // desktop (xl / 2xl):      đường dẫn output rõ ràng, hover effect mượt mà trên nút chọn
-// Interaction:             touch target >= 44px, tooltip path đầy đủ qua title attribute
+// Interaction:             touch target >= 44px, hỗ trợ cả gõ/paste trực tiếp và click dialog

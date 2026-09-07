@@ -2,11 +2,13 @@
 
 from enum import Enum
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
 class ScanMode(str, Enum):
     """Scan enhancement filter mode."""
+
     GRAY = "gray"
     BW = "bw"
     COLOR = "color"
@@ -14,6 +16,7 @@ class ScanMode(str, Enum):
 
 class FileState(str, Enum):
     """Classification state for discovered files."""
+
     NEW = "new"
     UNCHANGED = "unchanged"
     MODIFIED = "modified"
@@ -22,6 +25,7 @@ class FileState(str, Enum):
 
 class DiscoveredFile(BaseModel):
     """Metadata of a discovered image file."""
+
     employee_name: str
     file_name: str
     relative_path: str
@@ -35,6 +39,7 @@ class DiscoveredFile(BaseModel):
 
 class ScanPlan(BaseModel):
     """Overall summary plan before executing scan batch."""
+
     input_root: str
     output_root: str
     total_employees: int = 0

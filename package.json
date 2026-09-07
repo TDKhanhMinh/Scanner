@@ -7,7 +7,15 @@
     "dev:desktop": "npm --prefix apps/desktop run tauri dev",
     "build:desktop": "npm --prefix apps/desktop run build",
     "test:desktop": "npm --prefix apps/desktop test",
-    "typecheck:desktop": "npm --prefix apps/desktop run typecheck"
+    "typecheck:desktop": "npm --prefix apps/desktop run typecheck",
+    "lint:desktop": "npm --prefix apps/desktop run lint",
+    "lint:python": "scanner\\.venv\\Scripts\\ruff check scanner",
+    "format:python": "scanner\\.venv\\Scripts\\ruff format --check scanner",
+    "typecheck:python": "scanner\\.venv\\Scripts\\mypy scanner\\src",
+    "test:python": "scanner\\.venv\\Scripts\\pytest scanner\\tests",
+    "lint": "npm run lint:desktop && npm run lint:python",
+    "format": "npm run format:python",
+    "test": "npm run test:desktop && npm run test:python"
   },
   "workspaces": [
     "apps/desktop"

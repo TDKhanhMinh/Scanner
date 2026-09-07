@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "attendance-scanner"
 version = "0.1.0"
 description = "High-performance offline document scanner engine for attendance records"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.14"
 authors = [
     { name = "Attendance Scanner Team" }
 ]
@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "wheel",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "mypy>=1.9.0",
@@ -38,3 +39,19 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+warn_return_any = true
+plugins = ["pydantic.mypy"]
+exclude = ["build/", "dist/", ".venv/"]

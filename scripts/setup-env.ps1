@@ -11,7 +11,7 @@ if (!(Test-Path "scanner\.venv")) {
 }
 
 $venvPython = "scanner\.venv\Scripts\python.exe"
-& $venvPython -m pip install --upgrade pip
+& $venvPython -m pip install --upgrade pip setuptools wheel
 & $venvPython -m pip install -e "scanner[dev]"
 
 Write-Host "=== 2. Setting up Desktop dependencies in apps/desktop ===" -ForegroundColor Cyan

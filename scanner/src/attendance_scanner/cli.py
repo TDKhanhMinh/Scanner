@@ -13,7 +13,8 @@ def create_parser() -> argparse.ArgumentParser:
         description="Attendance Scanner Desktop engine sidecar CLI.",
     )
     parser.add_argument(
-        "-v", "--version",
+        "-v",
+        "--version",
         action="version",
         version="attendance-scanner 0.1.0",
     )
@@ -31,13 +32,15 @@ def create_parser() -> argparse.ArgumentParser:
         help="Analyze input folder and output incremental scan plan (JSONL)",
     )
     plan_parser.add_argument(
-        "--input", "-i",
+        "--input",
+        "-i",
         required=True,
         type=str,
         help="Path to root employee images folder",
     )
     plan_parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         required=False,
         type=str,
         default=None,
@@ -50,26 +53,30 @@ def create_parser() -> argparse.ArgumentParser:
         help="Execute scan pipeline and export PDFs (streams JSONL)",
     )
     scan_parser.add_argument(
-        "--input", "-i",
+        "--input",
+        "-i",
         required=True,
         type=str,
         help="Path to root employee images folder",
     )
     scan_parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         required=False,
         type=str,
         default=None,
         help="Path to output PDF folder (defaults to sibling <input>_pdf)",
     )
     scan_parser.add_argument(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         choices=["gray", "bw", "color"],
         default="gray",
         help="Enhancement mode (default: gray)",
     )
     scan_parser.add_argument(
-        "--workers", "-w",
+        "--workers",
+        "-w",
         type=int,
         default=3,
         help="Number of concurrent image processing workers (1-4, default: 3)",

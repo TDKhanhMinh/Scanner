@@ -6,8 +6,8 @@ Core Python scanner engine running as a local sidecar for the Attendance Scanner
 
 ```bash
 # Plan scan without processing
-python -m attendance_scanner.cli plan --input "D:\ChamCong\all"
+python -m attendance_scanner.cli plan --input "<path_to_input_images>"
 
 # Run batch processing
-python -m attendance_scanner.cli scan-batch --input "D:\ChamCong\all" --output "D:\ChamCong\all_pdf" --mode gray --workers 3
+python -m attendance_scanner.cli scan-batch --input "<path_to_input_images>" --output "<path_to_output_pdf>" --mode gray --workers 3
 ```

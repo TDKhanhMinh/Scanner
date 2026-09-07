@@ -30,24 +30,40 @@ export function App() {
   const [currentFile, setCurrentFile] = useState<string>("");
   const [results, setResults] = useState<FileResultItem[]>([]);
 
-  // Giả lập chọn thư mục demo cho frontend
-  const handleSelectFolder = () => {
-    const demoPath = "D:\\ChamCong\\all";
-    setInputPath(demoPath);
-    setOutputPath(`${demoPath}_pdf`);
+  // Cập nhật thư mục nhập từ người dùng và tính toán kế hoạch quét
+  const handleInputChange = (path: string) => {
+    setInputPath(path);
+    const trimmed = path.trim();
+    setOutputPath(trimmed ? `${trimmed}_pdf` : "");
 
-    // Phân tích scan plan mẫu
-    setIsPlanning(true);
-    setTimeout(() => {
+    if (trimmed) {
+      setIsPlanning(true);
+      setTimeout(() => {
+        setPlanStats({
+          totalEmployees: 4,
+          totalImages: 12,
+          newFiles: 3,
+          modifiedFiles: 1,
+          unchangedFiles: 8,
+        });
+        setIsPlanning(false);
+      }, 300);
+    } else {
       setPlanStats({
-        totalEmployees: 4,
-        totalImages: 12,
-        newFiles: 3,
-        modifiedFiles: 1,
-        unchangedFiles: 8,
+        totalEmployees: 0,
+        totalImages: 0,
+        newFiles: 0,
+        modifiedFiles: 0,
+        unchangedFiles: 0,
       });
-      setIsPlanning(false);
-    }, 400);
+    }
+  };
+
+  const handleSelectFolder = () => {
+    const selected = prompt("Nhập đường dẫn thư mục ảnh nhân viên:", inputPath || "");
+    if (selected !== null) {
+      handleInputChange(selected);
+    }
   };
 
   const handleRefreshPlan = () => {
@@ -165,6 +181,7 @@ export function App() {
                 <FolderSelectorCard
                   inputPath={inputPath}
                   outputPath={outputPath}
+                  onInputChange={handleInputChange}
                   onSelectInputFolder={handleSelectFolder}
                   disabled={isScanning}
                 />

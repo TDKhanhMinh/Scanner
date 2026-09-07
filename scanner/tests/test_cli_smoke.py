@@ -1,9 +1,9 @@
 """Smoke tests for attendance scanner CLI."""
 
 import json
-from io import StringIO
-from unittest.mock import patch
+
 import pytest
+
 from attendance_scanner.cli import create_parser, main
 
 

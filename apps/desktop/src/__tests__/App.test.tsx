@@ -26,10 +26,11 @@ describe("App with shadcn UI tests", () => {
     expect(screen.getByText("Success Badge")).toBeDefined();
   });
 
-  it("simulates folder selection demo in App", () => {
+  it("supports direct user typing into folder path input", () => {
     render(<App />);
-    const selectBtn = screen.getByRole("button", { name: /Chọn thư mục/i });
-    fireEvent.click(selectBtn);
-    expect(screen.getAllByText(/D:\\ChamCong\\all/i).length).toBeGreaterThan(0);
+    const input = screen.getByPlaceholderText(/Nhập hoặc chọn đường dẫn thư mục/i);
+    fireEvent.change(input, { target: { value: "C:\\attendance\\custom_folder" } });
+    expect(screen.getAllByText(/C:\\attendance\\custom_folder/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/C:\\attendance\\custom_folder_pdf/i).length).toBeGreaterThan(0);
   });
 });
