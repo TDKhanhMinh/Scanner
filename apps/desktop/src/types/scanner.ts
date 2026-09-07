@@ -44,6 +44,17 @@ export type ScannerErrorCode =
   | "OUTPUT_COLLISION"
   | "UNEXPECTED_ERROR";
 
+export const VALID_SCANNER_WARNING_CODES = new Set<string>([
+  "DOCUMENT_NOT_DETECTED",
+  "IMAGE_DOWNSCALED",
+  "WARP_FALLBACK",
+]);
+
+export type ScannerWarningCode =
+  | "DOCUMENT_NOT_DETECTED"
+  | "IMAGE_DOWNSCALED"
+  | "WARP_FALLBACK";
+
 export interface DiscoveredFile {
   employeeName: string;
   fileName: string;

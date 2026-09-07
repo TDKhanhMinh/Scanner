@@ -54,6 +54,14 @@ class ScannerErrorCode(str, Enum):
     UNEXPECTED_ERROR = "UNEXPECTED_ERROR"
 
 
+class ScannerWarningCode(str, Enum):
+    """Canonical warning codes for scanner operations."""
+
+    DOCUMENT_NOT_DETECTED = "DOCUMENT_NOT_DETECTED"
+    IMAGE_DOWNSCALED = "IMAGE_DOWNSCALED"
+    WARP_FALLBACK = "WARP_FALLBACK"
+
+
 class BaseContract(BaseModel):
     """Base contract model supporting camelCase aliases for interoperability."""
 

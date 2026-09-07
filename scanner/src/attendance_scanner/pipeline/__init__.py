@@ -18,8 +18,16 @@ from attendance_scanner.pipeline.load import (
     LoadedImageMetadata,
     load_image,
 )
+from attendance_scanner.pipeline.orchestrator import (
+    PipelineConfig,
+    ResizeConfig,
+    SingleScanDiagnostics,
+    SingleScanResult,
+    scan_one,
+)
 from attendance_scanner.pipeline.perspective import (
     DegenerateCornersError,
+    PerspectiveConfig,
     WarpedDocument,
     compute_destination_dimensions,
     warp_perspective,
@@ -34,6 +42,7 @@ __all__ = [
     "detect_document_boundary",
     "order_corners",
     "DegenerateCornersError",
+    "PerspectiveConfig",
     "WarpedDocument",
     "compute_destination_dimensions",
     "warp_perspective",
@@ -42,4 +51,9 @@ __all__ = [
     "enhance_gray",
     "enhance_bw",
     "enhance_color",
+    "ResizeConfig",
+    "PipelineConfig",
+    "SingleScanDiagnostics",
+    "SingleScanResult",
+    "scan_one",
 ]
