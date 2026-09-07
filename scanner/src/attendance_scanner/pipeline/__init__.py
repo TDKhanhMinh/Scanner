@@ -6,6 +6,13 @@ from attendance_scanner.pipeline.detect import (
     detect_document_boundary,
     order_corners,
 )
+from attendance_scanner.pipeline.enhance import (
+    EnhancementConfig,
+    enhance_bw,
+    enhance_color,
+    enhance_gray,
+    enhance_image,
+)
 from attendance_scanner.pipeline.load import (
     LoadedImage,
     LoadedImageMetadata,
@@ -30,4 +37,9 @@ __all__ = [
     "WarpedDocument",
     "compute_destination_dimensions",
     "warp_perspective",
+    "EnhancementConfig",
+    "enhance_image",
+    "enhance_gray",
+    "enhance_bw",
+    "enhance_color",
 ]
