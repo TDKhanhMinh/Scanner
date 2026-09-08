@@ -12,6 +12,7 @@ from attendance_scanner.pipeline.detect import detect_document_boundary
 from attendance_scanner.pipeline.load import load_image
 from attendance_scanner.pipeline.perspective import (
     DegenerateCornersError,
+    PerspectiveConfig,
     WarpedDocument,
     compute_destination_dimensions,
     warp_perspective,
@@ -44,6 +45,23 @@ def test_compute_destination_dimensions_trapezoid_and_natural_aspect_ratio():
     w, h = compute_destination_dimensions(corners)
     assert w == 341
     assert h == 221
+
+
+def test_warp_perspective_applies_configured_target_aspect_ratio():
+    """A configured template ratio normalizes perspective output page geometry."""
+    image = np.full((500, 700, 3), 240, dtype=np.uint8)
+    corners = np.array(
+        [[100.0, 80.0], [600.0, 90.0], [580.0, 420.0], [110.0, 410.0]],
+        dtype=np.float32,
+    )
+
+    warped = warp_perspective(
+        image,
+        corners,
+        PerspectiveConfig(target_aspect_ratio=2**0.5),
+    )
+
+    assert abs((warped.width / warped.height) - 2**0.5) < 0.01
 
 
 def test_warp_perspective_synthetic_grid_rectification():

@@ -37,7 +37,9 @@ class DetectionConfig(BaseContract):
     paper_min_threshold: int = Field(default=100, ge=0, le=255)
     paper_max_threshold: int = Field(default=230, ge=0, le=255)
     paper_morph_kernel_size: int = Field(default=61, ge=9, le=201)
-    paper_candidate_score_bonus: float = Field(default=1.35, ge=1.0, le=1.5)
+    paper_candidate_score_bonus: float = Field(default=1.0, ge=1.0, le=1.5)
+    paper_min_solidity: float = Field(default=0.75, ge=0.5, le=1.0)
+    paper_min_ink_ratio: float = Field(default=0.01, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_threshold_relationships(self) -> "DetectionConfig":
@@ -297,9 +299,6 @@ def detect_document_boundary(
             otsu_contours, _ = cv2.findContours(otsu_thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
             contour_list.extend(otsu_contours)
 
-        if not contour_list:
-            return None
-
         # 5. Sort contours by area descending
         contour_list.sort(key=cv2.contourArea, reverse=True)
 
@@ -313,7 +312,7 @@ def detect_document_boundary(
         # table border may produce a stronger edge than the actual sheet edge.
         paper_threshold = float(
             np.clip(
-                np.percentile(blurred, config.paper_brightness_percentile),
+                np.percentile(blurred, config.paper_brightness_percentile) - 1.0,
                 config.paper_min_threshold,
                 config.paper_max_threshold,
             )
@@ -339,9 +338,41 @@ def detect_document_boundary(
             if paper_area > max_area:
                 continue
             paper_hull = cv2.convexHull(paper_contour)
+            paper_hull_area = float(cv2.contourArea(paper_hull))
+            paper_solidity = paper_area / max(paper_hull_area, 1e-6)
+            if paper_solidity < config.paper_min_solidity:
+                continue
+            paper_region_mask = np.zeros_like(gray, dtype=np.uint8)
+            cv2.drawContours(paper_region_mask, [paper_contour], -1, 255, -1)
+            paper_ink_ratio = float(
+                ((gray < config.paper_min_threshold) & (paper_region_mask > 0)).sum()
+                / max((paper_region_mask > 0).sum(), 1)
+            )
+            if paper_ink_ratio < config.paper_min_ink_ratio:
+                continue
             paper_perimeter = cv2.arcLength(paper_hull, True)
             if paper_perimeter < 1e-6:
                 continue
+            min_rect = cv2.boxPoints(cv2.minAreaRect(paper_contour)).astype(np.float32)
+            min_rect[:, 0] = np.clip(min_rect[:, 0], 0.0, float(det_w - 1))
+            min_rect[:, 1] = np.clip(min_rect[:, 1], 0.0, float(det_h - 1))
+            min_rect = order_corners(min_rect)
+            min_rect_valid, min_rect_conf, min_rect_diag = _validate_quadrilateral(
+                min_rect, det_w, det_h, config
+            )
+            if min_rect_valid:
+                min_rect_area_ratio = float(cv2.contourArea(min_rect) / img_area)
+                min_rect_diag = {
+                    **min_rect_diag,
+                        "candidate_source": "paper_min_area_rect",
+                        "paper_threshold": paper_threshold,
+                        "paper_solidity": paper_solidity,
+                        "paper_ink_ratio": paper_ink_ratio,
+                }
+                min_rect_score = min_rect_conf * (0.6 + 0.4 * min_rect_area_ratio)
+                candidates.append(
+                    (min_rect_score, min_rect, min_rect_area_ratio, min_rect_diag)
+                )
             for eps_ratio in (0.02, 0.03, 0.04, 0.05, 0.06, 0.08):
                 paper_approx = cv2.approxPolyDP(
                     paper_hull, eps_ratio * paper_perimeter, True
@@ -358,6 +389,8 @@ def detect_document_boundary(
                         **diag,
                         "candidate_source": "paper_mask",
                         "paper_threshold": paper_threshold,
+                        "paper_solidity": paper_solidity,
+                        "paper_ink_ratio": paper_ink_ratio,
                     }
                     score = (
                         conf

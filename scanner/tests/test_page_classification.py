@@ -41,6 +41,24 @@ def _write_day_grid(path: Path, columns: int, *, skew: bool = False) -> None:
     Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)).save(path)
 
 
+def _write_day_grid_rows(path: Path, rows: int) -> None:
+    """Create a grid whose page identity is carried by horizontal day rows."""
+    image = np.full((800, 600, 3), 220, dtype=np.uint8)
+    paper = np.array([[50, 40], [550, 40], [550, 760], [50, 760]], dtype=np.int32)
+    cv2.fillConvexPoly(image, paper, (245, 245, 245))
+    table_left, table_right = 100, 500
+    table_top, table_bottom = 100, 700
+    cv2.rectangle(image, (table_left, table_top), (table_right, table_bottom), (40, 40, 40), 3)
+    for index in range(1, 5):
+        x = round(table_left + (table_right - table_left) * index / 5)
+        cv2.line(image, (x, table_top), (x, table_bottom), (40, 40, 40), 2)
+    for index in range(1, rows):
+        y = round(table_top + (table_bottom - table_top) * index / rows)
+        cv2.line(image, (table_left, y), (table_right, y), (40, 40, 40), 2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)).save(path)
+
+
 @pytest.mark.parametrize(
     ("columns", "expected_type", "expected_order"),
     [
@@ -74,6 +92,29 @@ def test_perspective_skew_is_classified_after_alignment_like_input(tmp_path: Pat
 
     assert identity.page_type == PageType.SECOND_HALF
     assert identity.page_order == 2
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected_type", "expected_order"),
+    [
+        (21, PageType.FIRST_HALF, 1),
+        (10, PageType.SECOND_HALF, 2),
+    ],
+)
+def test_classifies_page_by_horizontal_day_rows(
+    tmp_path: Path,
+    rows: int,
+    expected_type: PageType,
+    expected_order: int,
+):
+    path = tmp_path / f"rows-{rows}.png"
+    _write_day_grid_rows(path, rows)
+
+    identity = classify_page(load_image(path))
+
+    assert identity.page_type == expected_type
+    assert identity.page_order == expected_order
+    assert identity.diagnostics["detectedAxis"] == "horizontal"
 
 
 def test_unknown_template_returns_unknown_without_fake_order(tmp_path: Path):

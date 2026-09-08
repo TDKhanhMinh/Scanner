@@ -18,7 +18,7 @@ from attendance_scanner.contracts import (
 
 
 class PageClassificationConfig(BaseContract):
-    """Thresholds for the current attendance form day-column layout."""
+    """Thresholds for the current attendance form day-grid layout."""
 
     first_half_columns: int = Field(default=21, ge=2, le=64)
     second_half_columns: int = Field(default=10, ge=2, le=64)
@@ -140,8 +140,8 @@ def classify_page(
 ) -> PageIdentity:
     """Classify a processed/aligned attendance page without using its filename.
 
-    The current template exposes two stable layout signatures: a 21-column
-    first-half day grid and a 10-column second-half day grid. Any weak, low-margin,
+    The current template exposes two stable layout signatures: a 21-row
+    first-half day grid and a 10-row second-half day grid. Any weak, low-margin,
     or unsupported layout returns UNKNOWN so grouped export can require review.
     """
     cfg = config or PageClassificationConfig()

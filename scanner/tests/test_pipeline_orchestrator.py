@@ -310,7 +310,7 @@ def test_scan_one_mocked_detector_isolation_found():
         result = scan_one(bgr, mode=ScanMode.GRAY)
 
         mock_detect.assert_called_once()
-        mock_warp.assert_called_once()
+        assert mock_warp.call_count == 2
         assert result.document_detected is True
         assert result.diagnostics.document_detected is True
         assert result.warning_codes == []
@@ -318,6 +318,42 @@ def test_scan_one_mocked_detector_isolation_found():
         assert result.diagnostics.warning is None
         assert result.output_width == 380
         assert result.output_height == 280
+
+
+def test_scan_one_normalizes_detected_portrait_output_to_landscape():
+    """A detected portrait capture is rotated without changing pixel content mode."""
+    bgr = np.full((500, 300, 3), 200, dtype=np.uint8)
+    corners_list = [(10.0, 10.0), (290.0, 10.0), (290.0, 490.0), (10.0, 490.0)]
+    dummy_corners = np.array(corners_list, dtype=np.float32)
+    fake_detection = DetectionResult(
+        corners=corners_list,
+        confidence=0.95,
+        area_ratio=0.85,
+        scale_factor=1.0,
+    )
+    fake_warped = WarpedDocument(
+        image=np.full((500, 300, 3), 220, dtype=np.uint8),
+        width=300,
+        height=500,
+        transform_matrix=np.eye(3, dtype=np.float64),
+        source_corners=dummy_corners,
+    )
+
+    with (
+        patch(
+            "attendance_scanner.pipeline.orchestrator.detect_document_boundary",
+            return_value=fake_detection,
+        ),
+        patch(
+            "attendance_scanner.pipeline.orchestrator.warp_perspective",
+            return_value=fake_warped,
+        ),
+    ):
+        result = scan_one(bgr, mode=ScanMode.GRAY)
+
+    assert result.output_width == 500
+    assert result.output_height == 300
+    assert result.diagnostics.orientation_rotation_degrees == 90
 
 
 def test_scan_one_mocked_detector_isolation_not_found():

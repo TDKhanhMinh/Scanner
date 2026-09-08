@@ -77,6 +77,29 @@ def test_detect_high_contrast_synthetic_document():
         assert dist < 5.0, f"Corner {i} offset {dist} exceeds tolerance"
 
 
+def test_detect_prefers_outer_paper_over_inner_attendance_table():
+    """The bright sheet boundary should win over a darker inner table frame."""
+    canvas = np.full((700, 900, 3), 80, dtype=np.uint8)
+    outer = np.array([[70, 55], [830, 70], [815, 645], [75, 625]], dtype=np.int32)
+    inner = np.array([[170, 155], [740, 165], [735, 545], [175, 535]], dtype=np.int32)
+    cv2.fillConvexPoly(canvas, outer, (215, 215, 215))
+    cv2.polylines(canvas, [outer], True, (185, 185, 185), 3)
+    cv2.polylines(canvas, [inner], True, (20, 20, 20), 5)
+    for y in np.linspace(205, 505, 7, dtype=np.int32):
+        cv2.line(canvas, (175, int(y)), (735, int(y)), (20, 20, 20), 2)
+
+    result = detect_document_boundary(canvas)
+
+    assert result is not None
+    assert result.diagnostics["candidate_source"] in {
+        "paper_mask",
+        "paper_min_area_rect",
+    }
+    assert result.area_ratio > 0.55
+    assert result.corners_array[:, 0].min() < 110
+    assert result.corners_array[:, 1].min() < 100
+
+
 def test_detect_rotated_perspective_quadrilateral():
     """Verify detection on a slightly rotated quadrilateral document."""
     w, h = 900, 700

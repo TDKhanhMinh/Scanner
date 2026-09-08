@@ -32,7 +32,8 @@ flowchart LR
 - Image pipeline: `scanner/src/attendance_scanner/pipeline/`
   - `load.py` decodes/normalizes images, `detect.py` finds document quads,
     `perspective.py` warps, `enhance.py` applies mode, and `orchestrator.py`
-    assembles diagnostics.
+    assembles diagnostics. Attendance scans default to a landscape canvas with
+    A4 aspect ratio; generic callers can opt into natural orientation/ratio.
 - Output: `scanner/src/attendance_scanner/pdf_export.py` writes one-page PDFs via
   same-directory temporary files and atomic replace.
 - State: `scanner/src/attendance_scanner/state.py` stores manifest schema v1 under
@@ -99,12 +100,19 @@ Desktop checks from repository root:
 Rust bridge checks use the real manifest code when the sidecar is available. For
 unit-only runs with no external binary, set `TAURI_CONFIG` so `externalBin` is
 empty, then run cargo test/clippy/rustfmt as documented in the task evidence.
+Tauri unit tests live in `apps/desktop/src-tauri/src/tests.rs`; frontend tests
+live under `apps/desktop/src/__tests__/`; Python tests live under `scanner/tests/`.
 
 ## Where to tune scanner quality
 
 - Detection thresholds and geometry: `scanner/src/attendance_scanner/pipeline/detect.py`,
-  `DetectionConfig`.
-- Perspective limits: `pipeline/perspective.py`, `PerspectiveConfig`.
+  `DetectionConfig`. The detector combines edge contours with bright-paper
+  candidates and records the selected candidate source in diagnostics.
+- Perspective limits and template geometry: `pipeline/perspective.py`,
+  `PerspectiveConfig`. Set `target_aspect_ratio=None` to preserve measured geometry.
+- Page identity/order: `scanner/src/attendance_scanner/page_classification.py`.
+  The classifier evaluates both grid axes and returns `UNKNOWN` when confidence
+  is insufficient for grouped export.
 - Enhancement behavior: `pipeline/enhance.py`, `EnhancementConfig`.
 - Resize budget: `pipeline/orchestrator.py`, `ResizeConfig`.
 

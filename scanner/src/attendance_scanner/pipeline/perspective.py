@@ -3,9 +3,9 @@
 This module is the third stage of the document scanning pipeline. Given an image and
 the 4 detected document corners, it orders the corners canonically [TL, TR, BR, BL],
 calculates unwarped destination dimensions (width and height) from the maximum opposite-side
-Euclidean distances, validates against degenerate/collinear corner configurations, computes
-the 3x3 perspective homography matrix, and applies `cv2.warpPerspective` to produce a rectified
-rectangular document while strictly preserving the natural aspect ratio and orientation.
+Euclidean distances, optionally applies a configured template aspect ratio, validates against
+degenerate/collinear corner configurations, computes the 3x3 perspective homography matrix,
+and applies `cv2.warpPerspective` to produce a rectified rectangular document.
 """
 
 from dataclasses import dataclass
@@ -25,11 +25,12 @@ class DegenerateCornersError(ValueError):
 
 
 class PerspectiveConfig(BaseContract):
-    """Configuration options for perspective transformation."""
+    """Configuration options for perspective transformation and output geometry."""
 
     min_dimension: int = Field(default=10, ge=3, le=100)
     interpolation: int = cv2.INTER_LINEAR
     border_mode: int = cv2.BORDER_REPLICATE
+    target_aspect_ratio: Optional[float] = Field(default=None, gt=0.1, lt=10.0)
 
 
 @dataclass
@@ -53,7 +54,10 @@ class WarpedDocument:
         return 3 if self.image.ndim == 3 else 1
 
 
-def compute_destination_dimensions(ordered_corners: np.ndarray) -> Tuple[int, int]:
+def compute_destination_dimensions(
+    ordered_corners: np.ndarray,
+    target_aspect_ratio: Optional[float] = None,
+) -> Tuple[int, int]:
     """Calculate rectangular destination dimensions from maximum opposite-side distances.
 
     Given ordered corners [TL, TR, BR, BL]:
@@ -63,9 +67,12 @@ def compute_destination_dimensions(ordered_corners: np.ndarray) -> Tuple[int, in
     - Right edge height: ||BR - TR||
     - Left edge height: ||BL - TL||
     - Destination height: max(round(right_height), round(left_height))
+    - When ``target_aspect_ratio`` is provided, expand the shorter dimension to
+      match the target ratio without cropping the detected quadrilateral.
 
     Args:
         ordered_corners: Array of shape (4, 2) ordered [TL, TR, BR, BL].
+        target_aspect_ratio: Optional output width/height ratio.
 
     Returns:
         Tuple of (width, height) in pixels as positive integers.
@@ -80,6 +87,18 @@ def compute_destination_dimensions(ordered_corners: np.ndarray) -> Tuple[int, in
     height_right = float(np.linalg.norm(pts[2] - pts[1]))
     height_left = float(np.linalg.norm(pts[3] - pts[0]))
     dst_h = max(int(round(height_right)), int(round(height_left)))
+
+    if target_aspect_ratio is not None:
+        if target_aspect_ratio <= 0:
+            raise ValueError("target_aspect_ratio must be positive")
+        measured_ratio = dst_w / max(dst_h, 1)
+        desired_ratio = (
+            target_aspect_ratio if measured_ratio >= 1.0 else 1.0 / target_aspect_ratio
+        )
+        if measured_ratio > desired_ratio:
+            dst_h = max(dst_h, int(round(dst_w / desired_ratio)))
+        else:
+            dst_w = max(dst_w, int(round(dst_h * desired_ratio)))
 
     return dst_w, dst_h
 
@@ -99,7 +118,8 @@ def warp_perspective(
     3. Validate numerical validity (no NaNs, Infs, or incorrect point counts).
     4. Order corners into canonical clockwise order [TL, TR, BR, BL].
     5. Validate non-degeneracy (non-collinear, area > 0, side lengths >= min_dimension).
-    6. Compute destination dimensions (W, H) from maximum opposite-side lengths.
+    6. Compute destination dimensions (W, H) from maximum opposite-side lengths,
+       then apply the configured target aspect ratio when present.
     7. Form destination grid: [[0, 0], [W - 1, 0], [W - 1, H - 1], [0, H - 1]].
     8. Compute 3x3 transformation matrix M using `cv2.getPerspectiveTransform`.
     9. Warp image using `cv2.warpPerspective`.
@@ -172,7 +192,10 @@ def warp_perspective(
         )
 
     # 6. Compute destination width and height from max opposite-side Euclidean distances
-    dst_w, dst_h = compute_destination_dimensions(ordered_src)
+    dst_w, dst_h = compute_destination_dimensions(
+        ordered_src,
+        cfg.target_aspect_ratio,
+    )
 
     if dst_w < cfg.min_dimension or dst_h < cfg.min_dimension:
         raise DegenerateCornersError(

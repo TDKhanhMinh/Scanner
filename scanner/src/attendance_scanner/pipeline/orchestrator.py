@@ -13,7 +13,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -25,9 +25,11 @@ from attendance_scanner.contracts import (
     FileResult,
     ImageDecodeError,
     ImageProcessError,
+    PageIdentity,
     ScanMode,
     ScannerWarningCode,
 )
+from attendance_scanner.page_classification import classify_page
 from attendance_scanner.pipeline.detect import (
     DetectionConfig,
     DetectionResult,
@@ -60,13 +62,18 @@ class ResizeConfig(BaseContract):
 
 
 class PipelineConfig(BaseContract):
-    """Unified configuration for the full single-image scan pipeline."""
+    """Unified configuration for the full single-image attendance scan pipeline."""
 
     detection: DetectionConfig = Field(default_factory=DetectionConfig)
-    perspective: PerspectiveConfig = Field(default_factory=PerspectiveConfig)
+    perspective: PerspectiveConfig = Field(
+        default_factory=lambda: PerspectiveConfig(target_aspect_ratio=math.sqrt(2.0))
+    )
     enhancement: EnhancementConfig = Field(default_factory=EnhancementConfig)
     resize: ResizeConfig = Field(default_factory=ResizeConfig)
     warp_fallback_to_full: bool = True
+    # Attendance forms use a landscape output canvas; generic documents can opt
+    # into the source orientation with ``preferred_orientation=natural``.
+    preferred_orientation: Literal["natural", "landscape", "portrait"] = "landscape"
 
 
 class SingleScanDiagnostics(BaseContract):
@@ -80,6 +87,7 @@ class SingleScanDiagnostics(BaseContract):
     output_width: int = 0
     output_height: int = 0
     downscale_ratio: float = 1.0
+    orientation_rotation_degrees: int = 0
     warning_codes: List[str] = Field(default_factory=list)
     stage_durations_ms: Dict[str, float] = Field(default_factory=dict)
     total_duration_ms: float = 0.0
@@ -105,6 +113,7 @@ class SingleScanResult:
     mode: ScanMode
     warning_codes: List[str] = field(default_factory=list)
     diagnostics: SingleScanDiagnostics = field(default_factory=SingleScanDiagnostics)
+    page_identity: PageIdentity = field(default_factory=PageIdentity)
 
     @property
     def shape(self) -> Tuple[int, ...]:
@@ -288,9 +297,37 @@ def scan_one(
     # Stage 3: Optional Perspective Warp
     t_warp_start = time.perf_counter()
     warped_or_full: Union[WarpedDocument, LoadedImage, np.ndarray]
+    orientation_rotation_degrees = 0
+    page_identity = PageIdentity()
 
     if detection is not None:
         try:
+            classification_perspective = pipeline_cfg.perspective.model_copy(
+                update={"target_aspect_ratio": None}
+            )
+            classification_warp = warp_perspective(
+                loaded,
+                detection,
+                config=classification_perspective,
+            )
+            classification_candidates = [
+                (0, classify_page(classification_warp.image))
+            ]
+            if loaded.metadata.exif_orientation is None:
+                classification_candidates.extend(
+                    (
+                        turns,
+                        classify_page(
+                            np.ascontiguousarray(np.rot90(classification_warp.image, turns))
+                        ),
+                    )
+                    for turns in (1, 3)
+                )
+            selected_turns, page_identity = max(
+                classification_candidates,
+                key=lambda candidate: candidate[1].confidence or 0.0,
+            )
+            page_identity.diagnostics["classificationTurns"] = selected_turns
             warped_or_full = warp_perspective(
                 loaded,
                 detection,
@@ -309,6 +346,24 @@ def scan_one(
         # Fallback rule: detector failed -> use full normalized image with warning
         warped_or_full = loaded
         warning_codes.append(ScannerWarningCode.DOCUMENT_NOT_DETECTED.value)
+
+    if pipeline_cfg.preferred_orientation != "natural":
+        orientation_source = getattr(warped_or_full, "image", warped_or_full)
+        orientation_array = np.asarray(orientation_source)
+        source_height, source_width = orientation_array.shape[:2]
+        should_rotate = (
+            pipeline_cfg.preferred_orientation == "landscape"
+            and source_height > source_width
+        ) or (
+            pipeline_cfg.preferred_orientation == "portrait"
+            and source_width > source_height
+        )
+        if should_rotate:
+            # The attendance template is read left-to-right after a 90-degree
+            # counter-clockwise rotation for portrait-oriented camera captures.
+            turns = 1 if pipeline_cfg.preferred_orientation == "landscape" else 3
+            warped_or_full = np.ascontiguousarray(np.rot90(orientation_array, turns))
+            orientation_rotation_degrees = 90 if turns == 1 else 270
 
     stage_durations["warp_ms"] = (time.perf_counter() - t_warp_start) * 1000.0
 
@@ -361,6 +416,7 @@ def scan_one(
         output_width=out_w,
         output_height=out_h,
         downscale_ratio=downscale_ratio,
+        orientation_rotation_degrees=orientation_rotation_degrees,
         warning_codes=unique_warnings,
         stage_durations_ms=stage_durations,
         total_duration_ms=total_duration_ms,
@@ -376,4 +432,5 @@ def scan_one(
         mode=scan_mode,
         warning_codes=unique_warnings,
         diagnostics=diagnostics,
+        page_identity=page_identity,
     )

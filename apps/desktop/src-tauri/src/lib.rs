@@ -790,7 +790,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![greet, plan_scan, start_scan, open_output_folder])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            plan_scan,
+            start_scan,
+            open_output_folder
+        ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

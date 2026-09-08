@@ -572,6 +572,7 @@ def _process_one_file(
             else FileProcessingStatus.SUCCESS
         )
         previous = manifest.get_entry(file.relative_path)
+        page_identity = scan_result.page_identity
         output_relative_path: Optional[str] = file.target_relative_pdf
         output_relative_paths = (
             list(previous.output_relative_paths)
@@ -603,7 +604,7 @@ def _process_one_file(
             pipeline_version=pipeline_version,
             period=previous.period if previous is not None else batch_period,
             group_key=previous.group_key if previous is not None else None,
-            page_identity=previous.page_identity if previous is not None else PageIdentity(),
+            page_identity=page_identity,
             artifact_dependencies=artifact_dependencies,
         )
         if batch_period is not None:
