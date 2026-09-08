@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { Sparkles, Scan, FileText, Info } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { AppHeader } from "@/components/scanner/AppHeader";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
 import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
 import { WorkerSettingCard } from "@/components/scanner/WorkerSettingCard";
 import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/ScanPlanSummaryCard";
 import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
-import { FileResultList, type FileResultItem } from "@/components/scanner/FileResultList";
+import { FileResultList } from "@/components/scanner/FileResultList";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   listenScannerDiagnostics,
@@ -17,11 +18,13 @@ import {
   startScan,
 } from "@/lib/scannerBridge";
 import type {
-  FileCompletedEvent,
-  FileFailedEvent,
   ScanPlanEvent,
   ScannerEvent,
 } from "@/types/scanner";
+import {
+  initialScanExecutionState,
+  scanExecutionReducer,
+} from "@/lib/scanExecutionReducer";
 
 function toPlanStats(plan: ScanPlanEvent): ScanPlanStats {
   return {
@@ -39,36 +42,6 @@ function toPlanStats(plan: ScanPlanEvent): ScanPlanStats {
 interface ScannerSettings {
   mode: ScanFilterMode;
   workers: number | null;
-}
-
-function sourceFileName(relativePath: string): string {
-  return relativePath.split(/[\\/]/).pop() ?? relativePath;
-}
-
-function completedResultItem(event: FileCompletedEvent): FileResultItem {
-  return {
-    id: `${event.relativePath}:${event.timestamp}`,
-    employeeName: event.employeeName,
-    sourceFile: sourceFileName(event.relativePath),
-    targetPdf: event.outputRelativePath,
-    status: event.warning ? "warning" : "success",
-    documentDetected: event.documentDetected,
-    message: event.warning ?? undefined,
-    timestamp: event.timestamp,
-  };
-}
-
-function failedResultItem(event: FileFailedEvent): FileResultItem {
-  return {
-    id: `${event.relativePath}:${event.timestamp}`,
-    employeeName: event.employeeName,
-    sourceFile: sourceFileName(event.relativePath),
-    targetPdf: "",
-    status: "failed",
-    documentDetected: false,
-    message: `${event.errorCode}: ${event.message}`,
-    timestamp: event.timestamp,
-  };
 }
 
 export function App() {
@@ -92,17 +65,22 @@ export function App() {
   });
 
   // Batch progress state
-  const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isPlanning, setIsPlanning] = useState<boolean>(false);
-  const [processedCount, setProcessedCount] = useState<number>(0);
-  const [currentFile, setCurrentFile] = useState<string>("");
-  const [results, setResults] = useState<FileResultItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [hasPlanError, setHasPlanError] = useState<boolean>(false);
+  const [execution, dispatchExecution] = useReducer(
+    scanExecutionReducer,
+    initialScanExecutionState,
+  );
   const planRequestId = useRef(0);
   const scanRequestId = useRef(0);
   const planDebounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scanMode = settings.mode;
+  const isScanning = execution.phase === "running";
+  const { currentFile, processed: processedCount, results } = execution;
+  const successCount = execution.success;
+  const warningCount = execution.warning;
+  const failedCount = execution.failed;
 
   useEffect(() => {
     return () => {
@@ -166,6 +144,7 @@ export function App() {
   // Cập nhật thư mục nhập từ người dùng và tính toán kế hoạch quét
   const handleInputChange = (path: string) => {
     setInputPath(path);
+    dispatchExecution({ type: "reset" });
     const trimmed = path.trim();
     const nextOutputPath = trimmed ? `${trimmed}_pdf` : "";
     setOutputPath(nextOutputPath);
@@ -247,23 +226,9 @@ export function App() {
   };
 
   const handleScannerEvent = (event: ScannerEvent) => {
-    switch (event.type) {
-      case "scan_plan":
-        setPlanStats(toPlanStats(event));
-        break;
-      case "file_started":
-        setCurrentFile(event.relativePath);
-        break;
-      case "file_completed":
-        setResults((previous) => [...previous, completedResultItem(event)]);
-        setProcessedCount((count) => count + 1);
-        break;
-      case "file_failed":
-        setResults((previous) => [...previous, failedResultItem(event)]);
-        setProcessedCount((count) => count + 1);
-        break;
-      case "scan_completed":
-        break;
+    dispatchExecution({ type: "scanner_event", event });
+    if (event.type === "scan_plan") {
+      setPlanStats(toPlanStats(event));
     }
   };
 
@@ -275,10 +240,10 @@ export function App() {
       planDebounceTimer.current = undefined;
     }
     const requestId = ++scanRequestId.current;
-    setIsScanning(true);
-    setProcessedCount(0);
-    setResults([]);
-    setCurrentFile("");
+    dispatchExecution({
+      type: "scan_started",
+      totalToProcess: planStats.newFiles + planStats.modifiedFiles + (planStats.rebuildFiles ?? 0),
+    });
     setErrorMessage("");
 
     void (async () => {
@@ -299,26 +264,23 @@ export function App() {
         });
       } catch (error: unknown) {
         if (requestId === scanRequestId.current) {
-          setErrorMessage(scannerErrorMessage(error));
+          const message = scannerErrorMessage(error);
+          dispatchExecution({ type: "scan_error", message });
+          setErrorMessage(message);
         }
       } finally {
         unlistenEvents?.();
         unlistenDiagnostics?.();
-        if (requestId === scanRequestId.current) {
-          setIsScanning(false);
-          setCurrentFile("");
-        }
       }
     })();
   };
 
   const handleOpenOutputFolder = () => {
-    alert(`Mở thư mục: ${outputPath || `${inputPath}_pdf`}`);
+    const target = outputPath || `${inputPath}_pdf`;
+    void openPath(target).catch((error: unknown) => {
+      setErrorMessage(scannerErrorMessage(error));
+    });
   };
-
-  const successCount = results.filter((r) => r.status === "success").length;
-  const warningCount = results.filter((r) => r.status === "warning").length;
-  const failedCount = results.filter((r) => r.status === "failed").length;
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col antialiased selection:bg-primary/20 selection:text-primary">
@@ -405,7 +367,10 @@ export function App() {
                     successCount={successCount}
                     warningCount={warningCount}
                     failedCount={failedCount}
+                    skippedCount={execution.skipped}
                     isScanning={isScanning}
+                    isComplete={execution.phase === "completed"}
+                    outputReady={Boolean(outputPath)}
                     onOpenOutputFolder={handleOpenOutputFolder}
                   />
                 )}

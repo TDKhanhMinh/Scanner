@@ -2,6 +2,7 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
+  FileClock,
   FolderOpen,
   Loader2,
 } from "lucide-react";
@@ -21,7 +22,10 @@ export interface BatchProgressCardProps {
   successCount: number;
   warningCount: number;
   failedCount: number;
+  skippedCount: number;
   isScanning: boolean;
+  isComplete?: boolean;
+  outputReady?: boolean;
   onOpenOutputFolder: () => void;
 }
 
@@ -32,11 +36,18 @@ export function BatchProgressCard({
   successCount,
   warningCount,
   failedCount,
+  skippedCount,
   isScanning,
+  isComplete = false,
+  outputReady = false,
   onOpenOutputFolder,
 }: BatchProgressCardProps) {
-  const percent = totalCount > 0 ? Math.round((processedCount / totalCount) * 100) : 0;
-  const isDone = !isScanning && processedCount > 0 && processedCount === totalCount;
+  const isDone = isComplete || (!isScanning && processedCount === totalCount);
+  const percent = isDone
+    ? 100
+    : totalCount > 0
+    ? Math.round((processedCount / totalCount) * 100)
+    : 0;
 
   return (
     <Card className="border-border/80 bg-card/70">
@@ -76,7 +87,7 @@ export function BatchProgressCard({
         </div>
 
         {/* Live counters */}
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/40">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border/40">
           <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
             <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-400">
               <CheckCircle className="w-3.5 h-3.5" /> Thành công
@@ -103,10 +114,19 @@ export function BatchProgressCard({
               {failedCount}
             </span>
           </div>
+
+          <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-secondary/60 border border-border/60">
+            <div className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+              <FileClock className="w-3.5 h-3.5" /> Bỏ qua
+            </div>
+            <span className="text-base font-bold text-muted-foreground mt-0.5 font-mono">
+              {skippedCount}
+            </span>
+          </div>
         </div>
 
         {/* Completion actions */}
-        {isDone && (
+        {isDone && outputReady && (
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="text-xs text-muted-foreground">
               Tất cả file PDF đã được ghi an toàn qua cơ chế atomic rename.
