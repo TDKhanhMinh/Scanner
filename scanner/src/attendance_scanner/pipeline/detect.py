@@ -33,6 +33,11 @@ class DetectionConfig(BaseContract):
     min_side_ratio: float = Field(default=0.05, gt=0.0, lt=1.0)
     min_angle_deg: float = Field(default=45.0, ge=0.0, lt=180.0)
     max_angle_deg: float = Field(default=135.0, gt=0.0, le=180.0)
+    paper_brightness_percentile: float = Field(default=75.0, ge=50.0, le=95.0)
+    paper_min_threshold: int = Field(default=100, ge=0, le=255)
+    paper_max_threshold: int = Field(default=230, ge=0, le=255)
+    paper_morph_kernel_size: int = Field(default=61, ge=9, le=201)
+    paper_candidate_score_bonus: float = Field(default=1.35, ge=1.0, le=1.5)
 
     @model_validator(mode="after")
     def validate_threshold_relationships(self) -> "DetectionConfig":
@@ -304,6 +309,64 @@ def detect_document_boundary(
 
         candidates: List[Tuple[float, np.ndarray, float, Dict[str, Any]]] = []
 
+        # Use a bright-paper candidate in addition to edge contours. A dark
+        # table border may produce a stronger edge than the actual sheet edge.
+        paper_threshold = float(
+            np.clip(
+                np.percentile(blurred, config.paper_brightness_percentile),
+                config.paper_min_threshold,
+                config.paper_max_threshold,
+            )
+        )
+        _, paper_mask = cv2.threshold(
+            blurred, paper_threshold, 255, cv2.THRESH_BINARY
+        )
+        paper_kernel_size = config.paper_morph_kernel_size
+        if paper_kernel_size % 2 == 0:
+            paper_kernel_size += 1
+        paper_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (paper_kernel_size, paper_kernel_size)
+        )
+        paper_mask = cv2.morphologyEx(paper_mask, cv2.MORPH_CLOSE, paper_kernel)
+        paper_mask = cv2.morphologyEx(paper_mask, cv2.MORPH_OPEN, paper_kernel)
+        paper_contours, _ = cv2.findContours(
+            paper_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for paper_contour in sorted(paper_contours, key=cv2.contourArea, reverse=True):
+            paper_area = float(cv2.contourArea(paper_contour))
+            if paper_area < min_area:
+                break
+            if paper_area > max_area:
+                continue
+            paper_hull = cv2.convexHull(paper_contour)
+            paper_perimeter = cv2.arcLength(paper_hull, True)
+            if paper_perimeter < 1e-6:
+                continue
+            for eps_ratio in (0.02, 0.03, 0.04, 0.05, 0.06, 0.08):
+                paper_approx = cv2.approxPolyDP(
+                    paper_hull, eps_ratio * paper_perimeter, True
+                )
+                if len(paper_approx) != 4:
+                    continue
+                ordered = order_corners(paper_approx)
+                is_valid, conf, diag = _validate_quadrilateral(
+                    ordered, det_w, det_h, config
+                )
+                if is_valid:
+                    area_ratio = float(cv2.contourArea(ordered) / img_area)
+                    diag = {
+                        **diag,
+                        "candidate_source": "paper_mask",
+                        "paper_threshold": paper_threshold,
+                    }
+                    score = (
+                        conf
+                        * (0.6 + 0.4 * area_ratio)
+                        * config.paper_candidate_score_bonus
+                    )
+                    candidates.append((score, ordered, area_ratio, diag))
+                    break
+
         # 6. Evaluate candidate contours
         for c in contour_list:
             area = float(cv2.contourArea(c))
@@ -326,6 +389,7 @@ def detect_document_boundary(
                         area_ratio = float(cv2.contourArea(ordered) / img_area)
                         # Candidate score balances area and confidence
                         score = conf * (0.6 + 0.4 * area_ratio)
+                        diag = {**diag, "candidate_source": "edge_contour"}
                         candidates.append((score, ordered, area_ratio, diag))
                         break  # Found best approximation for this contour
 

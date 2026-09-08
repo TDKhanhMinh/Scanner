@@ -131,8 +131,8 @@ export function FolderSelectorCard({
             </div>
           </div>
         ) : (
-          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 flex items-start gap-2.5 text-xs text-amber-300">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-300 font-medium">
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <span>Vui lòng nhập hoặc chọn thư mục gốc để hệ thống tự động phân tích scan plan.</span>
           </div>
         )}

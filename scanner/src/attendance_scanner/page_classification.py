@@ -63,8 +63,11 @@ def _group_columns(columns: np.ndarray, *, merge_gap: int = 6) -> List[int]:
     return [int(round(sum(group) / len(group))) for group in groups]
 
 
-def _day_grid_features(gray: np.ndarray) -> Tuple[int, float, float]:
-    """Estimate day-column count and layout confidence from a normalized page."""
+def _day_grid_features(
+    gray: np.ndarray,
+    config: PageClassificationConfig,
+) -> Tuple[int, float, float, Dict[str, Any]]:
+    """Estimate the strongest day-grid axis and layout confidence."""
     height, width = gray.shape
     x_start = max(0, int(width * 0.15))
     x_end = min(width, int(width * 0.85))
@@ -72,7 +75,7 @@ def _day_grid_features(gray: np.ndarray) -> Tuple[int, float, float]:
     y_end = min(height, int(height * 0.90))
     roi = gray[y_start:y_end, x_start:x_end]
     if roi.size == 0:
-        return 0, 0.0, 0.0
+        return 0, 0.0, 0.0, {"detectedAxis": "unknown"}
 
     # Long vertical rules survive Canny/Hough even when paper/background contrast
     # changes. Text and shadows rarely produce similarly long vertical segments.
@@ -87,15 +90,39 @@ def _day_grid_features(gray: np.ndarray) -> Tuple[int, float, float]:
         minLineLength=min_line_length,
         maxLineGap=12,
     )
-    line_positions: List[int] = []
+    vertical_positions: List[int] = []
+    horizontal_positions: List[int] = []
     if lines is not None:
         for line in np.asarray(lines).reshape(-1, 4):
             x1, y1, x2, y2 = [int(value) for value in line]
             if abs(y2 - y1) >= abs(x2 - x1) * 2:
-                line_positions.append(int(round((x1 + x2) / 2)))
+                vertical_positions.append(int(round((x1 + x2) / 2)))
+            elif abs(x2 - x1) >= abs(y2 - y1) * 2:
+                horizontal_positions.append(int(round((y1 + y2) / 2)))
 
-    positions = _group_columns(np.array(sorted(line_positions), dtype=np.int32))
-    return max(0, len(positions) - 1), float((edges > 0).mean()), float(threshold)
+    vertical_count = max(
+        0,
+        len(_group_columns(np.array(sorted(vertical_positions), dtype=np.int32))) - 1,
+    )
+    horizontal_count = max(
+        0,
+        len(_group_columns(np.array(sorted(horizontal_positions), dtype=np.int32))) - 1,
+    )
+    vertical_score = max(
+        _score_column_count(vertical_count, config.first_half_columns),
+        _score_column_count(vertical_count, config.second_half_columns),
+    )
+    horizontal_score = max(
+        _score_column_count(horizontal_count, config.first_half_columns),
+        _score_column_count(horizontal_count, config.second_half_columns),
+    )
+    detected_axis = "vertical" if vertical_score >= horizontal_score else "horizontal"
+    detected_count = vertical_count if detected_axis == "vertical" else horizontal_count
+    return detected_count, float((edges > 0).mean()), float(threshold), {
+        "detectedAxis": detected_axis,
+        "verticalGridCount": vertical_count,
+        "horizontalGridCount": horizontal_count,
+    }
 
 
 def _score_column_count(column_count: int, expected: int) -> float:
@@ -119,7 +146,9 @@ def classify_page(
     """
     cfg = config or PageClassificationConfig()
     gray = _as_gray(image)
-    detected_columns, ink_ratio, score_threshold = _day_grid_features(gray)
+    detected_columns, ink_ratio, score_threshold, axis_diagnostics = _day_grid_features(
+        gray, cfg
+    )
     first_score = _score_column_count(detected_columns, cfg.first_half_columns)
     second_score = _score_column_count(detected_columns, cfg.second_half_columns)
     scores = {
@@ -130,6 +159,7 @@ def classify_page(
     confidence = scores[page_type]
     margin = abs(first_score - second_score)
     diagnostics: Dict[str, Any] = {
+        **axis_diagnostics,
         "detectedColumnCount": detected_columns,
         "firstHalfScore": round(first_score, 4),
         "secondHalfScore": round(second_score, 4),

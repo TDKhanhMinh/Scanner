@@ -67,12 +67,12 @@ export function PageOrderReviewPanel({
       className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:p-5"
     >
       <div className="flex items-start gap-3">
-        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
         <div className="min-w-0">
-          <h2 id="page-order-review-heading" className="text-base font-semibold text-amber-100">
+          <h2 id="page-order-review-heading" className="text-base font-semibold text-amber-950 dark:text-amber-100">
             Cần xác nhận thứ tự page trước khi ghép PDF
           </h2>
-          <p className="mt-1 text-xs leading-relaxed text-amber-200/80">
+          <p className="mt-1 text-xs leading-relaxed text-amber-900/90 dark:text-amber-200/90 font-medium">
             Grouped export không tự đoán khi classifier không đủ chắc chắn. Bạn có thể dùng select hoặc nút di chuyển bằng bàn phím.
           </p>
         </div>
@@ -97,7 +97,7 @@ export function PageOrderReviewPanel({
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {group.reasons.map((reason) => (
-                      <Badge key={reason} variant="warning" className="text-[10px]">
+                      <Badge key={reason} variant="warning" className="text-xs">
                         {reasonLabel(reason)}
                       </Badge>
                     ))}
@@ -236,7 +236,7 @@ export function PageOrderReviewPanel({
                 </Button>
               </div>
               {blockedByIncomplete && (
-                <p className="mt-2 text-right text-xs text-amber-200/80">
+                <p className="mt-2 text-right text-xs text-amber-800 dark:text-amber-300 font-medium">
                   Group incomplete; hãy bỏ qua hoặc bổ sung source trước khi ghép.
                 </p>
               )}

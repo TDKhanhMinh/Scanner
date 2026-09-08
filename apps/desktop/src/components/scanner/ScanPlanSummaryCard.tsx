@@ -179,7 +179,7 @@ export function ScanPlanSummaryCard({
                 <span className="rounded-md bg-emerald-500/10 px-1.5 py-1 text-center text-emerald-400">
                   Đủ: {stats.completeGroups ?? 0}
                 </span>
-                <span className="rounded-md bg-amber-500/10 px-1.5 py-1 text-center text-amber-300">
+                <span className="rounded-md bg-amber-500/10 px-1.5 py-1 text-center text-amber-800 dark:text-amber-300 font-medium">
                   Thiếu: {stats.incompleteGroups ?? 0}
                 </span>
                 <span className="rounded-md bg-destructive/10 px-1.5 py-1 text-center text-destructive">
@@ -187,7 +187,7 @@ export function ScanPlanSummaryCard({
                 </span>
               </div>
               {(stats.pagesNeedingReview ?? 0) > 0 && (
-                <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-300">
+                <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-900 dark:text-amber-300 font-medium">
                   Cần review {stats.pagesNeedingReview} page trước khi ghép PDF.
                 </p>
               )}
@@ -203,9 +203,9 @@ export function ScanPlanSummaryCard({
           </div>
 
           {(unsupportedFiles > 0 || (stats.collisions?.length ?? 0) > 0) && (
-            <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-300">
-              <div className="flex items-center gap-1.5 font-semibold">
-                <AlertCircle className="h-3.5 w-3.5" />
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-300 font-medium">
+              <div className="flex items-center gap-1.5 font-semibold text-amber-950 dark:text-amber-200">
+                <AlertCircle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                 Cần lưu ý trước khi quét
               </div>
               {unsupportedFiles > 0 && (
