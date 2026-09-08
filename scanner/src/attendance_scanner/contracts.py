@@ -263,6 +263,8 @@ class ScanBatchRequest(BaseContract):
     workers: int = Field(default=3, ge=1, le=4)
     period: Optional[BatchPeriod] = None
     export_mode: ExportMode = ExportMode.PER_IMAGE
+    manual_order: Dict[str, List[str]] = Field(default_factory=dict)
+    skip_groups: List[str] = Field(default_factory=list)
 
 
 class FileResult(BaseContract):

@@ -150,6 +150,7 @@ export interface ScanBatchRequest {
   period?: BatchPeriod | null;
   exportMode?: ExportMode;
   manualOrder?: Record<string, string[]> | null;
+  skipGroups?: string[] | null;
 }
 
 export interface FileResult {

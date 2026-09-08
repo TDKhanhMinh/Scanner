@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, PdfParser
 
 SCANNER_ROOT = Path(__file__).resolve().parents[1]
 
@@ -128,6 +128,146 @@ def test_plan_subprocess_accepts_period_and_grouped_export_mode(tmp_path: Path):
     assert payload["exportMode"] == "GROUPED"
     assert payload["documentGroups"] == 1
     assert payload["expectedArtifacts"] == 1
+
+
+def test_grouped_scan_subprocess_requires_review_and_exports_one_ordered_pdf(tmp_path: Path):
+    input_root = tmp_path / "Attendance Input"
+    employee = input_root / "NV01"
+    output_root = tmp_path / "Attendance Output"
+    employee.mkdir(parents=True)
+    Image.new("RGB", (80, 60), color=(180, 180, 180)).save(employee / "hash-z.png")
+    Image.new("RGB", (80, 60), color=(190, 190, 190)).save(employee / "hash-a.png")
+
+    without_review = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(output_root),
+        "--workers",
+        "1",
+        "--year",
+        "2026",
+        "--month",
+        "9",
+        "--export-mode",
+        "grouped",
+    )
+    assert without_review.returncode == 1
+    assert not list(output_root.rglob("*.pdf"))
+
+    manual_order = json.dumps(
+        {"NV01:2026-09": ["NV01/hash-z.png", "NV01/hash-a.png"]}
+    )
+    with_review = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(output_root),
+        "--workers",
+        "1",
+        "--year",
+        "2026",
+        "--month",
+        "9",
+        "--export-mode",
+        "grouped",
+        "--manual-order-json",
+        manual_order,
+    )
+    assert with_review.returncode == 0
+    events = [json.loads(line) for line in with_review.stdout.splitlines() if line.strip()]
+    assert events[-1]["type"] == "scan_completed"
+    assert events[-1]["totalProcessed"] == 2
+    grouped_outputs = list(output_root.rglob("*.pdf"))
+    assert [path.name for path in grouped_outputs] == ["2026-09_NV01.pdf"]
+    parser = PdfParser.PdfParser(filename=str(grouped_outputs[0]))
+    assert len(parser.pages) == 2
+
+    rerun = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(output_root),
+        "--workers",
+        "1",
+        "--year",
+        "2026",
+        "--month",
+        "9",
+        "--export-mode",
+        "grouped",
+    )
+    assert rerun.returncode == 0
+    rerun_events = [json.loads(line) for line in rerun.stdout.splitlines() if line.strip()]
+    assert rerun_events[-1]["totalProcessed"] == 0
+    assert [path.name for path in output_root.rglob("*.pdf")] == ["2026-09_NV01.pdf"]
+
+    per_image_output = tmp_path / "Per Image Output"
+    switched = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(per_image_output),
+        "--workers",
+        "1",
+        "--year",
+        "2026",
+        "--month",
+        "9",
+        "--export-mode",
+        "per-image",
+    )
+    assert switched.returncode == 0
+    assert {path.name for path in per_image_output.rglob("*.pdf")} == {
+        "hash-z.pdf",
+        "hash-a.pdf",
+    }
+
+
+def test_grouped_scan_skip_one_group_continues_other_employees(tmp_path: Path):
+    input_root = tmp_path / "employees"
+    output_root = tmp_path / "output"
+    for employee in ("A", "B"):
+        directory = input_root / employee
+        directory.mkdir(parents=True)
+        Image.new("RGB", (80, 60), color=(180, 180, 180)).save(directory / "random-2.png")
+        Image.new("RGB", (80, 60), color=(190, 190, 190)).save(directory / "random-1.png")
+
+    manual_order = json.dumps(
+        {"B:2026-09": ["B/random-2.png", "B/random-1.png"]}
+    )
+    skipped = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(output_root),
+        "--workers",
+        "1",
+        "--year",
+        "2026",
+        "--month",
+        "9",
+        "--export-mode",
+        "grouped",
+        "--manual-order-json",
+        manual_order,
+        "--skip-group-json",
+        '["A:2026-09"]',
+    )
+
+    assert skipped.returncode == 0
+    assert (output_root / "B" / "2026-09_B.pdf").is_file()
+    assert not (output_root / "A" / "2026-09_A.pdf").exists()
 
 
 def test_scan_batch_subprocess_invalid_output_is_fatal_without_jsonl_noise(tmp_path: Path):

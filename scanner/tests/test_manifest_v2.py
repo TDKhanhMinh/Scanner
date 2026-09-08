@@ -168,6 +168,27 @@ def test_migration_failure_keeps_original_v1_file_and_returns_typed_state_error(
     assert not list(store.state_dir.glob("*.corrupt.*"))
 
 
+def test_v1_root_mismatch_is_rejected_before_migration(tmp_path: Path):
+    input_root = tmp_path / "employees"
+    output_root = tmp_path / "output"
+    input_root.mkdir()
+    store = ManifestStore(state_dir=tmp_path / "state")
+    manifest_path = store.get_manifest_path(input_root)
+    store.state_dir.mkdir(parents=True, exist_ok=True)
+    invalid = _legacy_manifest(input_root, output_root)
+    invalid["rootId"] = "WRONG_ROOT_ID"
+    invalid["inputRoot"] = str(tmp_path / "another-input")
+    original = json.dumps(invalid)
+    manifest_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(Exception) as exc_info:
+        store.load_manifest(input_root, output_root=output_root, raise_on_corrupt=True)
+
+    assert getattr(exc_info.value, "code", None) == ScannerErrorCode.STATE_READ_FAILED
+    assert manifest_path.read_text(encoding="utf-8") == original
+    assert not list(store.state_dir.glob("*.corrupt.*"))
+
+
 def test_manual_group_order_round_trips_with_source_fingerprint(tmp_path: Path):
     input_root = tmp_path / "employees"
     input_root.mkdir()

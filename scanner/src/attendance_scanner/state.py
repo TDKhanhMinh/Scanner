@@ -391,6 +391,16 @@ class ManifestStore:
             # Check schema version compatibility
             schema_ver = raw_data.get("schemaVersion", raw_data.get("schema_version"))
             if schema_ver == LEGACY_SCHEMA_VERSION:
+                legacy_root_id = raw_data.get("rootId", raw_data.get("root_id"))
+                legacy_input_root = raw_data.get("inputRoot", raw_data.get("input_root"))
+                if (
+                    legacy_root_id != root_id
+                    or not isinstance(legacy_input_root, str)
+                    or Path(legacy_input_root).resolve() != Path(canonical_input).resolve()
+                ):
+                    raise ValueError(
+                        "Manifest v1 root identity does not match the selected input root"
+                    )
                 try:
                     migrated = Manifest.model_validate(_migrate_v1_data(raw_data))
                     self.save_manifest(migrated)

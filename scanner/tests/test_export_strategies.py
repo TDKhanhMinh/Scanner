@@ -96,18 +96,17 @@ def test_grouped_export_refuses_ambiguous_order_without_manual_override(tmp_path
     assert not list(tmp_path.rglob("*.pdf"))
 
 
-def test_grouped_export_manual_order_can_export_observed_order(tmp_path: Path):
+def test_grouped_export_boolean_manual_order_cannot_bypass_review(tmp_path: Path):
     pages = [_page("NV01/a.png"), _page("NV01/b.png")]
 
-    artifacts = export_grouped(
-        pages,
-        tmp_path,
-        BatchPeriod(year=2026, month=9),
-        manual_order=True,
-    )
-
-    assert artifacts[0].source_relative_paths == ["NV01/a.png", "NV01/b.png"]
-    assert artifacts[0].pdf.page_count == 2
+    with pytest.raises(ExportReviewRequiredError, match="requires page-order review"):
+        export_grouped(
+            pages,
+            tmp_path,
+            BatchPeriod(year=2026, month=9),
+            manual_order=True,
+        )
+    assert not list(tmp_path.rglob("*.pdf"))
 
 
 def test_grouped_export_uses_explicit_review_order_for_unknown_pages(tmp_path: Path):

@@ -25,15 +25,19 @@ const reviewGroup: ReviewGroup = {
 describe("PageOrderReviewPanel", () => {
   it("supports accessible reordering and only resolves on explicit confirmation", () => {
     const onResolve = vi.fn();
+    const onPreview = vi.fn();
     render(
       <PageOrderReviewPanel
         groups={[reviewGroup]}
         onResolve={onResolve}
         onSkip={vi.fn()}
+        onPreview={onPreview}
       />,
     );
 
     expect(screen.getByText(/Không nhận diện chắc chắn loại page/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Xem preview NV01\/page-one-random\.png/i }));
+    expect(onPreview).toHaveBeenCalledWith("NV01/page-one-random.png");
     fireEvent.click(screen.getByRole("button", { name: /Đưa NV01\/page-one-random\.png xuống sau/i }));
     expect(onResolve).not.toHaveBeenCalled();
 

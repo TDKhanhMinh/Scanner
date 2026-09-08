@@ -80,6 +80,7 @@ export function App() {
   const [manualOrderOverrides, setManualOrderOverrides] = useState<
     Record<string, string[]>
   >({});
+  const [skippedReviewGroups, setSkippedReviewGroups] = useState<string[]>([]);
 
   // Incremental scan plan state loaded from the Tauri scanner bridge.
   const [planStats, setPlanStats] = useState<ScanPlanStats>({
@@ -152,6 +153,7 @@ export function App() {
           setReviewGroups(plan.reviewGroups ?? []);
           setResolvedReviewGroups({});
           setManualOrderOverrides({});
+          setSkippedReviewGroups([]);
           setIsPlanReady(true);
         }
       })
@@ -170,6 +172,7 @@ export function App() {
           setReviewGroups([]);
           setResolvedReviewGroups({});
           setManualOrderOverrides({});
+          setSkippedReviewGroups([]);
           setHasPlanError(true);
           setIsPlanReady(false);
         }
@@ -202,6 +205,7 @@ export function App() {
     setReviewGroups([]);
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
+    setSkippedReviewGroups([]);
     planRequestId.current += 1;
     setIsPlanReady(false);
     const trimmed = path.trim();
@@ -245,6 +249,7 @@ export function App() {
     setReviewGroups([]);
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
+    setSkippedReviewGroups([]);
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -259,6 +264,7 @@ export function App() {
     setReviewGroups([]);
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
+    setSkippedReviewGroups([]);
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -295,6 +301,7 @@ export function App() {
     setReviewGroups([]);
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
+    setSkippedReviewGroups([]);
     planRequestId.current += 1;
     setIsPlanReady(false);
     setHasPlanError(false);
@@ -341,6 +348,17 @@ export function App() {
 
   const handleSkipReviewGroup = (groupId: string) => {
     setResolvedReviewGroups((current) => ({ ...current, [groupId]: "skipped" }));
+    setSkippedReviewGroups((current) =>
+      current.includes(groupId) ? current : [...current, groupId],
+    );
+  };
+
+  const handlePreviewSource = (relativePath: string) => {
+    const root = inputPath.replace(/[\\/]+$/, "");
+    const sourcePath = `${root}\\${relativePath.replace(/\//g, "\\")}`;
+    void openPath(sourcePath).catch((error: unknown) => {
+      setErrorMessage(scannerErrorMessage(error));
+    });
   };
 
   const handleStartScan = () => {
@@ -375,6 +393,7 @@ export function App() {
           period: settings.period,
           exportMode: settings.exportMode,
           manualOrder: manualOrderOverrides,
+          skipGroups: skippedReviewGroups,
         });
       } catch (error: unknown) {
         if (requestId === scanRequestId.current) {
@@ -469,6 +488,7 @@ export function App() {
                     resolvedGroups={resolvedReviewGroups}
                     onResolve={handleResolveReviewGroup}
                     onSkip={handleSkipReviewGroup}
+                    onPreview={handlePreviewSource}
                   />
                 )}
 

@@ -69,6 +69,7 @@ describe("scannerBridge", () => {
       month: null,
       exportMode: null,
       manualOrder: null,
+      skipGroups: null,
     });
   });
 
@@ -126,6 +127,7 @@ describe("scannerBridge", () => {
       month: 9,
       exportMode: "GROUPED",
       manualOrder: null,
+      skipGroups: null,
     });
   });
 

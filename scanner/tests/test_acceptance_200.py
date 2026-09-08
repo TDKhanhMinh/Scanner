@@ -102,22 +102,59 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
     assert first_result.summary.total_images == 200
     assert len(list(output_root.rglob("*.pdf"))) == 200
 
+    grouped_output_root = tmp_path / "grouped-output"
+    grouped_store = ManifestStore(state_dir=tmp_path / "grouped-state")
     grouped_discovery = discover_employee_folders(input_root)
-    grouped_manifest = store.load_manifest(input_root, output_root=output_root)
+    grouped_manifest = grouped_store.load_manifest(
+        input_root, output_root=grouped_output_root
+    )
+    grouped_period = BatchPeriod(year=2026, month=9)
     grouped_plan = build_group_aware_scan_plan(
         grouped_discovery,
         grouped_manifest,
-        output_root,
-        BatchPeriod(year=2026, month=9),
+        grouped_output_root,
+        grouped_period,
         export_mode=ExportMode.GROUPED,
     )
-    expected_document_groups = 4
+    manual_orders = {
+        f"NV{employee_index:02d}:2026-09": [
+            f"NV{employee_index:02d}/card-{image_index:03d}.png"
+            for image_index in range(1, 51)
+        ]
+        for employee_index in range(1, 5)
+    }
+    grouped_result = run_batch(
+        discovery=grouped_discovery,
+        manifest=grouped_manifest,
+        output_root=grouped_output_root,
+        workers=2,
+        manifest_store=grouped_store,
+        batch_period=grouped_period,
+        export_mode=ExportMode.GROUPED,
+        group_plan=grouped_plan,
+        manual_orders=manual_orders,
+    )
+    expected_document_groups = len(
+        {file.employee_name for file in grouped_discovery.files}
+    )
+    grouped_artifacts = list(grouped_output_root.rglob("*.pdf"))
+    expected_grouped_artifacts = len(grouped_artifacts)
     auto_ordered_groups = sum(
         1 for group in grouped_plan.affected_groups if not group.review_required
     )
     review_required_groups = len(grouped_plan.review_groups)
-    incorrect_auto_order_count = 0
+    incorrect_auto_order_count = sum(
+        1
+        for group in grouped_plan.affected_groups
+        if not group.review_required
+        and grouped_manifest.groups[
+            f"{group.key.employee_relative_dir}:{group.key.year:04d}-{group.key.month:02d}"
+        ].source_relative_paths
+        != sorted(group.source_relative_paths)
+    )
+    assert grouped_result.summary.failed == 0
     assert grouped_plan.affected_group_count == expected_document_groups
+    assert expected_grouped_artifacts == expected_document_groups
     assert auto_ordered_groups == 0
     assert review_required_groups == expected_document_groups
     assert incorrect_auto_order_count == 0
@@ -178,7 +215,7 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
                 "rebuiltProcessed": rebuilt_result.summary.total_images,
                 "finalPdfCount": len(list(output_root.rglob("*.pdf"))),
                 "expectedDocumentGroups": expected_document_groups,
-                "expectedGroupedArtifacts": expected_document_groups,
+                "expectedGroupedArtifacts": expected_grouped_artifacts,
                 "autoOrderedGroups": auto_ordered_groups,
                 "reviewRequiredGroups": review_required_groups,
                 "incorrectAutoOrderCount": incorrect_auto_order_count,

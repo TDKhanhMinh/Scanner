@@ -10,14 +10,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Set, Union
 
 from attendance_scanner.contracts import (
     BatchPeriod,
     BatchSummary,
+    CompletenessStatus,
     DiscoveredFile,
     DiscoveryResult,
     DocumentGroupKey,
+    ExportMode,
     FileProcessingStatus,
     FileResult,
     ImageProcessError,
@@ -27,7 +29,10 @@ from attendance_scanner.contracts import (
     ScannerErrorCode,
 )
 from attendance_scanner.diagnostics import describe_scanner_error, log_scanner_error
-from attendance_scanner.discovery import DEFAULT_PIPELINE_VERSION
+from attendance_scanner.discovery import (
+    DEFAULT_PIPELINE_VERSION,
+    GroupAwareScanPlan,
+)
 from attendance_scanner.events import (
     BaseEvent,
     FileCompletedEvent,
@@ -35,6 +40,11 @@ from attendance_scanner.events import (
     FileStartedEvent,
     ScanCompletedEvent,
     serialize_event,
+)
+from attendance_scanner.export import (
+    ExportPage,
+    ExportReviewRequiredError,
+    export_grouped,
 )
 from attendance_scanner.fingerprint import compute_fast_fingerprint, compute_sha256
 from attendance_scanner.pdf_export import PdfExportConfig, export_single_page_pdf
@@ -45,7 +55,9 @@ from attendance_scanner.pipeline.orchestrator import (
 )
 from attendance_scanner.state import (
     Manifest,
+    ManifestArtifact,
     ManifestEntry,
+    ManifestGroup,
     ManifestStore,
     assign_entry_context,
     set_manual_group_order,
@@ -54,6 +66,11 @@ from attendance_scanner.state import (
 logger = logging.getLogger(__name__)
 
 EventEmitter = Callable[[BaseEvent], None]
+
+
+def _group_id(key: DocumentGroupKey) -> str:
+    """Return the stable UI/CLI identifier for an employee-period group."""
+    return f"{key.employee_relative_dir}:{key.year:04d}-{key.month:02d}"
 
 
 def _persist_manual_orders(
@@ -100,6 +117,158 @@ def _persist_manual_orders(
         changed = True
     if changed:
         manifest_store.save_manifest(manifest)
+
+
+def _validate_grouped_run(
+    group_plan: GroupAwareScanPlan,
+    manual_orders: Optional[Dict[str, List[str]]],
+    skip_groups: Optional[Set[str]],
+) -> None:
+    """Reject grouped execution unless every review group has an explicit decision."""
+    orders = manual_orders or {}
+    skipped = skip_groups or set()
+    for review_group in group_plan.review_groups:
+        group_id = _group_id(review_group.key)
+        if group_id not in skipped and group_id not in orders:
+            raise ExportReviewRequiredError(
+                f"Grouped export requires page-order review for group {group_id!r}"
+            )
+    for group in group_plan.affected_groups:
+        group_id = _group_id(group.key)
+        if group_id in skipped or group_id not in orders:
+            continue
+        normalized_order = [path.replace("\\", "/") for path in orders[group_id]]
+        expected_paths = {
+            path.replace("\\", "/") for path in group.source_relative_paths
+        }
+        if (
+            len(normalized_order) != len(set(normalized_order))
+            or set(normalized_order) != expected_paths
+        ):
+            raise ExportReviewRequiredError(
+                f"Manual page order does not match current sources for group {group_id!r}"
+            )
+
+
+def _export_grouped_results(
+    outcomes: Dict[int, _FileOutcome],
+    selected_files: List[DiscoveredFile],
+    group_plan: GroupAwareScanPlan,
+    manifest: Manifest,
+    manifest_store: ManifestStore,
+    output_root: Path,
+    pdf_config: Optional[PdfExportConfig],
+    manual_orders: Optional[Dict[str, List[str]]],
+    skip_groups: Set[str],
+) -> Dict[str, str]:
+    """Build grouped PDFs and persist group/artifact dependencies atomically."""
+    outcome_by_path = {
+        file.relative_path.replace("\\", "/"): outcomes[index]
+        for index, file in enumerate(selected_files, start=1)
+    }
+    exported_path_by_source: Dict[str, str] = {}
+    changed = False
+    for group in group_plan.affected_groups:
+        group_id = _group_id(group.key)
+        if group_id in skip_groups:
+            continue
+        group_pages: List[ExportPage] = []
+        source_entries: List[ManifestEntry] = []
+        group_failed = False
+        for source_path in group.source_relative_paths:
+            normalized_path = source_path.replace("\\", "/")
+            outcome = outcome_by_path.get(normalized_path)
+            entry = manifest.get_entry(normalized_path)
+            if (
+                outcome is None
+                or outcome.scan_result is None
+                or outcome.file_result.status == FileProcessingStatus.FAILED
+                or entry is None
+            ):
+                group_failed = True
+                break
+            source_entries.append(entry)
+            identity = entry.page_identity
+            group_pages.append(
+                ExportPage(
+                    image=outcome.scan_result.image,
+                    source_relative_path=normalized_path,
+                    employee_name=group.key.employee_relative_dir,
+                    page_type=identity.page_type,
+                    page_order=identity.page_order,
+                    confidence=identity.confidence,
+                    detection_method=identity.detection_method,
+                )
+            )
+        if group_failed:
+            continue
+
+        persisted_group = manifest.groups.get(group_id)
+        effective_orders: Dict[str, List[str]] = {}
+        if manual_orders and group_id in manual_orders:
+            effective_orders[group_id] = list(manual_orders[group_id])
+        elif persisted_group and persisted_group.manual_order:
+            effective_orders[group_id] = list(persisted_group.manual_order)
+        artifacts = export_grouped(
+            group_pages,
+            output_root,
+            group_plan.period,
+            config=pdf_config,
+            manual_orders=effective_orders or None,
+        )
+        if len(artifacts) != 1:
+            raise ValueError(f"Expected one grouped artifact for group {group_id!r}")
+        artifact = artifacts[0]
+        artifact_relative_path = artifact.output_path.resolve().relative_to(output_root.resolve())
+        artifact_relative_path_text = artifact_relative_path.as_posix()
+        for source_path in artifact.source_relative_paths:
+            exported_path_by_source[source_path.replace("\\", "/")] = artifact_relative_path_text
+
+        explicit_order = effective_orders.get(group_id)
+        if explicit_order:
+            set_manual_group_order(
+                manifest,
+                group_key=group.key,
+                ordered_source_paths=artifact.source_relative_paths,
+                source_entries=source_entries,
+            )
+            persisted_group = manifest.groups[group_id]
+        else:
+            persisted_group = ManifestGroup(
+                key=group.key,
+                source_relative_paths=list(artifact.source_relative_paths),
+                artifact_relative_paths=[artifact_relative_path_text],
+                completeness_status=CompletenessStatus.COMPLETE,
+                review_required=False,
+                manual_order=(
+                    list(persisted_group.manual_order) if persisted_group else []
+                ),
+                manual_order_fingerprint=(
+                    persisted_group.manual_order_fingerprint if persisted_group else None
+                ),
+            )
+        persisted_group.source_relative_paths = list(artifact.source_relative_paths)
+        persisted_group.artifact_relative_paths = [artifact_relative_path_text]
+        persisted_group.completeness_status = CompletenessStatus.COMPLETE
+        persisted_group.review_required = False
+        manifest.set_group(persisted_group)
+        manifest.set_artifact(
+            ManifestArtifact(
+                export_mode=ExportMode.GROUPED,
+                output_relative_path=artifact_relative_path_text,
+                source_relative_paths=list(artifact.source_relative_paths),
+                artifact_version=DEFAULT_PIPELINE_VERSION,
+            )
+        )
+        for entry in source_entries:
+            entry.output_relative_path = artifact_relative_path_text
+            entry.output_relative_paths = [artifact_relative_path_text]
+            entry.artifact_dependencies = [artifact_relative_path_text]
+            manifest.set_entry(entry)
+        changed = True
+    if changed:
+        manifest_store.save_manifest(manifest)
+    return exported_path_by_source
 
 
 def default_worker_count() -> int:
@@ -251,6 +420,7 @@ class _FileOutcome:
     file_result: FileResult
     completed_event: Optional[FileCompletedEvent] = None
     failed_event: Optional[FileFailedEvent] = None
+    scan_result: Optional[SingleScanResult] = None
 
 
 @dataclass
@@ -283,6 +453,7 @@ def _process_one_file(
     events: List[BaseEvent],
     emit: Optional[EventEmitter],
     batch_period: Optional[BatchPeriod],
+    export_mode: ExportMode,
 ) -> _FileOutcome:
     """Process one file; all exceptions become a file-level failure outcome."""
     started_at = time.perf_counter()
@@ -314,8 +485,9 @@ def _process_one_file(
             mode=mode,
             config=pipeline_config,
         )
-        target_path = _resolve_output_path(output_root, file.target_relative_pdf)
-        export_single_page_pdf(scan_result, target_path, config=pdf_config)
+        if export_mode == ExportMode.PER_IMAGE:
+            target_path = _resolve_output_path(output_root, file.target_relative_pdf)
+            export_single_page_pdf(scan_result, target_path, config=pdf_config)
 
         final_size, final_mtime_ns = compute_fast_fingerprint(source_path)
         if (final_size, final_mtime_ns) != (source_size, source_mtime_ns):
@@ -330,23 +502,39 @@ def _process_one_file(
             else FileProcessingStatus.SUCCESS
         )
         previous = manifest.get_entry(file.relative_path)
+        output_relative_path: Optional[str] = file.target_relative_pdf
+        output_relative_paths = (
+            list(previous.output_relative_paths)
+            if previous is not None
+            else [file.target_relative_pdf]
+        )
+        artifact_dependencies = (
+            list(previous.artifact_dependencies)
+            if previous is not None
+            else [file.target_relative_pdf]
+        )
+        if export_mode == ExportMode.GROUPED:
+            output_relative_path = previous.output_relative_path if previous is not None else None
+            output_relative_paths = (
+                list(previous.output_relative_paths) if previous is not None else []
+            )
+            artifact_dependencies = (
+                list(previous.artifact_dependencies) if previous is not None else []
+            )
         manifest_entry = ManifestEntry(
             relative_path=file.relative_path,
             size=source_size,
             mtime_ns=source_mtime_ns,
             sha256=source_hash,
-            output_relative_path=file.target_relative_pdf,
+            output_relative_path=output_relative_path,
+            output_relative_paths=output_relative_paths,
             status=status,
             processed_at=datetime.now(timezone.utc).isoformat(),
             pipeline_version=pipeline_version,
             period=previous.period if previous is not None else batch_period,
             group_key=previous.group_key if previous is not None else None,
             page_identity=previous.page_identity if previous is not None else PageIdentity(),
-            artifact_dependencies=(
-                list(previous.artifact_dependencies)
-                if previous is not None
-                else [file.target_relative_pdf]
-            ),
+            artifact_dependencies=artifact_dependencies,
         )
         if batch_period is not None:
             assign_entry_context(
@@ -376,6 +564,7 @@ def _process_one_file(
                 warning=scan_result.warning,
                 duration_ms=duration_ms,
             ),
+            scan_result=scan_result,
         )
     except Exception as exc:
         error_code, error_message = _error_details(exc, relative_path=file.relative_path)
@@ -447,6 +636,9 @@ def run_batch(
     batch_period: Optional[BatchPeriod] = None,
     process_files: Optional[List[DiscoveredFile]] = None,
     manual_orders: Optional[Dict[str, List[str]]] = None,
+    export_mode: Union[ExportMode, str] = ExportMode.PER_IMAGE,
+    group_plan: Optional[GroupAwareScanPlan] = None,
+    skip_groups: Optional[Set[str]] = None,
 ) -> BatchRunResult:
     """Run the classified process set with resumable per-file isolation.
 
@@ -468,11 +660,39 @@ def run_batch(
         raise ValueError(f"Output root is not a directory: {effective_output_root}")
 
     scan_mode = _normalize_scan_mode(mode)
+    if isinstance(export_mode, ExportMode):
+        scan_export_mode = export_mode
+    else:
+        try:
+            scan_export_mode = ExportMode(str(export_mode).replace("-", "_").upper())
+        except ValueError as exc:
+            raise ValueError(f"Unsupported export mode: {export_mode!r}") from exc
     worker_count = clamp_worker_count(workers)
     store = manifest_store or ManifestStore()
-    selected_files = (
-        list(process_files) if process_files is not None else list(discovery.files_to_process)
-    )
+    if process_files is not None:
+        candidates = list(process_files)
+    elif scan_export_mode == ExportMode.GROUPED:
+        candidates = list(discovery.files)
+    else:
+        candidates = list(discovery.files_to_process)
+    effective_skip_groups = set(skip_groups or set())
+    if scan_export_mode == ExportMode.GROUPED:
+        if group_plan is None:
+            raise ValueError("GROUPED execution requires a group-aware scan plan")
+        _validate_grouped_run(group_plan, manual_orders, effective_skip_groups)
+        process_paths = {
+            path.replace("\\", "/")
+            for group in group_plan.affected_groups
+            if _group_id(group.key) not in effective_skip_groups
+            for path in group.process_relative_paths
+        }
+        selected_files = [
+            file
+            for file in candidates
+            if file.relative_path.replace("\\", "/") in process_paths
+        ]
+    else:
+        selected_files = candidates
     total = len(selected_files)
     events: List[BaseEvent] = []
     outcomes: Dict[int, _FileOutcome] = {}
@@ -500,6 +720,7 @@ def run_batch(
                 events,
                 emit,
                 batch_period,
+                scan_export_mode,
             )
             futures[future] = index
 
@@ -507,12 +728,35 @@ def run_batch(
             index = futures[future]
             outcome = future.result()
             outcomes[index] = outcome
+            if scan_export_mode == ExportMode.PER_IMAGE and outcome.completed_event is not None:
+                _emit_event(outcome.completed_event, events, emit, event_lock)
+            elif scan_export_mode == ExportMode.PER_IMAGE and outcome.failed_event is not None:
+                _emit_event(outcome.failed_event, events, emit, event_lock)
+
+    ordered_outcomes = [outcomes[index] for index in sorted(outcomes)]
+    if scan_export_mode == ExportMode.GROUPED and group_plan is not None:
+        grouped_outputs = _export_grouped_results(
+            outcomes,
+            selected_files,
+            group_plan,
+            manifest,
+            store,
+            effective_output_root,
+            pdf_config,
+            manual_orders,
+            effective_skip_groups,
+        )
+        for outcome in ordered_outcomes:
+            relative_path = outcome.file_result.relative_path.replace("\\", "/")
+            grouped_output = grouped_outputs.get(relative_path)
+            if grouped_output is not None:
+                outcome.file_result.target_relative_pdf = grouped_output
+                if outcome.completed_event is not None:
+                    outcome.completed_event.output_relative_path = grouped_output
             if outcome.completed_event is not None:
                 _emit_event(outcome.completed_event, events, emit, event_lock)
             elif outcome.failed_event is not None:
                 _emit_event(outcome.failed_event, events, emit, event_lock)
-
-    ordered_outcomes = [outcomes[index] for index in sorted(outcomes)]
     file_results = [outcome.file_result for outcome in ordered_outcomes]
     success_count = sum(
         1 for result in file_results if result.status == FileProcessingStatus.SUCCESS
@@ -531,7 +775,8 @@ def run_batch(
         skipped=max(0, discovery.image_count - total),
         duration_ms=int(round((time.perf_counter() - batch_started_at) * 1000.0)),
     )
-    _persist_manual_orders(manifest, store, discovery, batch_period, manual_orders)
+    if scan_export_mode == ExportMode.PER_IMAGE:
+        _persist_manual_orders(manifest, store, discovery, batch_period, manual_orders)
     _emit_event(ScanCompletedEvent.from_summary(summary), events, emit, event_lock)
 
     return BatchRunResult(

@@ -185,7 +185,7 @@ def export_grouped(
             ordered_pages = [by_source[source] for source in normalized_order]
         else:
             decision = order_source_pages([page.identity for page in group_pages])
-            if decision.review_required and not manual_order:
+            if decision.review_required:
                 raise ExportReviewRequiredError(
                     f"Grouped export requires page-order review for employee {employee_name!r}: "
                     f"{decision.reason}"

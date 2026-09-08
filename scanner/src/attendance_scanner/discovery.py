@@ -281,10 +281,33 @@ def _classify_file(
     entry: Optional[ManifestEntry],
     output_root: Union[str, Path],
     manifest: Manifest,
+    required_output_mode: Optional[ExportMode] = None,
 ) -> FileClassification:
     """Classify one discovered file according to the AS-11 state rules."""
     if entry is None:
         return FileClassification.NEW
+
+    if required_output_mode == ExportMode.PER_IMAGE:
+        expected_output = file.target_relative_pdf.replace("\\", "/")
+        recorded_outputs = {
+            path.replace("\\", "/") for path in entry.output_relative_paths
+        }
+        if entry.output_relative_path:
+            recorded_outputs.add(entry.output_relative_path.replace("\\", "/"))
+        if expected_output not in recorded_outputs or not _output_paths_exist(
+            output_root,
+            ManifestEntry(
+                relative_path=entry.relative_path,
+                size=entry.size,
+                mtime_ns=entry.mtime_ns,
+                sha256=entry.sha256,
+                output_relative_path=expected_output,
+                status=entry.status,
+                processed_at=entry.processed_at,
+                pipeline_version=entry.pipeline_version,
+            ),
+        ):
+            return FileClassification.REBUILD
 
     output_exists = _output_paths_exist(output_root, entry)
     if not output_exists:
@@ -321,6 +344,7 @@ def classify_discovered_files(
     manifest: Manifest,
     output_root: Optional[Union[str, Path]] = None,
     pipeline_version: str = DEFAULT_PIPELINE_VERSION,
+    required_output_mode: Optional[ExportMode] = None,
 ) -> DiscoveryResult:
     """Apply manifest-backed incremental classifications to a discovery result.
 
@@ -346,6 +370,7 @@ def classify_discovered_files(
             entry=entry,
             output_root=effective_output_root,
             manifest=manifest,
+            required_output_mode=required_output_mode,
         )
 
     discovery.outdated_pipeline_count = outdated_count
@@ -357,6 +382,7 @@ def build_incremental_scan_plan(
     manifest: Manifest,
     output_root: Optional[Union[str, Path]] = None,
     pipeline_version: str = DEFAULT_PIPELINE_VERSION,
+    required_output_mode: Optional[ExportMode] = None,
 ) -> ScanPlan:
     """Classify a discovery inventory and return its aggregate scan plan.
 
@@ -368,6 +394,7 @@ def build_incremental_scan_plan(
         manifest=manifest,
         output_root=output_root,
         pipeline_version=pipeline_version,
+        required_output_mode=required_output_mode,
     )
     effective_output_root = output_root or manifest.output_root
     return discovery.to_scan_plan(output_root=str(effective_output_root))
@@ -493,7 +520,7 @@ def build_group_aware_scan_plan(
                 ]
                 if len(known_orders) != len(set(known_orders)):
                     reasons.append("duplicate_page_order")
-                if len(entries) < 2 or not {1, 2}.issubset(set(known_orders)):
+                if len(entries) < 2:
                     reasons.append("missing_expected_page")
         if persisted_group and not _group_artifacts_exist(effective_output_root, artifact_paths):
             reasons.append("missing_grouped_output")

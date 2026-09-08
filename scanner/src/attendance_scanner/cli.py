@@ -79,6 +79,7 @@ def _report_cli_error(exc: BaseException, *, operation: ScannerOperation) -> int
 def _prepare_plan(
     input_root: str,
     output_root: Optional[str],
+    required_output_mode: Optional[ExportMode] = None,
 ) -> tuple[DiscoveryResult, Manifest, ManifestStore, str, ScanPlan]:
     """Discover, load state, classify files and persist only metadata-only updates."""
     validated_output_root = _validate_output_root(output_root)
@@ -92,6 +93,7 @@ def _prepare_plan(
         discovery=discovery,
         manifest=manifest,
         output_root=effective_output_root,
+        required_output_mode=required_output_mode,
     )
     if manifest.updated_at != previous_updated_at:
         store.save_manifest(manifest)
@@ -143,6 +145,22 @@ def _parse_manual_orders(value: Optional[str]) -> Optional[dict[str, List[str]]]
             raise CliArgumentError(f"Manual order contains duplicate paths for {group_id!r}")
         parsed[group_id] = normalized_paths
     return parsed
+
+
+def _parse_skip_groups(value: Optional[str]) -> set[str]:
+    """Parse group ids that the operator explicitly chose to skip."""
+    if value is None:
+        return set()
+    try:
+        raw = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise CliArgumentError("--skip-group-json must contain a JSON array") from exc
+    if not isinstance(raw, list) or not all(isinstance(group_id, str) for group_id in raw):
+        raise CliArgumentError("--skip-group-json must contain an array of group ids")
+    groups = {group_id.strip() for group_id in raw}
+    if "" in groups or len(groups) != len(raw):
+        raise CliArgumentError("Skipped group ids must be non-empty and unique")
+    return groups
 
 
 def _group_summary(
@@ -310,6 +328,11 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON object mapping employee:YYYY-MM groups to ordered source paths",
     )
+    scan_parser.add_argument(
+        "--skip-group-json",
+        default=None,
+        help="JSON array of employee:YYYY-MM groups to skip",
+    )
 
     return parser
 
@@ -317,9 +340,13 @@ def create_parser() -> argparse.ArgumentParser:
 def handle_plan(args: argparse.Namespace) -> int:
     """Execute plan subcommand by discovering employee folders and emitting ScanPlanEvent."""
     try:
-        _, _, _, _, plan = _prepare_plan(args.input, args.output)
         period = _parse_batch_period(args)
         export_mode = _parse_export_mode(args.export_mode)
+        _, _, _, _, plan = _prepare_plan(
+            args.input,
+            args.output,
+            required_output_mode=export_mode,
+        )
         event = _plan_event(
             plan,
             input_root=args.input,
@@ -339,9 +366,13 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
         period = _parse_batch_period(args)
         export_mode = _parse_export_mode(args.export_mode)
         manual_orders = _parse_manual_orders(args.manual_order_json)
+        skip_groups = _parse_skip_groups(args.skip_group_json)
+        if export_mode == ExportMode.GROUPED and period is None:
+            raise CliArgumentError("Grouped export requires --year and --month")
         discovery, manifest, store, effective_output_root, plan = _prepare_plan(
             args.input,
             args.output,
+            required_output_mode=export_mode,
         )
         plan_event = _plan_event(
             plan,
@@ -351,6 +382,18 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             export_mode=export_mode,
         )
         emit_jsonl_event(plan_event)
+
+        group_plan = (
+            build_group_aware_scan_plan(
+                discovery,
+                manifest,
+                effective_output_root,
+                period,
+                export_mode=export_mode,
+            )
+            if export_mode == ExportMode.GROUPED and period is not None
+            else None
+        )
 
         result = run_batch(
             discovery=discovery,
@@ -362,6 +405,9 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             emit=emit_jsonl_event,
             batch_period=period,
             manual_orders=manual_orders,
+            export_mode=export_mode,
+            group_plan=group_plan,
+            skip_groups=skip_groups,
         )
         sys.stdout.flush()
         return result.exit_code

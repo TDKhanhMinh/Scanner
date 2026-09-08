@@ -177,7 +177,7 @@ def configure_logging(log_path: Optional[Path] = None) -> None:
             maxBytes=2_000_000,
             backupCount=3,
             encoding="utf-8",
-            delay=True,
+            delay=False,
         )
     except OSError:
         return

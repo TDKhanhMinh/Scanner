@@ -286,6 +286,21 @@ fn validate_manual_order(value: Option<&Value>) -> Result<(), ScannerBridgeError
     Ok(())
 }
 
+fn validate_skip_groups(value: Option<&Vec<String>>) -> Result<(), ScannerBridgeError> {
+    let Some(groups) = value else {
+        return Ok(());
+    };
+    let mut seen = HashSet::new();
+    for group_id in groups {
+        if group_id.trim().is_empty() || !seen.insert(group_id.trim().to_string()) {
+            return Err(ScannerBridgeError::InvalidRequest {
+                message: "skipGroups must contain non-empty unique group ids".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_sidecar_args(
     command: &str,
@@ -297,6 +312,7 @@ fn build_sidecar_args(
     month: Option<u32>,
     export_mode: Option<&str>,
     manual_order_json: Option<&str>,
+    skip_group_json: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![
         command.to_string(),
@@ -326,6 +342,9 @@ fn build_sidecar_args(
             "--manual-order-json".to_string(),
             manual_order_json.to_string(),
         ]);
+    }
+    if let Some(skip_group_json) = skip_group_json {
+        args.extend(["--skip-group-json".to_string(), skip_group_json.to_string()]);
     }
     args
 }
@@ -619,6 +638,7 @@ async fn plan_scan(
         month,
         export_mode.as_deref(),
         None,
+        None,
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;
@@ -649,6 +669,7 @@ async fn start_scan(
     month: Option<u32>,
     export_mode: Option<String>,
     manual_order: Option<Value>,
+    skip_groups: Option<Vec<String>>,
 ) -> Result<ScanRunOutcome, ScannerBridgeError> {
     validate_request(
         input_root.as_str(),
@@ -660,6 +681,7 @@ async fn start_scan(
         export_mode.as_deref(),
     )?;
     validate_manual_order(manual_order.as_ref())?;
+    validate_skip_groups(skip_groups.as_ref())?;
     let manual_order_json = manual_order
         .as_ref()
         .map(serde_json::to_string)
@@ -667,6 +689,9 @@ async fn start_scan(
         .map_err(|error| ScannerBridgeError::InvalidRequest {
             message: format!("manualOrder could not be serialized: {error}"),
         })?;
+    let skip_group_json = skip_groups
+        .as_ref()
+        .map(|groups| serde_json::to_string(groups).expect("skip group ids should serialize"));
     let args = build_sidecar_args(
         "scan-batch",
         input_root.as_str(),
@@ -677,6 +702,7 @@ async fn start_scan(
         month,
         export_mode.as_deref(),
         manual_order_json.as_deref(),
+        skip_group_json.as_deref(),
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;
@@ -772,6 +798,7 @@ mod tests {
             Some(r"D:\Attendance Output"),
             Some("gray"),
             Some(3),
+            None,
             None,
             None,
             None,
@@ -900,6 +927,7 @@ mod tests {
             Some(9),
             Some("grouped"),
             None,
+            None,
         );
         assert_eq!(
             args,
@@ -943,6 +971,7 @@ mod tests {
             Some(9),
             Some("grouped"),
             Some(&encoded),
+            None,
         );
         assert_eq!(args[args.len() - 2], "--manual-order-json");
         assert_eq!(args.last(), Some(&encoded));

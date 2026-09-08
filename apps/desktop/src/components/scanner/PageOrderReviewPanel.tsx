@@ -8,6 +8,7 @@ export interface PageOrderReviewPanelProps {
   groups: ReviewGroup[];
   onResolve: (groupId: string, orderedPaths: string[]) => void;
   onSkip: (groupId: string) => void;
+  onPreview?: (sourcePath: string) => void;
   resolvedGroups?: Record<string, "resolved" | "skipped">;
 }
 
@@ -42,6 +43,7 @@ export function PageOrderReviewPanel({
   groups,
   onResolve,
   onSkip,
+  onPreview,
   resolvedGroups = {},
 }: PageOrderReviewPanelProps) {
   const [workingOrders, setWorkingOrders] = useState<Record<string, string[]>>({});
@@ -116,9 +118,22 @@ export function PageOrderReviewPanel({
                         className="flex min-w-0 flex-1 items-center gap-2"
                         aria-label={`Preview ${path}`}
                       >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
-                          <Eye className="h-4 w-4 text-primary" />
-                        </div>
+                        {onPreview ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Xem preview ${path}`}
+                            onClick={() => onPreview(path)}
+                            className="h-10 w-10 shrink-0 p-0"
+                          >
+                            <Eye className="h-4 w-4 text-primary" />
+                          </Button>
+                        ) : (
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10">
+                            <Eye className="h-4 w-4 text-primary" />
+                          </div>
+                        )}
                         <div className="min-w-0">
                           <p className="truncate font-mono text-xs text-foreground" title={path}>
                             {path}
