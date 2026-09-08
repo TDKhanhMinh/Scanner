@@ -17,6 +17,7 @@ from attendance_scanner.contracts import (
     ImageDecodeError,
     ImageProcessError,
     InvalidInputRootError,
+    OutputNotWritableError,
     PdfWriteError,
     ScanBatchRequest,
     ScanMode,
@@ -25,6 +26,13 @@ from attendance_scanner.contracts import (
     ScannerWarningCode,
     ScanPlan,
     StateError,
+)
+from attendance_scanner.diagnostics import (
+    ScannerErrorInfo,
+    configure_logging,
+    describe_scanner_error,
+    log_scanner_error,
+    scanner_error_user_message,
 )
 from attendance_scanner.discovery import (
     DEFAULT_PIPELINE_VERSION,
@@ -99,10 +107,16 @@ __all__ = [
     "ScannerWarningCode",
     "ScannerError",
     "InvalidInputRootError",
+    "OutputNotWritableError",
     "ImageDecodeError",
     "ImageProcessError",
     "PdfWriteError",
     "StateError",
+    "ScannerErrorInfo",
+    "configure_logging",
+    "describe_scanner_error",
+    "log_scanner_error",
+    "scanner_error_user_message",
     "DiscoveredFile",
     "DiscoveryResult",
     "ScanPlan",

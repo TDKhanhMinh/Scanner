@@ -120,7 +120,9 @@ def test_scan_batch_subprocess_invalid_output_is_fatal_without_jsonl_noise(tmp_p
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "Output root is not a directory" in result.stderr
+    diagnostics = json.loads(result.stderr.strip())
+    assert diagnostics["errorCode"] == "OUTPUT_NOT_WRITABLE"
+    assert "quyền" in diagnostics["message"]
 
 
 def test_invalid_cli_arguments_use_fatal_exit_code_1(tmp_path: Path):
@@ -148,5 +150,5 @@ def test_invalid_cli_arguments_use_fatal_exit_code_1(tmp_path: Path):
     assert invalid_workers.returncode == 1
     assert invalid_mode.stdout == ""
     assert invalid_workers.stdout == ""
-    assert "invalid choice" in invalid_mode.stderr
-    assert "invalid int value" in invalid_workers.stderr
+    assert json.loads(invalid_mode.stderr)["errorCode"] == "INVALID_REQUEST"
+    assert json.loads(invalid_workers.stderr)["errorCode"] == "INVALID_REQUEST"

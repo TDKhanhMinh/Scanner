@@ -13,11 +13,13 @@ export const SCANNER_STDERR_CHANNEL = "scanner://stderr";
 export interface ScannerDiagnostic {
   stream: "stderr";
   message: string;
+  errorCode?: string;
 }
 
 export interface ScannerBridgeError {
   kind?: string;
   message?: string;
+  errorCode?: string;
   code?: number;
 }
 
@@ -68,15 +70,85 @@ export function listenScannerDiagnostics(
   });
 }
 
+const USER_MESSAGES: Record<string, string> = {
+  INVALID_REQUEST: "Yêu cầu quét chưa hợp lệ. Hãy kiểm tra lại các tùy chọn và đường dẫn.",
+  INVALID_INPUT_ROOT:
+    "Không tìm thấy hoặc không thể truy cập thư mục ảnh gốc. Hãy kiểm tra đường dẫn và quyền truy cập.",
+  OUTPUT_NOT_WRITABLE:
+    "Không thể ghi vào thư mục xuất PDF. Hãy chọn thư mục khác hoặc kiểm tra quyền truy cập.",
+  IMAGE_DECODE_FAILED:
+    "Không thể đọc ảnh này. Hãy kiểm tra file có bị hỏng và thuộc định dạng được hỗ trợ.",
+  PDF_WRITE_FAILED:
+    "Không thể tạo file PDF. Hãy kiểm tra dung lượng và quyền ghi của thư mục xuất.",
+  STATE_READ_FAILED:
+    "Không thể đọc trạng thái quét trước đó. Hãy thử lại hoặc chọn lại thư mục.",
+  STATE_WRITE_FAILED:
+    "Không thể lưu trạng thái quét. Hãy kiểm tra quyền ghi của thư mục ứng dụng.",
+  OUTPUT_COLLISION:
+    "Tên file PDF bị trùng. Hãy đổi tên ảnh hoặc chọn thư mục xuất khác.",
+  SCANNER_ALREADY_RUNNING: "Một đợt quét khác đang chạy. Hãy chờ đợt quét hiện tại hoàn tất.",
+  SIDECAR_LAUNCH_FAILED:
+    "Không thể khởi động scanner sidecar. Hãy kiểm tra bản cài đặt và thử lại.",
+  SIDECAR_STREAM_FAILED: "Kết nối với scanner sidecar bị gián đoạn. Hãy thử lại.",
+  INVALID_SCANNER_EVENT: "Scanner sidecar trả về dữ liệu không hợp lệ. Hãy thử lại.",
+  MISSING_SCAN_PLAN: "Scanner sidecar chưa tạo được kế hoạch quét. Hãy kiểm tra thư mục đầu vào.",
+  SIDECAR_EXITED: "Scanner sidecar đã dừng bất thường. Hãy thử lại; nếu lỗi lặp lại, gửi mã cho hỗ trợ.",
+  SCANNER_INTERNAL_ERROR: "Scanner gặp lỗi nội bộ. Hãy thử lại; nếu lỗi lặp lại, gửi mã cho hỗ trợ.",
+  UNEXPECTED_ERROR:
+    "Đã xảy ra lỗi không xác định khi quét. Vui lòng thử lại; nếu lỗi lặp lại, gửi mã cho bộ phận hỗ trợ.",
+};
+
+const BRIDGE_ERROR_CODES: Record<string, string> = {
+  alreadyRunning: "SCANNER_ALREADY_RUNNING",
+  invalidRequest: "INVALID_REQUEST",
+  launchFailed: "SIDECAR_LAUNCH_FAILED",
+  streamFailed: "SIDECAR_STREAM_FAILED",
+  invalidEvent: "INVALID_SCANNER_EVENT",
+  missingPlan: "MISSING_SCAN_PLAN",
+  sidecarExited: "SIDECAR_EXITED",
+  internal: "SCANNER_INTERNAL_ERROR",
+};
+
+function hasOwnMessage(code: string): boolean {
+  return Object.prototype.hasOwnProperty.call(USER_MESSAGES, code);
+}
+
+function bridgeErrorCode(kind: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(BRIDGE_ERROR_CODES, kind)
+    ? BRIDGE_ERROR_CODES[kind]
+    : undefined;
+}
+
+function formatScannerError(code: string): string {
+  const normalizedCode = hasOwnMessage(code) ? code : "UNEXPECTED_ERROR";
+  return `${normalizedCode}: ${USER_MESSAGES[normalizedCode]}`;
+}
+
 export function scannerErrorMessage(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
-  }
   if (typeof error === "object" && error !== null) {
     const bridgeError = error as ScannerBridgeError;
-    if (bridgeError.message) {
-      return bridgeError.message;
+    if (bridgeError.errorCode) {
+      return formatScannerError(bridgeError.errorCode);
+    }
+    if (bridgeError.kind) {
+      const code = bridgeErrorCode(bridgeError.kind);
+      if (code) {
+        return formatScannerError(code);
+      }
     }
   }
-  return "Không thể kết nối tới scanner sidecar.";
+  return formatScannerError("UNEXPECTED_ERROR");
+}
+
+export function scannerDiagnosticMessage(diagnostic: unknown): string {
+  if (
+    typeof diagnostic === "object" &&
+    diagnostic !== null &&
+    "errorCode" in diagnostic &&
+    typeof diagnostic.errorCode === "string" &&
+    hasOwnMessage(diagnostic.errorCode)
+  ) {
+    return formatScannerError(diagnostic.errorCode);
+  }
+  return formatScannerError("UNEXPECTED_ERROR");
 }

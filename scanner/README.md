@@ -31,3 +31,12 @@ python -m attendance_scanner.cli scan-batch --input "<path_to_input_images>" --o
 and checkpoints the manifest after every terminal file state. Exit code `0`
 means all selected files completed, `2` means the batch completed with one or
 more file failures, and `1` is reserved for fatal configuration/runtime errors.
+
+## Diagnostics
+
+Fatal and per-file errors use stable `errorCode` values and actionable messages.
+The sidecar writes one safe structured JSON diagnostic per error to `stderr` and
+keeps detailed exception text and tracebacks in
+`%APPDATA%/attendance-scanner/attendance-scanner.log` on Windows (or the
+platform equivalent from the configured application data directory). Image
+bytes are never logged; file-level records use relative source paths.

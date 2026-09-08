@@ -8,9 +8,14 @@ from typing import List, NoReturn, Optional
 from attendance_scanner.batch import run_batch
 from attendance_scanner.contracts import (
     DiscoveryResult,
-    InvalidInputRootError,
+    OutputNotWritableError,
     ScanPlan,
-    StateError,
+)
+from attendance_scanner.diagnostics import (
+    ScannerOperation,
+    configure_logging,
+    describe_scanner_error,
+    log_scanner_error,
 )
 from attendance_scanner.discovery import (
     build_incremental_scan_plan,
@@ -21,7 +26,7 @@ from attendance_scanner.events import (
     ScanPlanEvent,
     serialize_event,
 )
-from attendance_scanner.state import Manifest, ManifestStore
+from attendance_scanner.state import Manifest, ManifestStore, get_default_state_dir
 
 
 class CliArgumentError(ValueError):
@@ -55,8 +60,15 @@ def _validate_output_root(output_root: Optional[str]) -> Optional[str]:
         return None
     resolved = Path(output_root).resolve()
     if resolved.exists() and not resolved.is_dir():
-        raise ValueError(f"Output root is not a directory: {resolved}")
+        raise OutputNotWritableError(str(resolved), "Output root is not a directory")
     return str(resolved)
+
+
+def _report_cli_error(exc: BaseException, *, operation: ScannerOperation) -> int:
+    """Log a structured fatal error and keep stderr free of tracebacks."""
+    info = describe_scanner_error(exc, operation=operation)
+    log_scanner_error(info, exc, operation=operation)
+    return 1
 
 
 def _prepare_plan(
@@ -173,11 +185,8 @@ def handle_plan(args: argparse.Namespace) -> int:
         event = ScanPlanEvent.from_plan(plan)
         emit_jsonl_event(event)
         return 0
-    except (InvalidInputRootError, StateError, ValueError) as exc:
-        message = exc.message if isinstance(exc, (InvalidInputRootError, StateError)) else str(exc)
-        sys.stderr.write(f"Error: {message}\n")
-        sys.stderr.flush()
-        return 1
+    except Exception as exc:
+        return _report_cli_error(exc, operation="plan")
 
 
 def handle_scan_batch(args: argparse.Namespace) -> int:
@@ -201,23 +210,19 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
         )
         sys.stdout.flush()
         return result.exit_code
-    except (InvalidInputRootError, StateError, ValueError) as exc:
-        message = exc.message if isinstance(exc, (InvalidInputRootError, StateError)) else str(exc)
-        sys.stderr.write(f"Error: {message}\n")
-        sys.stderr.flush()
-        return 1
+    except Exception as exc:
+        return _report_cli_error(exc, operation="request")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     """Main CLI entrypoint."""
     configure_stdio()
+    configure_logging(get_default_state_dir().parent / "attendance-scanner.log")
     parser = create_parser()
     try:
         args = parser.parse_args(argv)
     except CliArgumentError as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        sys.stderr.flush()
-        return 1
+        return _report_cli_error(exc, operation="request")
 
     if not args.command:
         parser.print_help(sys.stderr)

@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   listenScannerEvents,
   planScan,
+  scannerDiagnosticMessage,
   scannerErrorMessage,
   startScan,
 } from "@/lib/scannerBridge";
@@ -96,8 +97,53 @@ describe("scannerBridge", () => {
 
   it("extracts typed bridge errors for the UI", () => {
     expect(scannerErrorMessage({ kind: "launchFailed", message: "Missing sidecar" })).toBe(
-      "Missing sidecar",
+      "SIDECAR_LAUNCH_FAILED: Không thể khởi động scanner sidecar. Hãy kiểm tra bản cài đặt và thử lại.",
     );
-    expect(scannerErrorMessage("sidecar failed")).toBe("sidecar failed");
+    expect(scannerErrorMessage({ errorCode: "IMAGE_DECODE_FAILED", message: "raw detail" })).toBe(
+      "IMAGE_DECODE_FAILED: Không thể đọc ảnh này. Hãy kiểm tra file có bị hỏng và thuộc định dạng được hỗ trợ.",
+    );
+    expect(scannerErrorMessage("sidecar failed")).toBe(
+      "UNEXPECTED_ERROR: Đã xảy ra lỗi không xác định khi quét. Vui lòng thử lại; nếu lỗi lặp lại, gửi mã cho bộ phận hỗ trợ.",
+    );
+  });
+
+  it("maps structured diagnostics without exposing traceback details", () => {
+    expect(
+      scannerDiagnosticMessage({
+        stream: "stderr",
+        errorCode: "OUTPUT_NOT_WRITABLE",
+        message: "raw diagnostic detail",
+      }),
+    ).toBe(
+      "OUTPUT_NOT_WRITABLE: Không thể ghi vào thư mục xuất PDF. Hãy chọn thư mục khác hoặc kiểm tra quyền truy cập.",
+    );
+
+    expect(
+      scannerDiagnosticMessage({
+        stream: "stderr",
+        message: "C:/private/traceback and technical details",
+      }),
+    ).toBe(
+      "UNEXPECTED_ERROR: Đã xảy ra lỗi không xác định khi quét. Vui lòng thử lại; nếu lỗi lặp lại, gửi mã cho bộ phận hỗ trợ.",
+    );
+
+    expect(
+      scannerDiagnosticMessage({
+        stream: "stderr",
+        message: { privatePath: "C:/private/image.jpg" },
+      } as unknown),
+    ).toBe(
+      "UNEXPECTED_ERROR: Đã xảy ra lỗi không xác định khi quét. Vui lòng thử lại; nếu lỗi lặp lại, gửi mã cho bộ phận hỗ trợ.",
+    );
+
+    expect(scannerErrorMessage({ errorCode: "constructor" })).toBe(
+      "UNEXPECTED_ERROR: Đã xảy ra lỗi không xác định khi quét. Vui lòng thử lại; nếu lỗi lặp lại, gửi mã cho bộ phận hỗ trợ.",
+    );
+    expect(scannerDiagnosticMessage({ errorCode: "toString" })).toBe(
+      "UNEXPECTED_ERROR: Đã xảy ra lỗi không xác định khi quét. Vui lòng thử lại; nếu lỗi lặp lại, gửi mã cho bộ phận hỗ trợ.",
+    );
+    expect(scannerErrorMessage({ kind: "hasOwnProperty" })).toBe(
+      "UNEXPECTED_ERROR: Đã xảy ra lỗi không xác định khi quét. Vui lòng thử lại; nếu lỗi lặp lại, gửi mã cho bộ phận hỗ trợ.",
+    );
   });
 });

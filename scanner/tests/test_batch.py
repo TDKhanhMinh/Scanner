@@ -1,5 +1,6 @@
 """Integration tests for the resumable bounded-concurrency batch engine (AS-12)."""
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -282,4 +283,6 @@ def test_cli_state_read_failure_returns_fatal_exit_code_1(tmp_path: Path, monkey
     exit_code = cli.main(["scan-batch", "--input", str(tmp_path)])
 
     assert exit_code == 1
-    assert "injected state read failure" in capsys.readouterr().err
+    diagnostics = json.loads(capsys.readouterr().err)
+    assert diagnostics["errorCode"] == "STATE_READ_FAILED"
+    assert "trạng thái" in diagnostics["message"]

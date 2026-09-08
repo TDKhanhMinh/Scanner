@@ -14,6 +14,7 @@ import {
   listenScannerDiagnostics,
   listenScannerEvents,
   planScan,
+  scannerDiagnosticMessage,
   scannerErrorMessage,
   startScan,
 } from "@/lib/scannerBridge";
@@ -264,7 +265,7 @@ export function App() {
         unlistenEvents = await listenScannerEvents(handleScannerEvent);
         unlistenDiagnostics = await listenScannerDiagnostics((diagnostic) => {
           if (requestId === scanRequestId.current) {
-            setErrorMessage(diagnostic.message);
+            setErrorMessage(scannerDiagnosticMessage(diagnostic));
           }
         });
         await startScan({

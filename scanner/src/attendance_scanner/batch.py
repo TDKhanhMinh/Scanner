@@ -21,9 +21,9 @@ from attendance_scanner.contracts import (
     ImageProcessError,
     InvalidInputRootError,
     ScanMode,
-    ScannerError,
     ScannerErrorCode,
 )
+from attendance_scanner.diagnostics import describe_scanner_error, log_scanner_error
 from attendance_scanner.discovery import DEFAULT_PIPELINE_VERSION
 from attendance_scanner.events import (
     BaseEvent,
@@ -89,13 +89,15 @@ def _resolve_output_path(output_root: Union[str, Path], relative_path: str) -> P
     return candidate
 
 
-def _error_details(exc: BaseException) -> tuple[ScannerErrorCode, str]:
-    """Map worker exceptions to the stable file-level error contract."""
-    if isinstance(exc, ScannerError):
-        return exc.code, exc.message
-    if isinstance(exc, FileNotFoundError):
-        return ScannerErrorCode.IMAGE_DECODE_FAILED, str(exc)
-    return ScannerErrorCode.UNEXPECTED_ERROR, str(exc) or type(exc).__name__
+def _error_details(
+    exc: BaseException,
+    *,
+    relative_path: Optional[str] = None,
+) -> tuple[ScannerErrorCode, str]:
+    """Map and log worker exceptions without exposing diagnostic details to users."""
+    info = describe_scanner_error(exc, operation="file", relative_path=relative_path)
+    log_scanner_error(info, exc, operation="file")
+    return info.code, info.user_message
 
 
 def _persist_manifest_entry(
@@ -277,7 +279,7 @@ def _process_one_file(
             ),
         )
     except Exception as exc:
-        error_code, error_message = _error_details(exc)
+        error_code, error_message = _error_details(exc, relative_path=file.relative_path)
         try:
             current_size, current_mtime_ns = compute_fast_fingerprint(source_path)
         except OSError:

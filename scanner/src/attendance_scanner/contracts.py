@@ -44,6 +44,7 @@ class FileProcessingStatus(str, Enum):
 class ScannerErrorCode(str, Enum):
     """Canonical error codes for scanner operations."""
 
+    INVALID_REQUEST = "INVALID_REQUEST"
     INVALID_INPUT_ROOT = "INVALID_INPUT_ROOT"
     OUTPUT_NOT_WRITABLE = "OUTPUT_NOT_WRITABLE"
     IMAGE_DECODE_FAILED = "IMAGE_DECODE_FAILED"
@@ -224,6 +225,19 @@ class InvalidInputRootError(ScannerError):
         super().__init__(
             ScannerErrorCode.INVALID_INPUT_ROOT,
             f"Invalid input root: '{path}' ({reason})",
+        )
+        self.path = path
+
+
+class OutputNotWritableError(ScannerError):
+    """Raised when the configured output directory cannot accept scanner output."""
+
+    def __init__(
+        self, path: str, reason: str = "Path is not a writable directory"
+    ) -> None:
+        super().__init__(
+            ScannerErrorCode.OUTPUT_NOT_WRITABLE,
+            f"Output root is not writable: '{path}' ({reason})",
         )
         self.path = path
 

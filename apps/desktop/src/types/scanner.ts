@@ -24,6 +24,7 @@ export type FileProcessingStatus =
   | "skipped";
 
 export const VALID_SCANNER_ERROR_CODES = new Set<string>([
+  "INVALID_REQUEST",
   "INVALID_INPUT_ROOT",
   "OUTPUT_NOT_WRITABLE",
   "IMAGE_DECODE_FAILED",
@@ -35,6 +36,7 @@ export const VALID_SCANNER_ERROR_CODES = new Set<string>([
 ]);
 
 export type ScannerErrorCode =
+  | "INVALID_REQUEST"
   | "INVALID_INPUT_ROOT"
   | "OUTPUT_NOT_WRITABLE"
   | "IMAGE_DECODE_FAILED"

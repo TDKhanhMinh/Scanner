@@ -23,19 +23,40 @@ fn greet(name: &str) -> String {
 pub struct ScannerDiagnostic {
     pub stream: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ScannerBridgeError {
-    AlreadyRunning { message: String },
-    InvalidRequest { message: String },
-    LaunchFailed { message: String },
-    StreamFailed { message: String },
-    InvalidEvent { message: String },
-    MissingPlan { message: String },
-    SidecarExited { code: i32, message: String },
-    Internal { message: String },
+    AlreadyRunning {
+        message: String,
+    },
+    InvalidRequest {
+        message: String,
+    },
+    LaunchFailed {
+        message: String,
+    },
+    StreamFailed {
+        message: String,
+    },
+    InvalidEvent {
+        message: String,
+    },
+    MissingPlan {
+        message: String,
+    },
+    SidecarExited {
+        code: i32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error_code: Option<String>,
+        message: String,
+    },
+    Internal {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,7 +149,13 @@ impl ScannerState {
 struct SidecarCapture {
     exit_code: i32,
     plan: Option<ScanPlanPayload>,
-    stderr: Vec<String>,
+    stderr: Vec<CapturedDiagnostic>,
+}
+
+#[derive(Debug, Clone)]
+struct CapturedDiagnostic {
+    error_code: Option<String>,
+    message: String,
 }
 
 fn validate_request(
@@ -267,6 +294,32 @@ fn drain_lines(buffer: &mut Vec<u8>, flush_remainder: bool) -> Vec<Vec<u8>> {
     lines
 }
 
+fn parse_stderr_diagnostic(raw_message: &str) -> CapturedDiagnostic {
+    serde_json::from_str::<Value>(raw_message)
+        .ok()
+        .and_then(|value| {
+            let object = value.as_object()?;
+            let message = object
+                .get("message")
+                .and_then(Value::as_str)
+                .filter(|message| !message.trim().is_empty())?
+                .to_string();
+            let error_code = object
+                .get("errorCode")
+                .and_then(Value::as_str)
+                .filter(|code| !code.trim().is_empty())
+                .map(str::to_string);
+            Some(CapturedDiagnostic {
+                error_code,
+                message,
+            })
+        })
+        .unwrap_or_else(|| CapturedDiagnostic {
+            error_code: None,
+            message: "Scanner sidecar emitted an unstructured diagnostic.".to_string(),
+        })
+}
+
 fn forward_stdout_line<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     bytes: Vec<u8>,
@@ -296,21 +349,25 @@ fn forward_stdout_line<R: tauri::Runtime>(
 fn forward_stderr_line<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     bytes: Vec<u8>,
-    stderr: &mut Vec<String>,
+    stderr: &mut Vec<CapturedDiagnostic>,
 ) -> Result<(), ScannerBridgeError> {
-    let message = String::from_utf8_lossy(&bytes)
+    let raw_message = String::from_utf8_lossy(&bytes)
         .trim_end_matches(['\r', '\n'])
         .trim()
         .to_string();
-    if message.is_empty() {
+    if raw_message.is_empty() {
         return Ok(());
     }
-    stderr.push(message.clone());
+
+    let diagnostic = parse_stderr_diagnostic(&raw_message);
+
+    stderr.push(diagnostic.clone());
     app.emit(
         SCANNER_STDERR_CHANNEL,
         ScannerDiagnostic {
             stream: "stderr".to_string(),
-            message,
+            message: diagnostic.message,
+            error_code: diagnostic.error_code,
         },
     )
     .map_err(|error| ScannerBridgeError::StreamFailed {
@@ -406,17 +463,16 @@ async fn stream_sidecar<R: tauri::Runtime>(
 }
 
 fn sidecar_exit_error(capture: &SidecarCapture) -> ScannerBridgeError {
-    let diagnostics = if capture.stderr.is_empty() {
-        "No stderr diagnostics were emitted".to_string()
-    } else {
-        capture.stderr.join(" | ")
-    };
+    let diagnostic = capture.stderr.last();
+    let message = diagnostic.map_or_else(
+        || "Scanner sidecar exited without a diagnostic.".to_string(),
+        |item| item.message.clone(),
+    );
+    let error_code = diagnostic.and_then(|item| item.error_code.clone());
     ScannerBridgeError::SidecarExited {
         code: capture.exit_code,
-        message: format!(
-            "Scanner sidecar exited with code {}: {diagnostics}",
-            capture.exit_code
-        ),
+        error_code,
+        message,
     }
 }
 
@@ -668,5 +724,30 @@ mod tests {
             vec![br#"{"type":"scan_plan"}"#.to_vec()]
         );
         assert_eq!(drain_lines(&mut buffer, true), vec![b"next".to_vec()]);
+    }
+
+    #[test]
+    fn structured_stderr_keeps_user_message_and_error_code_only() {
+        let diagnostic = parse_stderr_diagnostic(
+            r#"{"event":"scanner_error","errorCode":"IMAGE_DECODE_FAILED","message":"Không thể đọc ảnh này.","traceback":"private diagnostics"}"#,
+        );
+
+        assert_eq!(
+            diagnostic.error_code.as_deref(),
+            Some("IMAGE_DECODE_FAILED")
+        );
+        assert_eq!(diagnostic.message, "Không thể đọc ảnh này.");
+        assert!(!diagnostic.message.contains("private diagnostics"));
+    }
+
+    #[test]
+    fn unstructured_stderr_uses_safe_fallback_message() {
+        let diagnostic = parse_stderr_diagnostic("raw path and traceback");
+
+        assert_eq!(diagnostic.error_code, None);
+        assert_eq!(
+            diagnostic.message,
+            "Scanner sidecar emitted an unstructured diagnostic."
+        );
     }
 }

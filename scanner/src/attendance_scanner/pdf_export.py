@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image
 from pydantic import Field
 
-from attendance_scanner.contracts import BaseContract, PdfWriteError
+from attendance_scanner.contracts import BaseContract, PdfWriteError, ScannerErrorCode
 from attendance_scanner.pipeline.orchestrator import SingleScanResult
 
 
@@ -117,7 +117,16 @@ def export_single_page_pdf(
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
-        raise PdfWriteError(str(dest), f"Failed to create parent directory: {exc}") from exc
+        error_code = (
+            ScannerErrorCode.OUTPUT_NOT_WRITABLE
+            if isinstance(exc, PermissionError)
+            else ScannerErrorCode.PDF_WRITE_FAILED
+        )
+        raise PdfWriteError(
+            str(dest),
+            f"Failed to create parent directory: {exc}",
+            code=error_code,
+        ) from exc
 
     # 2. Allocate unique temporary file in the same directory for atomic commit
     temp_id = uuid.uuid4().hex[:12]
@@ -154,7 +163,16 @@ def export_single_page_pdf(
 
         if isinstance(exc, PdfWriteError):
             raise
-        raise PdfWriteError(str(dest), f"Failed to commit PDF: {exc}") from exc
+        error_code = (
+            ScannerErrorCode.OUTPUT_NOT_WRITABLE
+            if isinstance(exc, PermissionError)
+            else ScannerErrorCode.PDF_WRITE_FAILED
+        )
+        raise PdfWriteError(
+            str(dest),
+            f"Failed to commit PDF: {exc}",
+            code=error_code,
+        ) from exc
 
     final_size = dest.stat().st_size
     w_px, h_px = pil_img.size
