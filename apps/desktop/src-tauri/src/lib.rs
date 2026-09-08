@@ -753,6 +753,36 @@ fn hide_helper_windows() {
     }
 }
 
+#[tauri::command]
+fn open_output_folder(path: String) -> Result<(), String> {
+    let folder_path = std::path::Path::new(&path);
+    if !folder_path.exists() {
+        let _ = std::fs::create_dir_all(folder_path);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(folder_path)
+            .spawn()
+            .map_err(|e| format!("Unable to open folder in explorer: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(folder_path)
+            .spawn()
+            .map_err(|e| format!("Unable to open folder: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(folder_path)
+            .spawn()
+            .map_err(|e| format!("Unable to open folder: {e}"))?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -760,7 +790,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![greet, plan_scan, start_scan])
+        .invoke_handler(tauri::generate_handler![greet, plan_scan, start_scan, open_output_folder])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

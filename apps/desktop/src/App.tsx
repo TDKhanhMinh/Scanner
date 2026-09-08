@@ -1,7 +1,8 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { Sparkles, Scan, FileText, Info } from "lucide-react";
+import { Sparkles, Scan, FileText, Info, CheckCircle2, FolderOpen } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
 import { AppHeader } from "@/components/scanner/AppHeader";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
 import { BatchOptionsCard } from "@/components/scanner/BatchOptionsCard";
@@ -410,8 +411,13 @@ export function App() {
 
   const handleOpenOutputFolder = () => {
     const target = outputPath || `${inputPath}_pdf`;
-    void openPath(target).catch((error: unknown) => {
-      setErrorMessage(scannerErrorMessage(error));
+    if (!target) return;
+    invoke("open_output_folder", { path: target }).catch(() => {
+      openPath(target).catch(() => {
+        revealItemInDir(target).catch((error: unknown) => {
+          setErrorMessage(scannerErrorMessage(error));
+        });
+      });
     });
   };
 
@@ -430,6 +436,71 @@ export function App() {
             Chỉ xử lý các ảnh mới thêm hoặc ảnh nguồn đã bị chỉnh sửa, tự động bỏ qua các ảnh đã tạo PDF thành công trước đó để tối ưu thời gian.
           </div>
         </div>
+
+        {/* Completion Success Notification */}
+        {execution.phase === "completed" && (
+          <div
+            role="status"
+            className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 backdrop-blur-sm shadow-sm"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                    Quá trình quét hoàn tất thành công!
+                  </h3>
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-medium">
+                    {execution.processed} file đã xử lý
+                  </span>
+                </div>
+                <p className="text-xs text-foreground/80 leading-relaxed">
+                  Đã tạo file PDF an toàn:{" "}
+                  <strong className="text-emerald-700 dark:text-emerald-400 font-medium">
+                    {execution.success} thành công
+                  </strong>
+                  {execution.warning > 0 && (
+                    <span className="text-amber-600 dark:text-amber-400 font-medium">
+                      {" • "}{execution.warning} cảnh báo
+                    </span>
+                  )}
+                  {execution.failed > 0 && (
+                    <span className="text-destructive font-medium">
+                      {" • "}{execution.failed} lỗi
+                    </span>
+                  )}
+                  {execution.skipped > 0 && (
+                    <span className="text-muted-foreground">
+                      {" • "}{execution.skipped} bỏ qua
+                    </span>
+                  )}
+                  . Tất cả file PDF đã được ghi vào thư mục xuất.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 w-full sm:w-auto shrink-0 self-end sm:self-center">
+              <button
+                type="button"
+                onClick={() => setActiveTab("results")}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2 rounded-xl text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors shadow-sm"
+              >
+                <FileText className="w-3.5 h-3.5 mr-1.5 text-primary" />
+                Xem kết quả ({results.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenOutputFolder}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center px-3.5 py-2 rounded-xl text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-colors"
+              >
+                <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+                Mở thư mục PDF
+              </button>
+            </div>
+          </div>
+        )}
 
         {errorMessage && (
           <div
