@@ -201,6 +201,18 @@ def _block_failed_groups(
                 entry.artifact_dependencies = []
                 manifest.set_entry(entry)
                 changed = True
+        persisted_group = manifest.groups.get(_group_id(group.key))
+        if persisted_group is not None:
+            persisted_group.artifact_stale = True
+            persisted_group.completeness_status = CompletenessStatus.AMBIGUOUS
+            persisted_group.review_required = True
+            manifest.set_group(persisted_group)
+            for artifact_path in persisted_group.artifact_relative_paths:
+                artifact = manifest.artifacts.get(artifact_path)
+                if artifact is not None:
+                    artifact.stale = True
+                    manifest.set_artifact(artifact)
+            changed = True
     if changed:
         manifest_store.save_manifest(manifest)
 
@@ -301,11 +313,13 @@ def _export_grouped_results(
                 manual_order_fingerprint=(
                     persisted_group.manual_order_fingerprint if persisted_group else None
                 ),
+                artifact_stale=False,
             )
         persisted_group.source_relative_paths = list(artifact.source_relative_paths)
         persisted_group.artifact_relative_paths = [artifact_relative_path_text]
         persisted_group.completeness_status = CompletenessStatus.COMPLETE
         persisted_group.review_required = False
+        persisted_group.artifact_stale = False
         manifest.set_group(persisted_group)
         manifest.set_artifact(
             ManifestArtifact(
@@ -313,6 +327,7 @@ def _export_grouped_results(
                 output_relative_path=artifact_relative_path_text,
                 source_relative_paths=list(artifact.source_relative_paths),
                 artifact_version=DEFAULT_PIPELINE_VERSION,
+                stale=False,
             )
         )
         for entry in source_entries:

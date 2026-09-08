@@ -235,16 +235,21 @@ fn validate_request(
         }
     }
     if let Some(value) = export_mode {
-        if !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "per-image" | "grouped"
-        ) {
+        if normalize_export_mode(value).is_none() {
             return Err(ScannerBridgeError::InvalidRequest {
                 message: format!("Unsupported export mode: {value}"),
             });
         }
     }
     Ok(())
+}
+
+fn normalize_export_mode(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+        "per-image" => Some("per-image"),
+        "grouped" => Some("grouped"),
+        _ => None,
+    }
 }
 
 fn validate_manual_order(value: Option<&Value>) -> Result<(), ScannerBridgeError> {
@@ -334,7 +339,7 @@ fn build_sidecar_args(
     if let Some(month) = month {
         args.extend(["--month".to_string(), month.to_string()]);
     }
-    if let Some(export_mode) = export_mode {
+    if let Some(export_mode) = export_mode.and_then(normalize_export_mode) {
         args.extend(["--export-mode".to_string(), export_mode.to_string()]);
     }
     if let Some(manual_order_json) = manual_order_json {
@@ -902,6 +907,26 @@ mod tests {
             Some("gray"),
             Some(2),
             Some(2026),
+            Some(9),
+            Some("GROUPED")
+        )
+        .is_ok());
+        assert!(validate_request(
+            "input",
+            None,
+            Some("gray"),
+            Some(2),
+            Some(2026),
+            Some(9),
+            Some("PER_IMAGE")
+        )
+        .is_ok());
+        assert!(validate_request(
+            "input",
+            None,
+            Some("gray"),
+            Some(2),
+            Some(2026),
             None,
             Some("grouped")
         )
@@ -925,7 +950,7 @@ mod tests {
             None,
             Some(2026),
             Some(9),
-            Some("grouped"),
+            Some("PER_IMAGE"),
             None,
             None,
         );
@@ -944,7 +969,7 @@ mod tests {
                 "--month",
                 "9",
                 "--export-mode",
-                "grouped",
+                "per-image",
             ]
         );
     }

@@ -109,6 +109,7 @@ class ManifestArtifact(BaseContract):
     source_relative_paths: List[str] = Field(default_factory=list)
     artifact_version: Optional[str] = None
     artifact_hash: Optional[str] = None
+    stale: bool = False
 
 
 class ManifestGroup(BaseContract):
@@ -121,6 +122,7 @@ class ManifestGroup(BaseContract):
     review_required: bool = False
     manual_order: List[str] = Field(default_factory=list)
     manual_order_fingerprint: Optional[str] = None
+    artifact_stale: bool = False
 
     @model_validator(mode="after")
     def require_review_for_ambiguous_group(self) -> "ManifestGroup":

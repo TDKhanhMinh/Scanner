@@ -19,6 +19,7 @@ from attendance_scanner.batch import (
 )
 from attendance_scanner.contracts import (
     BatchPeriod,
+    CompletenessStatus,
     ExportMode,
     FileProcessingStatus,
     ImageDecodeError,
@@ -252,6 +253,69 @@ def test_grouped_failure_blocks_all_sibling_results_without_missing_outputs(tmp_
         and manifest.get_entry(item.relative_path).output_relative_path is None
         for item in discovery.files
     )
+
+
+def test_grouped_failure_marks_existing_artifact_stale(tmp_path: Path):
+    input_root, output_root, discovery, manifest, store = _create_batch_context(tmp_path, count=3)
+    period = BatchPeriod(year=2026, month=9)
+    group_plan = build_group_aware_scan_plan(
+        discovery, manifest, output_root, period, export_mode=ExportMode.GROUPED
+    )
+    manual_orders = {
+        "NV01:2026-09": ["NV01/1.png", "NV01/2.png", "NV01/3.png"]
+    }
+
+    with patch(
+        "attendance_scanner.batch.scan_one",
+        side_effect=lambda source, mode, *, config=None: _scan_result(mode),
+    ):
+        first_result = run_batch(
+            discovery=discovery,
+            manifest=manifest,
+            output_root=output_root,
+            workers=1,
+            manifest_store=store,
+            batch_period=period,
+            export_mode=ExportMode.GROUPED,
+            group_plan=group_plan,
+            manual_orders=manual_orders,
+        )
+    assert first_result.exit_code == 0
+    grouped_path = output_root / "NV01" / "2026-09_NV01.pdf"
+    assert grouped_path.is_file()
+
+    (input_root / "NV01/2.png").write_bytes(b"corrupt grouped page")
+    retry_discovery = discover_employee_folders(input_root)
+    retry_manifest = store.load_manifest(input_root, output_root=output_root)
+    retry_plan = build_group_aware_scan_plan(
+        retry_discovery, retry_manifest, output_root, period, export_mode=ExportMode.GROUPED
+    )
+
+    def fail_second_page(source, mode, *, config=None):
+        if Path(source).name == "2.png":
+            raise ImageDecodeError(str(source), "injected rebuild failure")
+        return _scan_result(mode)
+
+    with patch("attendance_scanner.batch.scan_one", side_effect=fail_second_page):
+        failed_result = run_batch(
+            discovery=retry_discovery,
+            manifest=retry_manifest,
+            output_root=output_root,
+            workers=1,
+            manifest_store=store,
+            batch_period=period,
+            export_mode=ExportMode.GROUPED,
+            group_plan=retry_plan,
+            manual_orders=manual_orders,
+        )
+
+    assert failed_result.exit_code == 2
+    persisted_group = retry_manifest.groups["NV01:2026-09"]
+    assert persisted_group.artifact_stale is True
+    assert persisted_group.completeness_status == CompletenessStatus.AMBIGUOUS
+    assert persisted_group.review_required is True
+    assert retry_manifest.artifacts["NV01/2026-09_NV01.pdf"].stale is True
+    assert grouped_path.is_file()
 
 
 def test_corrupt_file_isolated_and_batch_returns_exit_code_2(tmp_path: Path):

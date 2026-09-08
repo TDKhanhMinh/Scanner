@@ -524,6 +524,8 @@ def build_group_aware_scan_plan(
                     reasons.append("missing_expected_page")
         if persisted_group and not _group_artifacts_exist(effective_output_root, artifact_paths):
             reasons.append("missing_grouped_output")
+        if persisted_group and persisted_group.artifact_stale:
+            reasons.append("grouped_artifact_stale")
         if not reasons:
             continue
 
@@ -556,6 +558,7 @@ def build_group_aware_scan_plan(
                 "duplicate_page_order",
                 "manual_order_invalidated",
                 "missing_expected_page",
+                "grouped_artifact_stale",
             }
             for reason in reasons
         )

@@ -20,6 +20,7 @@ const REASON_LABELS: Record<string, string> = {
   source_removed: "Một source page đã bị xóa",
   manual_order_invalidated: "Source đã thay đổi sau manual override",
   missing_grouped_output: "Thiếu grouped PDF cần dựng lại",
+  grouped_artifact_stale: "Grouped PDF cũ không còn hợp lệ sau lỗi rebuild",
   source_new: "Có source page mới trong group",
   source_modified: "Có source page đã thay đổi",
   source_rebuild: "Một source cần rebuild",
