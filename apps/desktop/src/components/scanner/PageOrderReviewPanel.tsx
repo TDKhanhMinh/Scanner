@@ -78,7 +78,11 @@ export function PageOrderReviewPanel({
         </div>
       </div>
 
-      <div className="mt-4 space-y-3">
+      <div
+        tabIndex={0}
+        aria-label="Danh sách nhóm cần xác nhận thứ tự"
+        className="mt-4 space-y-3 max-h-[380px] sm:max-h-[460px] lg:max-h-[520px] overflow-y-auto pr-1.5 custom-scrollbar touch-pan-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/30 rounded-xl"
+      >
         {groups.map((group) => {
           const id = groupId(group);
           const status = resolvedGroups[id];
@@ -247,3 +251,9 @@ export function PageOrderReviewPanel({
     </section>
   );
 }
+
+// --- Hybrid Responsive Summary ---
+// mobile  (default / sm):  Scroll container max-h-[380px], touch-pan-y, full-width buttons, touch targets >= 44px
+// tablet  (md / lg):       Scroll container max-h-[460px], header flex-row, actions dàn ngang sm:justify-end
+// desktop (xl / 2xl):      Scroll container max-h-[520px], thanh cuộn custom-scrollbar siêu mảnh, hover states mượt mà
+// Interaction:             Hỗ trợ cuộn chuột mượt mà, bàn phím điều hướng select và nút ArrowUp/Down, focus-visible ring
