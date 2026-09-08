@@ -114,9 +114,13 @@ from attendance_scanner.pipeline import (
 )
 from attendance_scanner.state import (
     CURRENT_SCHEMA_VERSION,
+    LEGACY_SCHEMA_VERSION,
     Manifest,
+    ManifestArtifact,
     ManifestEntry,
+    ManifestGroup,
     ManifestStore,
+    assign_entry_context,
     compute_root_id,
     get_default_state_dir,
 )
@@ -214,6 +218,10 @@ __all__ = [
     "compute_root_id",
     "get_default_state_dir",
     "CURRENT_SCHEMA_VERSION",
+    "LEGACY_SCHEMA_VERSION",
+    "ManifestArtifact",
+    "ManifestGroup",
+    "assign_entry_context",
     "ManifestEntry",
     "Manifest",
     "ManifestStore",

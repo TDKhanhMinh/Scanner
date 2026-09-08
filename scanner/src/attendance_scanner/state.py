@@ -13,7 +13,12 @@ from pydantic import Field, model_validator
 
 from .contracts import (
     BaseContract,
+    BatchPeriod,
+    CompletenessStatus,
+    DocumentGroupKey,
+    ExportMode,
     FileProcessingStatus,
+    PageIdentity,
     ScannerErrorCode,
     StateError,
 )
@@ -21,7 +26,8 @@ from .contracts import (
 logger = logging.getLogger(__name__)
 
 # Canonical schema version for manifest files
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
+LEGACY_SCHEMA_VERSION = 1
 
 
 def compute_root_id(canonical_input_root: Union[str, Path]) -> str:
@@ -76,6 +82,10 @@ class ManifestEntry(BaseContract):
     status: FileProcessingStatus = FileProcessingStatus.SUCCESS
     processed_at: str
     pipeline_version: str = "0.1.0"
+    period: Optional[BatchPeriod] = None
+    group_key: Optional[DocumentGroupKey] = None
+    page_identity: PageIdentity = Field(default_factory=PageIdentity)
+    artifact_dependencies: List[str] = Field(default_factory=list)
     extra: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -91,6 +101,32 @@ class ManifestEntry(BaseContract):
         return self
 
 
+class ManifestArtifact(BaseContract):
+    """One output artifact and its ordered source dependencies."""
+
+    export_mode: ExportMode = ExportMode.PER_IMAGE
+    output_relative_path: str
+    source_relative_paths: List[str] = Field(default_factory=list)
+    artifact_version: Optional[str] = None
+    artifact_hash: Optional[str] = None
+
+
+class ManifestGroup(BaseContract):
+    """Persisted document group state for one employee and period."""
+
+    key: DocumentGroupKey
+    source_relative_paths: List[str] = Field(default_factory=list)
+    artifact_relative_paths: List[str] = Field(default_factory=list)
+    completeness_status: CompletenessStatus = CompletenessStatus.AMBIGUOUS
+    review_required: bool = False
+
+    @model_validator(mode="after")
+    def require_review_for_ambiguous_group(self) -> "ManifestGroup":
+        if self.completeness_status == CompletenessStatus.AMBIGUOUS:
+            self.review_required = True
+        return self
+
+
 class Manifest(BaseContract):
     """Top-level versioned manifest tracking incremental processing state."""
 
@@ -101,6 +137,8 @@ class Manifest(BaseContract):
     created_at: str
     updated_at: str
     entries: Dict[str, ManifestEntry] = Field(default_factory=dict)
+    groups: Dict[str, ManifestGroup] = Field(default_factory=dict)
+    artifacts: Dict[str, ManifestArtifact] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -134,6 +172,100 @@ class Manifest(BaseContract):
         if removed is not None:
             self.updated_at = datetime.now(timezone.utc).isoformat()
         return removed
+
+    def set_group(self, group: ManifestGroup) -> None:
+        """Persist a group in memory; the caller commits it through ManifestStore."""
+        key = _group_storage_key(group.key)
+        self.groups[key] = group
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+
+    def set_artifact(self, artifact: ManifestArtifact) -> None:
+        """Persist an artifact in memory; the caller commits it atomically."""
+        self.artifacts[artifact.output_relative_path.replace("\\", "/")] = artifact
+        self.updated_at = datetime.now(timezone.utc).isoformat()
+
+
+def _group_storage_key(key: DocumentGroupKey) -> str:
+    """Return a stable storage key independent of source filename."""
+    employee = key.employee_relative_dir.replace("\\", "/")
+    return f"{employee}:{key.year:04d}-{key.month:02d}"
+
+
+def assign_entry_context(
+    entry: ManifestEntry,
+    *,
+    employee_relative_dir: str,
+    batch_period: BatchPeriod,
+    page_identity: Optional[PageIdentity] = None,
+) -> ManifestEntry:
+    """Assign context to a new entry while preserving existing period/group identity."""
+    if entry.period is None:
+        entry.period = batch_period
+    if entry.group_key is None:
+        entry.group_key = DocumentGroupKey(
+            employee_relative_dir=employee_relative_dir,
+            year=entry.period.year,
+            month=entry.period.month,
+        )
+    if page_identity is not None:
+        entry.page_identity = page_identity
+    return entry
+
+
+def _migrate_v1_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform a validated-shape v1 manifest into lossless v2 data."""
+    if raw_data.get("schemaVersion", raw_data.get("schema_version")) != LEGACY_SCHEMA_VERSION:
+        raise ValueError("Only manifest schema v1 can be migrated")
+
+    migrated: Dict[str, Any] = dict(raw_data)
+    raw_entries = raw_data.get("entries", raw_data.get("files", {}))
+    if not isinstance(raw_entries, dict):
+        raise ValueError("Manifest v1 entries must be an object")
+
+    migrated_entries: Dict[str, Any] = {}
+    artifacts: Dict[str, Any] = {}
+    for storage_key, raw_entry in raw_entries.items():
+        if not isinstance(raw_entry, dict):
+            raise ValueError(f"Manifest v1 entry {storage_key!r} must be an object")
+        entry = dict(raw_entry)
+        relative_path = entry.get("relativePath", entry.get("relative_path", storage_key))
+        output_paths = entry.get("outputRelativePaths", entry.get("output_relative_paths", []))
+        if not isinstance(output_paths, list):
+            raise ValueError(f"Manifest v1 output paths for {relative_path!r} must be a list")
+        output_path = entry.get("outputRelativePath", entry.get("output_relative_path"))
+        if output_path and output_path not in output_paths:
+            output_paths = [*output_paths, output_path]
+
+        entry["period"] = None
+        entry["groupKey"] = None
+        entry["pageIdentity"] = {
+            "pageType": "UNKNOWN",
+            "pageOrder": None,
+            "confidence": None,
+            "detectionMethod": "legacy_v1",
+            "diagnostics": {"migratedFrom": LEGACY_SCHEMA_VERSION},
+        }
+        entry["artifactDependencies"] = [str(path).replace("\\", "/") for path in output_paths]
+        migrated_entries[str(relative_path).replace("\\", "/")] = entry
+
+        for output_relative_path in output_paths:
+            normalized_output = str(output_relative_path).replace("\\", "/")
+            artifacts.setdefault(
+                normalized_output,
+                {
+                    "exportMode": ExportMode.PER_IMAGE.value,
+                    "outputRelativePath": normalized_output,
+                    "sourceRelativePaths": [str(relative_path).replace("\\", "/")],
+                    "artifactVersion": entry.get("pipelineVersion", entry.get("pipeline_version")),
+                    "artifactHash": None,
+                },
+            )
+
+    migrated["schemaVersion"] = CURRENT_SCHEMA_VERSION
+    migrated["entries"] = migrated_entries
+    migrated["groups"] = {}
+    migrated["artifacts"] = artifacts
+    return migrated
 
 
 class ManifestStore:
@@ -204,6 +336,8 @@ class ManifestStore:
                 created_at=now_iso,
                 updated_at=now_iso,
                 entries={},
+                groups={},
+                artifacts={},
             )
 
         try:
@@ -212,6 +346,19 @@ class ManifestStore:
 
             # Check schema version compatibility
             schema_ver = raw_data.get("schemaVersion", raw_data.get("schema_version"))
+            if schema_ver == LEGACY_SCHEMA_VERSION:
+                try:
+                    migrated = Manifest.model_validate(_migrate_v1_data(raw_data))
+                    self.save_manifest(migrated)
+                    return migrated
+                except StateError:
+                    raise
+                except Exception as migration_error:
+                    raise StateError(
+                        ScannerErrorCode.STATE_READ_FAILED,
+                        f"Failed to migrate manifest v1 to v2: {migration_error}",
+                        path=str(manifest_path),
+                    ) from migration_error
             if schema_ver != CURRENT_SCHEMA_VERSION:
                 raise ValueError(
                     f"Unsupported schema version {schema_ver} (expected {CURRENT_SCHEMA_VERSION})"
@@ -232,6 +379,8 @@ class ManifestStore:
 
             return manifest
 
+        except StateError:
+            raise
         except Exception as err:
             if raise_on_corrupt:
                 raise StateError(
@@ -268,6 +417,8 @@ class ManifestStore:
                 created_at=now_iso,
                 updated_at=now_iso,
                 entries={},
+                groups={},
+                artifacts={},
             )
 
     def save_manifest(self, manifest: Manifest) -> Path:
