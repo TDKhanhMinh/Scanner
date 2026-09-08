@@ -18,7 +18,9 @@ attendance-scanner/
 ├── fixtures/
 │   └── scanner/                  # Tập ảnh mẫu kiểm thử (không chứa PII)
 ├── scripts/
-│   └── setup-env.ps1             # Kịch bản khởi tạo môi trường tự động
+│   ├── setup-env.ps1             # Kịch bản khởi tạo môi trường tự động
+│   ├── build-sidecar.ps1         # Build PyInstaller onefile cho Windows
+│   └── test-sidecar.ps1          # Smoke test sidecar không cần Python
 └── README.md
 ```
 
@@ -78,6 +80,27 @@ npm run build
 cd apps\desktop
 npm run tauri dev
 ```
+
+### Build và smoke test Windows sidecar
+
+AS-18 dùng PyInstaller onefile để Tauri phân phối trực tiếp một executable,
+đồng thời vẫn giữ console stdout/stderr cho JSONL và diagnostics.
+
+Chạy từ thư mục gốc:
+
+    .\scanner\.venv\Scripts\python -m pip install -r scanner\requirements-sidecar.lock
+    .\scripts\build-sidecar.ps1
+    .\scripts\test-sidecar.ps1 -InputRoot "C:\path\to\representative\images"
+
+Thư mục smoke test phải có ít nhất một file .jpg, .png và .webp. Script kiểm
+tra --version, --help, plan, scan-batch, JSONL protocol v1 và PDF đầu ra; state
+được cô lập trong thư mục tạm. Build tạo artifact theo tên
+attendance-scanner-sidecar-x86_64-pc-windows-msvc.exe dưới
+apps/desktop/src-tauri/binaries/.
+
+File executable trong thư mục binaries là artifact được tạo tự động và được
+ignore khỏi Git history. Workflow Windows sidecar thực hiện build, smoke test,
+upload artifact và chạy tauri build để clean checkout luôn tái tạo đúng sidecar.
 
 ## 5. Quy tắc Cam kết (Definition of Done)
 - 100% xử lý hoàn toàn local-first, không OCR/AI/cloud ở MVP.

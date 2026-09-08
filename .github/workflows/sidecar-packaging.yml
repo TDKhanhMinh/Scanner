@@ -1,0 +1,69 @@
+name: Windows sidecar packaging
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scanner/**"
+      - "scripts/build-sidecar.ps1"
+      - "scripts/test-sidecar.ps1"
+      - "scripts/create-sidecar-fixtures.py"
+      - "apps/desktop/src-tauri/**"
+      - ".github/workflows/sidecar-packaging.yml"
+
+jobs:
+  package-sidecar:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install locked sidecar environment
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r scanner/requirements-sidecar.lock
+
+      - name: Build and validate sidecar
+        shell: pwsh
+        run: .\scripts\build-sidecar.ps1 -PythonPath (Get-Command python).Source
+
+      - name: Create smoke fixtures
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "attendance-scanner-sidecar-input"
+          python scripts/create-sidecar-fixtures.py --output $smokeRoot
+          "SMOKE_INPUT=$smokeRoot" >> $env:GITHUB_ENV
+
+      - name: Run packaged sidecar smoke test
+        shell: pwsh
+        run: .\scripts\test-sidecar.ps1 -InputRoot $env:SMOKE_INPUT
+
+      - name: Install desktop dependencies
+        shell: pwsh
+        run: npm ci
+
+      - name: Build Tauri desktop package
+        shell: pwsh
+        run: npm --prefix apps/desktop run tauri build
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: attendance-scanner-sidecar
+          path: apps/desktop/src-tauri/binaries/*.exe
+          if-no-files-found: error
