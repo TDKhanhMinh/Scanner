@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -65,6 +65,7 @@ class PageIdentity(BaseContract):
     page_order: Optional[int] = Field(default=None, ge=1)
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     detection_method: Optional[str] = None
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DocumentGroupKey(BaseContract):

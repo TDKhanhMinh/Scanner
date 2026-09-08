@@ -66,6 +66,13 @@ from attendance_scanner.fingerprint import (
     compute_fast_fingerprint,
     compute_sha256,
 )
+from attendance_scanner.page_classification import (
+    PageClassificationConfig,
+    PageOrderDecision,
+    classify_document_page,
+    classify_page,
+    order_source_pages,
+)
 from attendance_scanner.pdf_export import (
     PdfExportConfig,
     PdfExportResult,
@@ -192,4 +199,9 @@ __all__ = [
     "ManifestEntry",
     "Manifest",
     "ManifestStore",
+    "PageClassificationConfig",
+    "PageOrderDecision",
+    "classify_page",
+    "classify_document_page",
+    "order_source_pages",
 ]

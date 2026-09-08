@@ -30,6 +30,7 @@ export interface PageIdentity {
   pageOrder?: number | null;
   confidence?: number | null;
   detectionMethod?: string | null;
+  diagnostics?: Record<string, unknown>;
 }
 
 export interface DocumentGroupKey {
