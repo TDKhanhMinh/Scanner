@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseScannerEvent } from "@/lib/eventParser";
 import type {
+  BatchPeriod,
+  ExportMode,
   ScanMode,
   ScanPlanEvent,
   ScannerEvent,
@@ -32,6 +34,8 @@ export interface ScannerRequest {
   outputRoot?: string | null;
   mode?: ScanMode | null;
   workers?: number | null;
+  period?: BatchPeriod | null;
+  exportMode?: ExportMode | null;
 }
 
 export async function planScan(request: ScannerRequest): Promise<ScanPlanEvent> {
@@ -39,6 +43,9 @@ export async function planScan(request: ScannerRequest): Promise<ScanPlanEvent> 
     inputRoot: request.inputRoot,
     outputRoot: request.outputRoot ?? null,
     mode: request.mode ?? null,
+    year: request.period?.year ?? null,
+    month: request.period?.month ?? null,
+    exportMode: request.exportMode ?? null,
   });
 }
 
@@ -48,6 +55,9 @@ export async function startScan(request: ScannerRequest): Promise<ScanRunOutcome
     outputRoot: request.outputRoot ?? null,
     mode: request.mode ?? null,
     workers: request.workers ?? null,
+    year: request.period?.year ?? null,
+    month: request.period?.month ?? null,
+    exportMode: request.exportMode ?? null,
   });
 }
 

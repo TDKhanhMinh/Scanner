@@ -8,7 +8,9 @@ from pydantic.alias_generators import to_camel
 
 from attendance_scanner.contracts import (
     PROTOCOL_VERSION,
+    BatchPeriod,
     BatchSummary,
+    ExportMode,
     ScannerErrorCode,
     ScanPlan,
 )
@@ -62,6 +64,14 @@ class ScanPlanEvent(BaseEvent):
     outdated_pipeline_count: int = Field(default=0, ge=0)
     unsupported_count: int = Field(default=0, ge=0)
     collisions: List[str] = Field(default_factory=list)
+    period: Optional[BatchPeriod] = None
+    export_mode: ExportMode = ExportMode.PER_IMAGE
+    document_groups: int = Field(default=0, ge=0)
+    expected_artifacts: int = Field(default=0, ge=0)
+    complete_groups: int = Field(default=0, ge=0)
+    incomplete_groups: int = Field(default=0, ge=0)
+    ambiguous_groups: int = Field(default=0, ge=0)
+    pages_needing_review: int = Field(default=0, ge=0)
 
     @model_validator(mode="before")
     @classmethod
@@ -134,7 +144,20 @@ class ScanPlanEvent(BaseEvent):
         return self.unchanged
 
     @classmethod
-    def from_plan(cls, plan: ScanPlan, timestamp: Optional[str] = None) -> "ScanPlanEvent":
+    def from_plan(
+        cls,
+        plan: ScanPlan,
+        timestamp: Optional[str] = None,
+        *,
+        period: Optional[BatchPeriod] = None,
+        export_mode: ExportMode = ExportMode.PER_IMAGE,
+        document_groups: int = 0,
+        expected_artifacts: int = 0,
+        complete_groups: int = 0,
+        incomplete_groups: int = 0,
+        ambiguous_groups: int = 0,
+        pages_needing_review: int = 0,
+    ) -> "ScanPlanEvent":
         """Construct ScanPlanEvent from ScanPlan contract model."""
         if timestamp is not None:
             return cls(
@@ -150,6 +173,14 @@ class ScanPlanEvent(BaseEvent):
                 outdated_pipeline_count=plan.outdated_pipeline_count,
                 unsupported_count=plan.unsupported_count,
                 collisions=list(plan.collisions),
+                period=period,
+                export_mode=export_mode,
+                document_groups=document_groups,
+                expected_artifacts=expected_artifacts,
+                complete_groups=complete_groups,
+                incomplete_groups=incomplete_groups,
+                ambiguous_groups=ambiguous_groups,
+                pages_needing_review=pages_needing_review,
                 timestamp=timestamp,
             )
         return cls(
@@ -165,6 +196,14 @@ class ScanPlanEvent(BaseEvent):
             outdated_pipeline_count=plan.outdated_pipeline_count,
             unsupported_count=plan.unsupported_count,
             collisions=list(plan.collisions),
+            period=period,
+            export_mode=export_mode,
+            document_groups=document_groups,
+            expected_artifacts=expected_artifacts,
+            complete_groups=complete_groups,
+            incomplete_groups=incomplete_groups,
+            ambiguous_groups=ambiguous_groups,
+            pages_needing_review=pages_needing_review,
         )
 
 

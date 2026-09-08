@@ -82,6 +82,24 @@ pub struct ScanPlanPayload {
     #[serde(default)]
     pub unsupported_count: u64,
     pub collisions: Vec<String>,
+    #[serde(default)]
+    pub year: Option<u32>,
+    #[serde(default)]
+    pub month: Option<u32>,
+    #[serde(default)]
+    pub export_mode: Option<String>,
+    #[serde(default)]
+    pub document_groups: u64,
+    #[serde(default)]
+    pub expected_artifacts: u64,
+    #[serde(default)]
+    pub complete_groups: u64,
+    #[serde(default)]
+    pub incomplete_groups: u64,
+    #[serde(default)]
+    pub ambiguous_groups: u64,
+    #[serde(default)]
+    pub pages_needing_review: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,6 +181,9 @@ fn validate_request(
     output_root: Option<&str>,
     mode: Option<&str>,
     workers: Option<u32>,
+    year: Option<u32>,
+    month: Option<u32>,
+    export_mode: Option<&str>,
 ) -> Result<(), ScannerBridgeError> {
     if input_root.trim().is_empty() {
         return Err(ScannerBridgeError::InvalidRequest {
@@ -191,15 +212,48 @@ fn validate_request(
             });
         }
     }
+    if year.is_some() != month.is_some() {
+        return Err(ScannerBridgeError::InvalidRequest {
+            message: "year and month must be provided together".to_string(),
+        });
+    }
+    if let Some(value) = year {
+        if !(1..=9999).contains(&value) {
+            return Err(ScannerBridgeError::InvalidRequest {
+                message: "year must be between 1 and 9999".to_string(),
+            });
+        }
+    }
+    if let Some(value) = month {
+        if !(1..=12).contains(&value) {
+            return Err(ScannerBridgeError::InvalidRequest {
+                message: "month must be between 1 and 12".to_string(),
+            });
+        }
+    }
+    if let Some(value) = export_mode {
+        if !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "per-image" | "grouped"
+        ) {
+            return Err(ScannerBridgeError::InvalidRequest {
+                message: format!("Unsupported export mode: {value}"),
+            });
+        }
+    }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_sidecar_args(
     command: &str,
     input_root: &str,
     output_root: Option<&str>,
     mode: Option<&str>,
     workers: Option<u32>,
+    year: Option<u32>,
+    month: Option<u32>,
+    export_mode: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![
         command.to_string(),
@@ -214,6 +268,15 @@ fn build_sidecar_args(
     }
     if let Some(workers) = workers {
         args.extend(["--workers".to_string(), workers.to_string()]);
+    }
+    if let Some(year) = year {
+        args.extend(["--year".to_string(), year.to_string()]);
+    }
+    if let Some(month) = month {
+        args.extend(["--month".to_string(), month.to_string()]);
+    }
+    if let Some(export_mode) = export_mode {
+        args.extend(["--export-mode".to_string(), export_mode.to_string()]);
     }
     args
 }
@@ -477,18 +540,25 @@ fn sidecar_exit_error(capture: &SidecarCapture) -> ScannerBridgeError {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn plan_scan(
     app: tauri::AppHandle,
     state: State<'_, ScannerState>,
     input_root: String,
     output_root: Option<String>,
     mode: Option<String>,
+    year: Option<u32>,
+    month: Option<u32>,
+    export_mode: Option<String>,
 ) -> Result<ScanPlanPayload, ScannerBridgeError> {
     validate_request(
         input_root.as_str(),
         output_root.as_deref(),
         mode.as_deref(),
         None,
+        year,
+        month,
+        export_mode.as_deref(),
     )?;
     let args = build_sidecar_args(
         "plan",
@@ -496,6 +566,9 @@ async fn plan_scan(
         output_root.as_deref(),
         mode.as_deref(),
         None,
+        year,
+        month,
+        export_mode.as_deref(),
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;
@@ -514,6 +587,7 @@ async fn plan_scan(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn start_scan(
     app: tauri::AppHandle,
     state: State<'_, ScannerState>,
@@ -521,12 +595,18 @@ async fn start_scan(
     output_root: Option<String>,
     mode: Option<String>,
     workers: Option<u32>,
+    year: Option<u32>,
+    month: Option<u32>,
+    export_mode: Option<String>,
 ) -> Result<ScanRunOutcome, ScannerBridgeError> {
     validate_request(
         input_root.as_str(),
         output_root.as_deref(),
         mode.as_deref(),
         workers,
+        year,
+        month,
+        export_mode.as_deref(),
     )?;
     let args = build_sidecar_args(
         "scan-batch",
@@ -534,6 +614,9 @@ async fn start_scan(
         output_root.as_deref(),
         mode.as_deref(),
         workers,
+        year,
+        month,
+        export_mode.as_deref(),
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;
@@ -629,6 +712,9 @@ mod tests {
             Some(r"D:\Attendance Output"),
             Some("gray"),
             Some(3),
+            None,
+            None,
+            None,
         );
 
         assert_eq!(
@@ -705,9 +791,72 @@ mod tests {
 
     #[test]
     fn request_validation_rejects_worker_counts_outside_contract() {
-        assert!(validate_request("input", None, Some("gray"), Some(0)).is_err());
-        assert!(validate_request("input", None, Some("gray"), Some(5)).is_err());
-        assert!(validate_request("input", None, Some("gray"), Some(4)).is_ok());
+        assert!(validate_request("input", None, Some("gray"), Some(0), None, None, None).is_err());
+        assert!(validate_request("input", None, Some("gray"), Some(5), None, None, None).is_err());
+        assert!(validate_request("input", None, Some("gray"), Some(4), None, None, None).is_ok());
+    }
+
+    #[test]
+    fn request_validation_and_args_support_period_and_export_mode() {
+        assert!(validate_request(
+            "input",
+            None,
+            Some("gray"),
+            Some(2),
+            Some(2026),
+            Some(9),
+            Some("grouped")
+        )
+        .is_ok());
+        assert!(validate_request(
+            "input",
+            None,
+            Some("gray"),
+            Some(2),
+            Some(2026),
+            None,
+            Some("grouped")
+        )
+        .is_err());
+        assert!(validate_request(
+            "input",
+            None,
+            Some("gray"),
+            Some(2),
+            Some(2026),
+            Some(13),
+            Some("grouped")
+        )
+        .is_err());
+
+        let args = build_sidecar_args(
+            "plan",
+            "D:\\Input",
+            Some("D:\\Output"),
+            Some("gray"),
+            None,
+            Some(2026),
+            Some(9),
+            Some("grouped"),
+        );
+        assert_eq!(
+            args,
+            vec![
+                "plan",
+                "--input",
+                "D:\\Input",
+                "--output",
+                "D:\\Output",
+                "--mode",
+                "gray",
+                "--year",
+                "2026",
+                "--month",
+                "9",
+                "--export-mode",
+                "grouped",
+            ]
+        );
     }
 
     #[test]

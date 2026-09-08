@@ -56,12 +56,74 @@ describe("scannerBridge", () => {
       inputRoot: "D:/Attendance Input",
       outputRoot: "D:/Attendance Output",
       mode: "gray",
+      year: null,
+      month: null,
+      exportMode: null,
     });
     expect(invoke).toHaveBeenNthCalledWith(2, "start_scan", {
       inputRoot: "D:/Attendance Input",
       outputRoot: "D:/Attendance Output",
       mode: "gray",
       workers: 3,
+      year: null,
+      month: null,
+      exportMode: null,
+    });
+  });
+
+  it("passes the selected period and export mode to both bridge commands", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      protocolVersion: 1,
+      type: "scan_plan",
+      timestamp: "2026-09-07T00:00:00Z",
+      inputRoot: "D:/Attendance Input",
+      outputRoot: "D:/Attendance Output",
+      employees: 1,
+      totalImages: 2,
+      new: 2,
+      modified: 0,
+      rebuild: 0,
+      unchanged: 0,
+      filesToProcess: 2,
+      collisions: [],
+      outdatedPipelineCount: 0,
+      unsupportedCount: 0,
+      period: { year: 2026, month: 9 },
+      exportMode: "GROUPED",
+    });
+
+    await planScan({
+      inputRoot: "D:/Attendance Input",
+      outputRoot: "D:/Attendance Output",
+      mode: "gray",
+      period: { year: 2026, month: 9 },
+      exportMode: "GROUPED",
+    });
+    await startScan({
+      inputRoot: "D:/Attendance Input",
+      outputRoot: "D:/Attendance Output",
+      mode: "gray",
+      workers: 2,
+      period: { year: 2026, month: 9 },
+      exportMode: "GROUPED",
+    });
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "plan_scan", {
+      inputRoot: "D:/Attendance Input",
+      outputRoot: "D:/Attendance Output",
+      mode: "gray",
+      year: 2026,
+      month: 9,
+      exportMode: "GROUPED",
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "start_scan", {
+      inputRoot: "D:/Attendance Input",
+      outputRoot: "D:/Attendance Output",
+      mode: "gray",
+      workers: 2,
+      year: 2026,
+      month: 9,
+      exportMode: "GROUPED",
     });
   });
 

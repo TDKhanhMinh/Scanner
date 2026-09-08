@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { AppHeader } from "@/components/scanner/AppHeader";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
+import { BatchOptionsCard } from "@/components/scanner/BatchOptionsCard";
 import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
 import { WorkerSettingCard } from "@/components/scanner/WorkerSettingCard";
 import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/ScanPlanSummaryCard";
@@ -19,6 +20,8 @@ import {
   startScan,
 } from "@/lib/scannerBridge";
 import type {
+  BatchPeriod,
+  ExportMode,
   ScanPlanEvent,
   ScannerEvent,
 } from "@/types/scanner";
@@ -37,12 +40,25 @@ function toPlanStats(plan: ScanPlanEvent): ScanPlanStats {
     rebuildFiles: plan.rebuild,
     unsupportedFiles: plan.unsupportedCount,
     collisions: plan.collisions,
+    documentGroups: plan.documentGroups ?? 0,
+    expectedArtifacts: plan.expectedArtifacts ?? 0,
+    completeGroups: plan.completeGroups ?? 0,
+    incompleteGroups: plan.incompleteGroups ?? 0,
+    ambiguousGroups: plan.ambiguousGroups ?? 0,
+    pagesNeedingReview: plan.pagesNeedingReview ?? 0,
   };
+}
+
+function defaultBatchPeriod(): BatchPeriod {
+  const now = new Date();
+  return { year: now.getFullYear(), month: now.getMonth() + 1 };
 }
 
 interface ScannerSettings {
   mode: ScanFilterMode;
   workers: number | null;
+  period: BatchPeriod;
+  exportMode: ExportMode;
 }
 
 export function App() {
@@ -51,6 +67,8 @@ export function App() {
   const [settings, setSettings] = useState<ScannerSettings>({
     mode: "gray",
     workers: null,
+    period: defaultBatchPeriod(),
+    exportMode: "PER_IMAGE",
   });
   const [activeTab, setActiveTab] = useState<string>("config");
 
@@ -63,6 +81,12 @@ export function App() {
     unchangedFiles: 0,
     rebuildFiles: 0,
     unsupportedFiles: 0,
+    documentGroups: 0,
+    expectedArtifacts: 0,
+    completeGroups: 0,
+    incompleteGroups: 0,
+    ambiguousGroups: 0,
+    pagesNeedingReview: 0,
   });
 
   // Batch progress state
@@ -93,7 +117,11 @@ export function App() {
     };
   }, []);
 
-  const requestPlan = (path: string, nextOutputPath: string) => {
+  const requestPlan = (
+    path: string,
+    nextOutputPath: string,
+    requestSettings: ScannerSettings = settings,
+  ) => {
     const requestId = ++planRequestId.current;
     setIsPlanning(true);
     setErrorMessage("");
@@ -103,7 +131,9 @@ export function App() {
     void planScan({
       inputRoot: path,
       outputRoot: nextOutputPath,
-      mode: scanMode,
+      mode: requestSettings.mode,
+      period: requestSettings.period,
+      exportMode: requestSettings.exportMode,
     })
       .then((plan) => {
         if (requestId === planRequestId.current) {
@@ -136,13 +166,17 @@ export function App() {
       });
   };
 
-  const schedulePlan = (path: string, nextOutputPath: string) => {
+  const schedulePlan = (
+    path: string,
+    nextOutputPath: string,
+    requestSettings: ScannerSettings = settings,
+  ) => {
     if (planDebounceTimer.current !== undefined) {
       clearTimeout(planDebounceTimer.current);
     }
     planDebounceTimer.current = setTimeout(() => {
       planDebounceTimer.current = undefined;
-      requestPlan(path, nextOutputPath);
+      requestPlan(path, nextOutputPath, requestSettings);
     }, 250);
   };
 
@@ -176,7 +210,35 @@ export function App() {
         unchangedFiles: 0,
         rebuildFiles: 0,
         unsupportedFiles: 0,
+        documentGroups: 0,
+        expectedArtifacts: 0,
+        completeGroups: 0,
+        incompleteGroups: 0,
+        ambiguousGroups: 0,
+        pagesNeedingReview: 0,
       });
+    }
+  };
+
+  const handlePeriodChange = (period: BatchPeriod) => {
+    const nextSettings = { ...settings, period };
+    setSettings(nextSettings);
+    dispatchExecution({ type: "reset" });
+    planRequestId.current += 1;
+    setIsPlanReady(false);
+    if (inputPath.trim()) {
+      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
+    }
+  };
+
+  const handleExportModeChange = (exportMode: ExportMode) => {
+    const nextSettings = { ...settings, exportMode };
+    setSettings(nextSettings);
+    dispatchExecution({ type: "reset" });
+    planRequestId.current += 1;
+    setIsPlanReady(false);
+    if (inputPath.trim()) {
+      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
     }
   };
 
@@ -273,6 +335,8 @@ export function App() {
           outputRoot: outputPath || `${inputPath}_pdf`,
           mode: scanMode,
           workers: settings.workers,
+          period: settings.period,
+          exportMode: settings.exportMode,
         });
       } catch (error: unknown) {
         if (requestId === scanRequestId.current) {
@@ -353,6 +417,14 @@ export function App() {
                   disabled={isScanning}
                 />
 
+                <BatchOptionsCard
+                  period={settings.period}
+                  exportMode={settings.exportMode}
+                  onPeriodChange={handlePeriodChange}
+                  onExportModeChange={handleExportModeChange}
+                  disabled={isScanning}
+                />
+
                 <ScanModeSelector
                   mode={scanMode}
                   onSelectMode={(mode) => setSettings((previous) => ({ ...previous, mode }))}
@@ -397,6 +469,8 @@ export function App() {
                   stats={planStats}
                   isPlanning={isPlanning}
                   isScanning={isScanning}
+                  period={settings.period}
+                  exportMode={settings.exportMode}
                   canScan={Boolean(inputPath.trim()) && isPlanReady && !hasPlanError}
                   onRefreshPlan={handleRefreshPlan}
                   onStartScan={handleStartScan}

@@ -103,6 +103,33 @@ def test_scan_batch_subprocess_supports_unicode_spaces_and_jsonl_events(tmp_path
     assert (output_root / "Nguyễn Văn A" / "ảnh 01.pdf").is_file()
 
 
+def test_plan_subprocess_accepts_period_and_grouped_export_mode(tmp_path: Path):
+    input_root = tmp_path / "Attendance Input"
+    employee = input_root / "Nguyễn Văn A"
+    employee.mkdir(parents=True)
+    Image.new("RGB", (80, 60), color=(180, 180, 180)).save(employee / "random-page.png")
+
+    result = _run_cli(
+        tmp_path,
+        "plan",
+        "--input",
+        str(input_root),
+        "--year",
+        "2026",
+        "--month",
+        "9",
+        "--export-mode",
+        "grouped",
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout.strip())
+    assert payload["period"] == {"year": 2026, "month": 9}
+    assert payload["exportMode"] == "GROUPED"
+    assert payload["documentGroups"] == 1
+    assert payload["expectedArtifacts"] == 1
+
+
 def test_scan_batch_subprocess_invalid_output_is_fatal_without_jsonl_noise(tmp_path: Path):
     input_root = tmp_path / "employees"
     input_root.mkdir()

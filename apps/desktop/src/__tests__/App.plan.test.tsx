@@ -94,6 +94,11 @@ describe("App scan plan states", () => {
       inputRoot: "C:/Attendance Input",
       outputRoot: "C:/Attendance Input_pdf",
       mode: "gray",
+      period: {
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+      },
+      exportMode: "PER_IMAGE",
     });
   });
 
@@ -128,5 +133,32 @@ describe("App scan plan states", () => {
 
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Mở thư mục kết quả PDF/i })).toBeEnabled();
+  });
+
+  it("shows editable period/export options and sends the selected values to planning", async () => {
+    vi.mocked(planScan).mockResolvedValue(validPlan);
+    render(<App />);
+    await enterInputPath();
+
+    const month = screen.getByLabelText("Tháng xử lý");
+    const year = screen.getByLabelText("Năm xử lý");
+    expect(month).toHaveValue("9");
+    expect(year).toHaveValue(2026);
+    expect(screen.getByRole("radio", { name: /Nhiều ảnh → một PDF/i })).toBeInTheDocument();
+
+    fireEvent.change(month, { target: { value: "8" } });
+    fireEvent.change(year, { target: { value: "2025" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Nhiều ảnh → một PDF/i }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(planScan).toHaveBeenLastCalledWith({
+      inputRoot: "C:/Attendance Input",
+      outputRoot: "C:/Attendance Input_pdf",
+      mode: "gray",
+      period: { year: 2025, month: 8 },
+      exportMode: "GROUPED",
+    });
   });
 });

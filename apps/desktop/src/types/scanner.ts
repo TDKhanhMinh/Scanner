@@ -188,6 +188,14 @@ export interface ScanPlanEvent extends BaseEvent {
   collisions: string[];
   outdatedPipelineCount: number;
   unsupportedCount: number;
+  period?: BatchPeriod | null;
+  exportMode?: ExportMode;
+  documentGroups?: number;
+  expectedArtifacts?: number;
+  completeGroups?: number;
+  incompleteGroups?: number;
+  ambiguousGroups?: number;
+  pagesNeedingReview?: number;
   // Backward-compatible aliases
   totalEmployees?: number;
   newCount?: number;

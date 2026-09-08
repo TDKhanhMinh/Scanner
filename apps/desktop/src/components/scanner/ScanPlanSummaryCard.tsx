@@ -18,6 +18,7 @@ import {
   CardContent,
   CardFooter,
 } from "@/components/ui/card";
+import type { BatchPeriod, ExportMode } from "@/types/scanner";
 
 export interface ScanPlanStats {
   totalEmployees: number;
@@ -28,6 +29,12 @@ export interface ScanPlanStats {
   rebuildFiles?: number;
   unsupportedFiles?: number;
   collisions?: string[];
+  documentGroups?: number;
+  expectedArtifacts?: number;
+  completeGroups?: number;
+  incompleteGroups?: number;
+  ambiguousGroups?: number;
+  pagesNeedingReview?: number;
 }
 
 export interface ScanPlanSummaryCardProps {
@@ -35,6 +42,8 @@ export interface ScanPlanSummaryCardProps {
   isPlanning?: boolean;
   isScanning?: boolean;
   canScan?: boolean;
+  period?: BatchPeriod;
+  exportMode?: ExportMode;
   onRefreshPlan: () => void;
   onStartScan: () => void;
 }
@@ -44,12 +53,16 @@ export function ScanPlanSummaryCard({
   isPlanning = false,
   isScanning = false,
   canScan = false,
+  period,
+  exportMode = "PER_IMAGE",
   onRefreshPlan,
   onStartScan,
 }: ScanPlanSummaryCardProps) {
   const rebuildFiles = stats.rebuildFiles ?? 0;
   const unsupportedFiles = stats.unsupportedFiles ?? 0;
   const filesToProcess = stats.newFiles + stats.modifiedFiles + rebuildFiles;
+  const documentGroups = stats.documentGroups ?? 0;
+  const expectedArtifacts = stats.expectedArtifacts ?? 0;
 
   return (
     <Card className="border-border/80 flex flex-col justify-between h-full">
@@ -75,6 +88,10 @@ export function ScanPlanSummaryCard({
           <CardDescription className="text-xs">
             {isPlanning
               ? "Đang phân tích thư mục và manifest..."
+              : period
+              ? `Kỳ ${period.year}-${String(period.month).padStart(2, "0")} • ${
+                  exportMode === "GROUPED" ? "Ghép theo nhóm" : "Mỗi ảnh một PDF"
+                }`
               : "Hệ thống tự nhận diện file mới và file đã sửa đổi"}
           </CardDescription>
         </CardHeader>
@@ -139,6 +156,43 @@ export function ScanPlanSummaryCard({
               {stats.unchangedFiles}
             </span>
           </div>
+
+          {(exportMode === "GROUPED" || documentGroups > 0) && (
+            <>
+              <div className="flex items-center justify-between border-b border-border/40 py-2 text-xs">
+                <span className="text-muted-foreground flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5" /> Nhóm tài liệu:
+                </span>
+                <span className="font-mono text-sm font-semibold text-foreground">
+                  {documentGroups}
+                </span>
+              </div>
+              <div className="flex items-center justify-between border-b border-border/40 py-2 text-xs">
+                <span className="text-muted-foreground flex items-center gap-1.5">
+                  <FileCheck2 className="h-3.5 w-3.5" /> Artifact dự kiến:
+                </span>
+                <span className="font-mono text-sm font-semibold text-foreground">
+                  {expectedArtifacts}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 border-b border-border/40 py-2 text-[11px]">
+                <span className="rounded-md bg-emerald-500/10 px-1.5 py-1 text-center text-emerald-400">
+                  Đủ: {stats.completeGroups ?? 0}
+                </span>
+                <span className="rounded-md bg-amber-500/10 px-1.5 py-1 text-center text-amber-300">
+                  Thiếu: {stats.incompleteGroups ?? 0}
+                </span>
+                <span className="rounded-md bg-destructive/10 px-1.5 py-1 text-center text-destructive">
+                  Mơ hồ: {stats.ambiguousGroups ?? 0}
+                </span>
+              </div>
+              {(stats.pagesNeedingReview ?? 0) > 0 && (
+                <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-300">
+                  Cần review {stats.pagesNeedingReview} page trước khi ghép PDF.
+                </p>
+              )}
+            </>
+          )}
 
           {/* Target to process highlight */}
           <div className="rounded-xl bg-primary/10 border border-primary/20 p-3 mt-3 flex items-center justify-between text-xs">

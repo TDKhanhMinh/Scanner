@@ -161,6 +161,53 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
           ? raw.unsupportedCount
           : 0;
       raw.collisions = Array.isArray(raw.collisions) ? raw.collisions : [];
+      const rawPeriod = raw.period;
+      if (rawPeriod !== undefined && rawPeriod !== null) {
+        const periodRecord =
+          typeof rawPeriod === "object" && rawPeriod !== null
+            ? (rawPeriod as Record<string, unknown>)
+            : undefined;
+        if (
+          periodRecord === undefined ||
+          typeof periodRecord.year !== "number" ||
+          typeof periodRecord.month !== "number" ||
+          periodRecord.year < 1 ||
+          periodRecord.year > 9999 ||
+          periodRecord.month < 1 ||
+          periodRecord.month > 12
+        ) {
+          return null;
+        }
+      }
+      if (
+        raw.exportMode !== undefined &&
+        raw.exportMode !== "PER_IMAGE" &&
+        raw.exportMode !== "GROUPED"
+      ) {
+        return null;
+      }
+      raw.exportMode = raw.exportMode ?? "PER_IMAGE";
+      for (const field of [
+        "documentGroups",
+        "expectedArtifacts",
+        "completeGroups",
+        "incompleteGroups",
+        "ambiguousGroups",
+        "pagesNeedingReview",
+      ]) {
+        if (
+          raw[field] !== undefined &&
+          (typeof raw[field] !== "number" || raw[field] < 0)
+        ) {
+          return null;
+        }
+      }
+      raw.documentGroups = raw.documentGroups ?? 0;
+      raw.expectedArtifacts = raw.expectedArtifacts ?? 0;
+      raw.completeGroups = raw.completeGroups ?? 0;
+      raw.incompleteGroups = raw.incompleteGroups ?? 0;
+      raw.ambiguousGroups = raw.ambiguousGroups ?? 0;
+      raw.pagesNeedingReview = raw.pagesNeedingReview ?? 0;
 
       return raw as unknown as ScannerEvent;
     }
