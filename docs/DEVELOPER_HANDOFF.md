@@ -34,8 +34,9 @@ flowchart LR
     `perspective.py` warps, `enhance.py` applies mode, and `orchestrator.py`
     assembles diagnostics. Attendance scans default to a landscape canvas with
     A4 aspect ratio; generic callers can opt into natural orientation/ratio.
-- Output: `scanner/src/attendance_scanner/pdf_export.py` writes one-page PDFs via
-  same-directory temporary files and atomic replace.
+- Output: `scanner/src/attendance_scanner/pdf_export.py` writes fixed A4 landscape
+  pages via same-directory temporary files and atomic replace; grouped export can
+  commit multiple pages into one PDF with one shared MediaBox.
 - State: `scanner/src/attendance_scanner/state.py` stores manifest schema v1 under
   `%APPDATA%\attendance-scanner\state`.
 - Desktop bridge: `apps/desktop/src-tauri/src/lib.rs` owns sidecar lifecycle,

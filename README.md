@@ -1,6 +1,6 @@
 # Attendance Scanner Desktop
 
-Ứng dụng desktop nội bộ hỗ trợ quét và số hóa ảnh chấm công theo thư mục nhân viên, tự động phát hiện file mới/sửa đổi (incremental scan), nắn thẳng tài liệu bằng OpenCV và xuất **mỗi ảnh thành một PDF riêng**.
+Ứng dụng desktop nội bộ hỗ trợ quét và số hóa ảnh chấm công theo thư mục nhân viên, tự động phát hiện file mới/sửa đổi (incremental scan), nắn thẳng tài liệu bằng OpenCV và xuất PDF A4 landscape theo chế độ **mỗi ảnh một PDF** hoặc **nhiều page trong một PDF grouped**.
 
 ## 1. Cấu trúc Dự án (Monorepo Layout)
 

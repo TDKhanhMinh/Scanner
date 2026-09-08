@@ -29,6 +29,7 @@ from attendance_scanner.contracts import (
 from attendance_scanner.pdf_export import (
     PdfExportConfig,
     PdfExportResult,
+    export_pdf_pages,
     export_single_page_pdf,
 )
 from attendance_scanner.pipeline.orchestrator import scan_one
@@ -51,6 +52,13 @@ def _verify_pdf_is_single_page(pdf_path: Path) -> None:
     assert b"image" in page_obj[b"Resources"][b"XObject"]
 
 
+def _media_box(pdf_path: Path, page_index: int = 0) -> list[float]:
+    """Read one PDF page MediaBox using Pillow's parser."""
+    parser = PdfParser.PdfParser(filename=str(pdf_path))
+    page_obj = parser.read_indirect(parser.pages[page_index])
+    return [float(value) for value in page_obj[b"MediaBox"]]
+
+
 def test_export_single_page_pdf_grayscale(tmp_path: Path):
     """Verify exporting 2D grayscale uint8 array creates a valid 1-page PDF."""
     target_pdf = tmp_path / "gray_doc.pdf"
@@ -70,6 +78,29 @@ def test_export_single_page_pdf_grayscale(tmp_path: Path):
     assert result.file_size_bytes > 100
 
     _verify_pdf_is_single_page(target_pdf)
+    media_box = _media_box(target_pdf)
+    assert abs((media_box[2] - media_box[0]) - 842.0) < 1.0
+    assert abs((media_box[3] - media_box[1]) - 595.0) < 1.0
+
+
+def test_export_pdf_pages_uses_one_a4_landscape_box_for_every_page(tmp_path: Path):
+    """Grouped pages share a physical A4 landscape MediaBox."""
+    target_pdf = tmp_path / "a4-landscape.pdf"
+    export_pdf_pages(
+        [
+            np.full((400, 600), 180, dtype=np.uint8),
+            np.full((300, 500), 200, dtype=np.uint8),
+        ],
+        target_pdf,
+    )
+
+    parser = PdfParser.PdfParser(filename=str(target_pdf))
+    assert len(parser.pages) == 2
+    first_box = _media_box(target_pdf, 0)
+    second_box = _media_box(target_pdf, 1)
+    assert first_box == second_box
+    assert first_box[2] > first_box[3]
+    assert abs((first_box[2] / first_box[3]) - (297.0 / 210.0)) < 0.01
 
 
 def test_export_single_page_pdf_bw_binary(tmp_path: Path):
@@ -112,12 +143,12 @@ def test_export_single_page_pdf_color_bgr_channel_order(tmp_path: Path):
     assert embedded_img.mode == "RGB"
 
     # Top-left must be Red: (255, 0, 0)
-    tl_pixel = embedded_img.getpixel((25, 25))
+    tl_pixel = embedded_img.getpixel((1000, 1000))
     assert isinstance(tl_pixel, tuple)
     assert tl_pixel[0] > 200 and tl_pixel[2] < 50, f"Expected Red, got {tl_pixel}"
 
     # Bottom-right must be Blue: (0, 0, 255)
-    br_pixel = embedded_img.getpixel((75, 75))
+    br_pixel = embedded_img.getpixel((2200, 1800))
     assert isinstance(br_pixel, tuple)
     assert br_pixel[2] > 200 and br_pixel[0] < 50, f"Expected Blue, got {br_pixel}"
 

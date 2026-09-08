@@ -3,13 +3,15 @@
 Given a processed document image (NumPy array, SingleScanResult, or PIL Image),
 this module renders a standards-compliant single-page PDF, saves it to a unique
 temporary file in the target directory, and atomically commits it using `os.replace`.
-Failure to save cleanly unlinks the temporary file without corrupting any existing target.
+Pages use a fixed A4 canvas by default, preserving image aspect ratio and landscape
+orientation for attendance forms. Failure to save cleanly unlinks the temporary file
+without corrupting any existing target.
 """
 
 import os
 import uuid
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, List, Literal, Optional, Sequence, Union
 
 import cv2
 import numpy as np
@@ -21,11 +23,13 @@ from attendance_scanner.pipeline.orchestrator import SingleScanResult
 
 
 class PdfExportConfig(BaseContract):
-    """Configuration options for single-page PDF export."""
+    """Configuration options for fixed-page PDF export."""
 
     dpi: float = Field(default=300.0, gt=10.0, le=1200.0)
     quality: int = Field(default=95, ge=1, le=100)
     optimize: bool = True
+    page_format: Literal["A4"] = "A4"
+    page_orientation: Literal["LANDSCAPE", "PORTRAIT"] = "LANDSCAPE"
 
 
 class PdfExportResult(BaseContract):
@@ -40,6 +44,40 @@ class PdfExportResult(BaseContract):
 
 
 ImageInput = Union[np.ndarray, SingleScanResult, Image.Image]
+
+_A4_WIDTH_INCHES = 297.0 / 25.4
+_A4_HEIGHT_INCHES = 210.0 / 25.4
+
+
+def _page_canvas_size(config: PdfExportConfig) -> tuple[int, int]:
+    """Return a fixed A4 canvas size at the configured DPI."""
+    width_inches, height_inches = (
+        (_A4_WIDTH_INCHES, _A4_HEIGHT_INCHES)
+        if config.page_orientation == "LANDSCAPE"
+        else (_A4_HEIGHT_INCHES, _A4_WIDTH_INCHES)
+    )
+    return round(width_inches * config.dpi), round(height_inches * config.dpi)
+
+
+def _fit_image_to_page(image: Image.Image, config: PdfExportConfig) -> Image.Image:
+    """Fit an image to a fixed page while preserving aspect ratio and content."""
+    if image.mode not in {"L", "RGB"}:
+        image = image.convert("RGB")
+    canvas_width, canvas_height = _page_canvas_size(config)
+    scale = min(canvas_width / image.width, canvas_height / image.height)
+    resized_size = (
+        max(1, round(image.width * scale)),
+        max(1, round(image.height * scale)),
+    )
+    resized = image.resize(resized_size, Image.Resampling.LANCZOS)
+    background = 255 if image.mode == "L" else (255, 255, 255)
+    canvas = Image.new(image.mode, (canvas_width, canvas_height), background)
+    offset = (
+        (canvas_width - resized.width) // 2,
+        (canvas_height - resized.height) // 2,
+    )
+    canvas.paste(resized, offset)
+    return canvas
 
 
 def _prepare_pil_image(
@@ -117,14 +155,15 @@ def export_pdf_pages(
     *,
     config: Optional[PdfExportConfig] = None,
 ) -> PdfExportResult:
-    """Render one or more processed images into one atomically committed PDF."""
+    """Render one or more images into one atomically committed fixed-page PDF."""
     cfg = config or PdfExportConfig()
     dest = Path(target_path).resolve()
     if not images:
         raise PdfWriteError(str(dest), "No pages were provided for export")
 
     try:
-        pil_images: List[Image.Image] = [_prepare_pil_image(image) for image in images]
+        source_images: List[Image.Image] = [_prepare_pil_image(image) for image in images]
+        pil_images = [_fit_image_to_page(image, cfg) for image in source_images]
     except Exception as exc:
         raise PdfWriteError(str(dest), f"Image preparation failed: {exc}") from exc
 
@@ -194,7 +233,7 @@ def export_pdf_pages(
         ) from exc
 
     final_size = dest.stat().st_size
-    w_px, h_px = pil_images[0].size
+    w_px, h_px = source_images[0].size
 
     return PdfExportResult(
         pdf_path=str(dest),
@@ -202,5 +241,5 @@ def export_pdf_pages(
         page_count=len(pil_images),
         width_px=w_px,
         height_px=h_px,
-        mode=pil_images[0].mode,
+        mode=source_images[0].mode,
     )
