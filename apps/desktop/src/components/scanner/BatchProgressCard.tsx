@@ -17,6 +17,7 @@ import {
 
 export interface BatchProgressCardProps {
   currentFile: string;
+  currentEmployee: string;
   processedCount: number;
   totalCount: number;
   successCount: number;
@@ -31,6 +32,7 @@ export interface BatchProgressCardProps {
 
 export function BatchProgressCard({
   currentFile,
+  currentEmployee,
   processedCount,
   totalCount,
   successCount,
@@ -79,15 +81,34 @@ export function BatchProgressCard({
         <Progress value={percent} className="h-2.5" />
 
         {/* Current file status */}
-        <div className="flex items-center justify-between text-xs text-muted-foreground gap-2">
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="flex items-center justify-between text-xs text-muted-foreground gap-2"
+        >
           <span className="shrink-0 font-medium">Đang xử lý:</span>
-          <span className="font-mono truncate text-foreground text-right" title={currentFile}>
-            {currentFile || (isDone ? "Đã xử lý tất cả file trong kế hoạch" : "Chờ bắt đầu...")}
+          <span className="min-w-0 truncate text-right text-foreground" title={currentFile}>
+            {currentFile ? (
+              <>
+                <span className="font-semibold">{currentEmployee}</span>
+                <span className="mx-1 text-muted-foreground">·</span>
+                <span className="font-mono">{currentFile}</span>
+              </>
+            ) : isDone ? (
+              "Đã xử lý tất cả file trong kế hoạch"
+            ) : (
+              "Chờ bắt đầu…"
+            )}
           </span>
         </div>
 
         {/* Live counters */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border/40">
+        <div
+          aria-live="polite"
+          aria-label="Tổng hợp kết quả quét"
+          className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border/40"
+        >
           <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
             <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-400">
               <CheckCircle className="w-3.5 h-3.5" /> Thành công

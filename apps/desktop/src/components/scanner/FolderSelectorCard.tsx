@@ -55,12 +55,16 @@ export function FolderSelectorCard({
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 min-w-0 bg-secondary/50 border border-border rounded-xl px-3.5 py-2 text-sm text-foreground font-mono flex items-center gap-2 focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent transition-all">
             <FolderOpen className="w-4 h-4 text-muted-foreground shrink-0" />
+            <label htmlFor="input-folder-path" className="sr-only">
+              Thư mục ảnh chấm công gốc
+            </label>
             <input
               id="input-folder-path"
+              name="inputFolderPath"
               type="text"
               value={inputPath}
               onChange={(e) => onInputChange?.(e.target.value)}
-              placeholder="Nhập hoặc chọn đường dẫn thư mục ảnh nhân viên..."
+              placeholder="Nhập hoặc chọn đường dẫn thư mục ảnh nhân viên…"
               disabled={disabled}
               className="flex-1 min-w-0 bg-transparent text-sm text-foreground font-mono focus:outline-none placeholder:text-muted-foreground/60 placeholder:font-sans"
             />

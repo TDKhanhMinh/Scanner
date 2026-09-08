@@ -68,6 +68,7 @@ describe("scanExecutionReducer", () => {
     expect(afterDuplicate.warning).toBe(1);
     expect(afterDuplicate.failed).toBe(0);
     expect(afterDuplicate.results).toHaveLength(2);
+    expect(afterDuplicate.results[0].relativePath).toBe("NV01/1.jpg");
   });
 
   it("uses scan_completed as the authoritative terminal summary", () => {

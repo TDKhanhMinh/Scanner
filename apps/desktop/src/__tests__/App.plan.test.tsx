@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { planScan } from "@/lib/scannerBridge";
+import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
 
 vi.mock("@/lib/scannerBridge", () => ({
   planScan: vi.fn(),
@@ -56,6 +57,7 @@ describe("App scan plan states", () => {
   it("keeps Scan New Files disabled until a folder has a valid plan", () => {
     render(<App />);
     expect(screen.getByRole("button", { name: /Quét các file mới/i })).toBeDisabled();
+    expect(screen.getByLabelText("Thư mục ảnh chấm công gốc")).toBeInTheDocument();
     expect(screen.getByText(/Vui lòng nhập hoặc chọn thư mục gốc/i)).toBeInTheDocument();
   });
 
@@ -103,5 +105,28 @@ describe("App scan plan states", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Không tìm thấy sidecar");
     expect(screen.getByRole("button", { name: /Quét các file mới/i })).toBeDisabled();
+  });
+
+  it("keeps the completion summary visible when every file was skipped", () => {
+    const onOpenOutputFolder = vi.fn();
+    render(
+      <BatchProgressCard
+        currentFile=""
+        currentEmployee=""
+        processedCount={0}
+        totalCount={0}
+        successCount={0}
+        warningCount={0}
+        failedCount={0}
+        skippedCount={3}
+        isScanning={false}
+        isComplete
+        outputReady
+        onOpenOutputFolder={onOpenOutputFolder}
+      />,
+    );
+
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mở thư mục kết quả PDF/i })).toBeEnabled();
   });
 });

@@ -10,6 +10,7 @@ export interface ScanExecutionState {
   totalToProcess: number;
   processed: number;
   currentFile: string;
+  currentEmployee: string;
   success: number;
   warning: number;
   failed: number;
@@ -30,6 +31,7 @@ export const initialScanExecutionState: ScanExecutionState = {
   totalToProcess: 0,
   processed: 0,
   currentFile: "",
+  currentEmployee: "",
   success: 0,
   warning: 0,
   failed: 0,
@@ -89,6 +91,7 @@ export function scanExecutionReducer(
         totalToProcess: action.totalToProcess,
         processed: 0,
         currentFile: "",
+        currentEmployee: "",
         success: 0,
         warning: 0,
         failed: 0,
@@ -102,6 +105,7 @@ export function scanExecutionReducer(
         ...state,
         phase: "error",
         currentFile: "",
+        currentEmployee: "",
         errorMessage: action.message,
       };
     case "scanner_event": {
@@ -123,11 +127,13 @@ export function scanExecutionReducer(
             ...nextState,
             phase: "running",
             currentFile: event.relativePath,
+            currentEmployee: event.employeeName,
           };
         case "file_completed": {
           const isWarning = Boolean(event.warning);
           const result: FileResultItem = {
             id: `${event.relativePath}:${event.timestamp}`,
+            relativePath: event.relativePath,
             employeeName: event.employeeName,
             sourceFile: sourceFileName(event.relativePath),
             targetPdf: event.outputRelativePath,
@@ -147,6 +153,7 @@ export function scanExecutionReducer(
         case "file_failed": {
           const result: FileResultItem = {
             id: `${event.relativePath}:${event.timestamp}`,
+            relativePath: event.relativePath,
             employeeName: event.employeeName,
             sourceFile: sourceFileName(event.relativePath),
             targetPdf: "",
@@ -172,6 +179,7 @@ export function scanExecutionReducer(
             failed: event.failed,
             skipped: event.skipped,
             currentFile: "",
+            currentEmployee: "",
           };
       }
     }

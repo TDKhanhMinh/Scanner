@@ -68,6 +68,7 @@ export function App() {
   const [isPlanning, setIsPlanning] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [hasPlanError, setHasPlanError] = useState<boolean>(false);
+  const [isPlanReady, setIsPlanReady] = useState<boolean>(false);
   const [execution, dispatchExecution] = useReducer(
     scanExecutionReducer,
     initialScanExecutionState,
@@ -77,7 +78,7 @@ export function App() {
   const planDebounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scanMode = settings.mode;
   const isScanning = execution.phase === "running";
-  const { currentFile, processed: processedCount, results } = execution;
+  const { currentFile, currentEmployee, processed: processedCount, results } = execution;
   const successCount = execution.success;
   const warningCount = execution.warning;
   const failedCount = execution.failed;
@@ -96,6 +97,7 @@ export function App() {
     setIsPlanning(true);
     setErrorMessage("");
     setHasPlanError(false);
+    setIsPlanReady(false);
 
     void planScan({
       inputRoot: path,
@@ -107,6 +109,7 @@ export function App() {
           setPlanStats(toPlanStats(plan));
           setInputPath(plan.inputRoot);
           setOutputPath(plan.outputRoot);
+          setIsPlanReady(true);
         }
       })
       .catch((error: unknown) => {
@@ -122,6 +125,7 @@ export function App() {
           });
           setErrorMessage(scannerErrorMessage(error));
           setHasPlanError(true);
+          setIsPlanReady(false);
         }
       })
       .finally(() => {
@@ -145,6 +149,8 @@ export function App() {
   const handleInputChange = (path: string) => {
     setInputPath(path);
     dispatchExecution({ type: "reset" });
+    planRequestId.current += 1;
+    setIsPlanReady(false);
     const trimmed = path.trim();
     const nextOutputPath = trimmed ? `${trimmed}_pdf` : "";
     setOutputPath(nextOutputPath);
@@ -160,6 +166,7 @@ export function App() {
       setIsPlanning(false);
       setErrorMessage("");
       setHasPlanError(false);
+      setIsPlanReady(false);
       setPlanStats({
         totalEmployees: 0,
         totalImages: 0,
@@ -197,6 +204,10 @@ export function App() {
   const handleOutputChange = (path: string) => {
     const input = inputPath.trim();
     const nextOutputPath = path.trim() || (input ? `${input}_pdf` : "");
+    dispatchExecution({ type: "reset" });
+    planRequestId.current += 1;
+    setIsPlanReady(false);
+    setHasPlanError(false);
     setOutputPath(nextOutputPath);
     if (input) {
       schedulePlan(input, nextOutputPath);
@@ -355,9 +366,10 @@ export function App() {
                   disabled={isScanning}
                 />
 
-                {(isScanning || processedCount > 0) && (
+                {(isScanning || processedCount > 0 || execution.phase === "completed") && (
                   <BatchProgressCard
                     currentFile={currentFile}
+                    currentEmployee={currentEmployee}
                     processedCount={processedCount}
                     totalCount={
                       planStats.newFiles +
@@ -370,7 +382,9 @@ export function App() {
                     skippedCount={execution.skipped}
                     isScanning={isScanning}
                     isComplete={execution.phase === "completed"}
-                    outputReady={Boolean(outputPath)}
+                    outputReady={
+                      Boolean(outputPath) && isPlanReady && !isPlanning && !hasPlanError
+                    }
                     onOpenOutputFolder={handleOpenOutputFolder}
                   />
                 )}
@@ -382,7 +396,7 @@ export function App() {
                   stats={planStats}
                   isPlanning={isPlanning}
                   isScanning={isScanning}
-                  canScan={Boolean(inputPath.trim()) && !hasPlanError}
+                  canScan={Boolean(inputPath.trim()) && isPlanReady && !hasPlanError}
                   onRefreshPlan={handleRefreshPlan}
                   onStartScan={handleStartScan}
                 />
