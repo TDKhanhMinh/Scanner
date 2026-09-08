@@ -9,7 +9,7 @@ Failure to save cleanly unlinks the temporary file without corrupting any existi
 import os
 import uuid
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, List, Optional, Sequence, Union
 
 import cv2
 import numpy as np
@@ -37,6 +37,9 @@ class PdfExportResult(BaseContract):
     width_px: int
     height_px: int
     mode: str
+
+
+ImageInput = Union[np.ndarray, SingleScanResult, Image.Image]
 
 
 def _prepare_pil_image(
@@ -80,7 +83,7 @@ def _prepare_pil_image(
 
 
 def export_single_page_pdf(
-    image: Union[np.ndarray, SingleScanResult, Image.Image],
+    image: ImageInput,
     target_path: Union[str, Path],
     *,
     config: Optional[PdfExportConfig] = None,
@@ -105,11 +108,23 @@ def export_single_page_pdf(
     Raises:
         PdfWriteError: If image conversion, PDF encoding, or filesystem commit fails.
     """
+    return export_pdf_pages([image], target_path, config=config)
+
+
+def export_pdf_pages(
+    images: Sequence[ImageInput],
+    target_path: Union[str, Path],
+    *,
+    config: Optional[PdfExportConfig] = None,
+) -> PdfExportResult:
+    """Render one or more processed images into one atomically committed PDF."""
     cfg = config or PdfExportConfig()
     dest = Path(target_path).resolve()
+    if not images:
+        raise PdfWriteError(str(dest), "No pages were provided for export")
 
     try:
-        pil_img = _prepare_pil_image(image)
+        pil_images: List[Image.Image] = [_prepare_pil_image(image) for image in images]
     except Exception as exc:
         raise PdfWriteError(str(dest), f"Image preparation failed: {exc}") from exc
 
@@ -134,14 +149,18 @@ def export_single_page_pdf(
 
     try:
         # 3. Save PDF using Pillow's native PDF writer
-        pil_img.save(
-            temp_file,
-            format="PDF",
-            resolution=cfg.dpi,
-            quality=cfg.quality,
-            optimize=cfg.optimize,
-            title=dest.stem,
-        )
+        first_image = pil_images[0]
+        save_options: dict[str, Any] = {
+            "format": "PDF",
+            "resolution": cfg.dpi,
+            "quality": cfg.quality,
+            "optimize": cfg.optimize,
+            "title": dest.stem,
+        }
+        if len(pil_images) > 1:
+            save_options["save_all"] = True
+            save_options["append_images"] = pil_images[1:]
+        first_image.save(temp_file, **save_options)
 
         # 4. Verify temporary file was created and has non-zero size
         if not temp_file.exists():
@@ -175,13 +194,13 @@ def export_single_page_pdf(
         ) from exc
 
     final_size = dest.stat().st_size
-    w_px, h_px = pil_img.size
+    w_px, h_px = pil_images[0].size
 
     return PdfExportResult(
         pdf_path=str(dest),
         file_size_bytes=final_size,
-        page_count=1,
+        page_count=len(pil_images),
         width_px=w_px,
         height_px=h_px,
-        mode=pil_img.mode,
+        mode=pil_images[0].mode,
     )

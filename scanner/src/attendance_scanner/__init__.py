@@ -61,6 +61,15 @@ from attendance_scanner.events import (
     deserialize_event,
     serialize_event,
 )
+from attendance_scanner.export import (
+    ExportArtifact,
+    ExportPage,
+    ExportReviewRequiredError,
+    export_grouped,
+    export_pages,
+    export_per_image,
+    sanitize_filename_component,
+)
 from attendance_scanner.fingerprint import (
     FileFingerprint,
     compute_fast_fingerprint,
@@ -76,6 +85,7 @@ from attendance_scanner.page_classification import (
 from attendance_scanner.pdf_export import (
     PdfExportConfig,
     PdfExportResult,
+    export_pdf_pages,
     export_single_page_pdf,
 )
 from attendance_scanner.pipeline import (
@@ -140,6 +150,13 @@ __all__ = [
     "describe_scanner_error",
     "log_scanner_error",
     "scanner_error_user_message",
+    "ExportPage",
+    "ExportArtifact",
+    "ExportReviewRequiredError",
+    "export_per_image",
+    "export_grouped",
+    "export_pages",
+    "sanitize_filename_component",
     "DiscoveredFile",
     "DiscoveryResult",
     "ScanPlan",
@@ -190,6 +207,7 @@ __all__ = [
     "PdfExportConfig",
     "PdfExportResult",
     "export_single_page_pdf",
+    "export_pdf_pages",
     "compute_fast_fingerprint",
     "compute_sha256",
     "FileFingerprint",
