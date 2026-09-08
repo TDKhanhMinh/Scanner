@@ -44,6 +44,10 @@ from attendance_scanner.diagnostics import (
 )
 from attendance_scanner.discovery import (
     DEFAULT_PIPELINE_VERSION,
+    GroupAwareScanPlan,
+    GroupRebuildPlan,
+    build_affected_document_groups,
+    build_group_aware_scan_plan,
     build_incremental_scan_plan,
     classify_discovered_files,
     discover_employee_folders,
@@ -175,6 +179,10 @@ __all__ = [
     "classify_discovered_files",
     "build_incremental_scan_plan",
     "DEFAULT_PIPELINE_VERSION",
+    "GroupRebuildPlan",
+    "GroupAwareScanPlan",
+    "build_group_aware_scan_plan",
+    "build_affected_document_groups",
     "natural_sort_key",
     "resolve_target_pdf",
     "BaseEvent",

@@ -3,12 +3,17 @@
 import re
 import stat
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Union
 
 from attendance_scanner.contracts import (
+    BatchPeriod,
+    CompletenessStatus,
     DiscoveredFile,
     DiscoveryResult,
+    DocumentGroupKey,
+    ExportMode,
     FileClassification,
     FileProcessingStatus,
     InvalidInputRootError,
@@ -18,6 +23,57 @@ from attendance_scanner.fingerprint import compute_sha256
 from attendance_scanner.state import Manifest, ManifestEntry
 
 DEFAULT_PIPELINE_VERSION = "0.1.0"
+
+
+@dataclass(frozen=True)
+class GroupRebuildPlan:
+    """Affected document-group plan layered on top of file classifications."""
+
+    key: DocumentGroupKey
+    source_relative_paths: List[str]
+    process_relative_paths: List[str]
+    artifact_relative_paths: List[str]
+    reasons: List[str]
+    completeness_status: CompletenessStatus
+    review_required: bool
+
+
+@dataclass(frozen=True)
+class GroupAwareScanPlan:
+    """Combined file plan and affected-group plan for one export mode/period."""
+
+    export_mode: ExportMode
+    period: BatchPeriod
+    source_plan: ScanPlan
+    affected_groups: List[GroupRebuildPlan]
+    process_relative_paths: List[str]
+
+    @property
+    def affected_group_count(self) -> int:
+        return len(self.affected_groups)
+
+
+def _entry_group_key(
+    entry: Optional[ManifestEntry],
+    *,
+    employee_name: str,
+    period: BatchPeriod,
+) -> DocumentGroupKey:
+    """Resolve existing group identity or the context for a new source."""
+    if entry is not None and entry.group_key is not None:
+        return entry.group_key
+    effective_period = entry.period if entry is not None and entry.period else period
+    return DocumentGroupKey(
+        employee_relative_dir=employee_name,
+        year=effective_period.year,
+        month=effective_period.month,
+    )
+
+
+def _group_storage_key(key: DocumentGroupKey) -> str:
+    """Return the same stable group storage key used by manifest state."""
+    employee = key.employee_relative_dir.replace("\\", "/")
+    return f"{employee}:{key.year:04d}-{key.month:02d}"
 
 _COMPLETED_STATUSES = {
     FileProcessingStatus.SUCCESS,
@@ -306,3 +362,168 @@ def build_incremental_scan_plan(
     )
     effective_output_root = output_root or manifest.output_root
     return discovery.to_scan_plan(output_root=str(effective_output_root))
+
+
+def _group_artifacts_exist(output_root: Union[str, Path], artifact_paths: List[str]) -> bool:
+    """Check persisted artifact paths without treating an empty list as valid."""
+    if not artifact_paths:
+        return False
+    root = Path(output_root).resolve()
+    for relative_path in artifact_paths:
+        candidate = (root / Path(relative_path.replace("\\", "/"))).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return False
+        if not candidate.is_file():
+            return False
+    return True
+
+
+def build_group_aware_scan_plan(
+    discovery: DiscoveryResult,
+    manifest: Manifest,
+    output_root: Optional[Union[str, Path]],
+    period: BatchPeriod,
+    *,
+    export_mode: ExportMode = ExportMode.GROUPED,
+) -> GroupAwareScanPlan:
+    """Build file and affected-group plans for PER_IMAGE or GROUPED export.
+
+    Grouped mode expands an affected group's process set to all currently
+    discovered siblings because the MVP has no reusable processed-page cache.
+    The expansion is scoped to the same employee/period and never changes other
+    groups. Removed sources remain stale/incomplete and are never auto-deleted.
+    """
+    source_plan = build_incremental_scan_plan(
+        discovery=discovery,
+        manifest=manifest,
+        output_root=output_root,
+    )
+    effective_output_root = output_root or manifest.output_root
+    discovered_paths = {file.relative_path.replace("\\", "/") for file in discovery.files}
+    grouped_files: Dict[str, List[DiscoveredFile]] = {}
+    group_reasons: Dict[str, List[str]] = {}
+    group_keys: Dict[str, DocumentGroupKey] = {}
+
+    for file in discovery.files:
+        normalized_path = file.relative_path.replace("\\", "/")
+        entry = manifest.get_entry(normalized_path)
+        key = _entry_group_key(entry, employee_name=file.employee_name, period=period)
+        storage_key = _group_storage_key(key)
+        group_keys[storage_key] = key
+        grouped_files.setdefault(storage_key, []).append(file)
+        if file.classification in {
+            FileClassification.NEW,
+            FileClassification.MODIFIED,
+            FileClassification.REBUILD,
+        }:
+            group_reasons.setdefault(storage_key, []).append(
+                f"source_{file.classification.value}"
+            )
+
+    affected_groups: List[GroupRebuildPlan] = []
+    all_process_paths: List[str] = []
+    for storage_key, files in grouped_files.items():
+        key = group_keys[storage_key]
+        persisted_group = manifest.groups.get(storage_key)
+        artifact_paths = (
+            list(persisted_group.artifact_relative_paths) if persisted_group else []
+        )
+        reasons = list(dict.fromkeys(group_reasons.get(storage_key, [])))
+        missing_sources = (
+            [
+                path
+                for path in persisted_group.source_relative_paths
+                if path.replace("\\", "/") not in discovered_paths
+            ]
+            if persisted_group
+            else []
+        )
+        if missing_sources:
+            reasons.append("source_removed")
+        if persisted_group and not _group_artifacts_exist(effective_output_root, artifact_paths):
+            reasons.append("missing_grouped_output")
+        if not reasons:
+            continue
+
+        source_paths = [file.relative_path.replace("\\", "/") for file in files]
+        process_paths = source_paths
+        if export_mode == ExportMode.PER_IMAGE:
+            process_paths = [
+                file.relative_path.replace("\\", "/")
+                for file in files
+                if file.classification
+                in {
+                    FileClassification.NEW,
+                    FileClassification.MODIFIED,
+                    FileClassification.REBUILD,
+                }
+            ]
+        status = (
+            persisted_group.completeness_status
+            if persisted_group
+            else CompletenessStatus.AMBIGUOUS
+        )
+        if missing_sources:
+            status = CompletenessStatus.INCOMPLETE
+        review_required = persisted_group.review_required if persisted_group else False
+        review_required = review_required or bool(missing_sources)
+        plan = GroupRebuildPlan(
+            key=key,
+            source_relative_paths=source_paths,
+            process_relative_paths=process_paths,
+            artifact_relative_paths=artifact_paths,
+            reasons=list(dict.fromkeys(reasons)),
+            completeness_status=status,
+            review_required=review_required,
+        )
+        affected_groups.append(plan)
+        for path in process_paths:
+            if path not in all_process_paths:
+                all_process_paths.append(path)
+
+    for storage_key, persisted_group in manifest.groups.items():
+        missing_sources = [
+            path
+            for path in persisted_group.source_relative_paths
+            if path.replace("\\", "/") not in discovered_paths
+        ]
+        if not missing_sources or storage_key in grouped_files:
+            continue
+        affected_groups.append(
+            GroupRebuildPlan(
+                key=persisted_group.key,
+                source_relative_paths=list(persisted_group.source_relative_paths),
+                process_relative_paths=[],
+                artifact_relative_paths=list(persisted_group.artifact_relative_paths),
+                reasons=["source_removed"],
+                completeness_status=CompletenessStatus.INCOMPLETE,
+                review_required=True,
+            )
+        )
+
+    if export_mode == ExportMode.PER_IMAGE:
+        process_paths = [
+            file.relative_path.replace("\\", "/")
+            for file in discovery.files
+            if file.classification
+            in {
+                FileClassification.NEW,
+                FileClassification.MODIFIED,
+                FileClassification.REBUILD,
+            }
+        ]
+    else:
+        process_paths = all_process_paths
+
+    return GroupAwareScanPlan(
+        export_mode=export_mode,
+        period=period,
+        source_plan=source_plan,
+        affected_groups=affected_groups,
+        process_relative_paths=process_paths,
+    )
+
+
+build_affected_document_groups = build_group_aware_scan_plan

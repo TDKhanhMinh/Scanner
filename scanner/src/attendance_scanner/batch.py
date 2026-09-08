@@ -13,6 +13,7 @@ from threading import Lock
 from typing import Callable, Dict, List, Optional, Union
 
 from attendance_scanner.contracts import (
+    BatchPeriod,
     BatchSummary,
     DiscoveredFile,
     DiscoveryResult,
@@ -20,6 +21,7 @@ from attendance_scanner.contracts import (
     FileResult,
     ImageProcessError,
     InvalidInputRootError,
+    PageIdentity,
     ScanMode,
     ScannerErrorCode,
 )
@@ -40,7 +42,12 @@ from attendance_scanner.pipeline.orchestrator import (
     SingleScanResult,
     scan_one,
 )
-from attendance_scanner.state import Manifest, ManifestEntry, ManifestStore
+from attendance_scanner.state import (
+    Manifest,
+    ManifestEntry,
+    ManifestStore,
+    assign_entry_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +153,8 @@ def _make_failure_entry(
     target_relative_pdf: str,
     manifest: Manifest,
     pipeline_version: str,
+    batch_period: Optional[BatchPeriod] = None,
+    employee_relative_dir: Optional[str] = None,
 ) -> ManifestEntry:
     """Build retryable failure metadata while preserving prior artifacts."""
     previous = manifest.get_entry(file_relative_path)
@@ -161,7 +170,7 @@ def _make_failure_entry(
             output_relative_path = target_relative_pdf
         stored_pipeline_version = previous.pipeline_version
 
-    return ManifestEntry(
+    failure_entry = ManifestEntry(
         relative_path=file_relative_path,
         size=file_size,
         mtime_ns=file_mtime_ns,
@@ -171,7 +180,20 @@ def _make_failure_entry(
         status=FileProcessingStatus.FAILED,
         processed_at=datetime.now(timezone.utc).isoformat(),
         pipeline_version=stored_pipeline_version,
+        period=previous.period if previous is not None else None,
+        group_key=previous.group_key if previous is not None else None,
+        page_identity=previous.page_identity if previous is not None else PageIdentity(),
+        artifact_dependencies=(
+            list(previous.artifact_dependencies) if previous is not None else output_relative_paths
+        ),
     )
+    if batch_period is not None and employee_relative_dir is not None:
+        assign_entry_context(
+            failure_entry,
+            employee_relative_dir=employee_relative_dir,
+            batch_period=batch_period,
+        )
+    return failure_entry
 
 
 @dataclass
@@ -212,6 +234,7 @@ def _process_one_file(
     pipeline_version: str,
     events: List[BaseEvent],
     emit: Optional[EventEmitter],
+    batch_period: Optional[BatchPeriod],
 ) -> _FileOutcome:
     """Process one file; all exceptions become a file-level failure outcome."""
     started_at = time.perf_counter()
@@ -258,6 +281,7 @@ def _process_one_file(
             if scan_result.has_warning
             else FileProcessingStatus.SUCCESS
         )
+        previous = manifest.get_entry(file.relative_path)
         manifest_entry = ManifestEntry(
             relative_path=file.relative_path,
             size=source_size,
@@ -267,7 +291,21 @@ def _process_one_file(
             status=status,
             processed_at=datetime.now(timezone.utc).isoformat(),
             pipeline_version=pipeline_version,
+            period=previous.period if previous is not None else batch_period,
+            group_key=previous.group_key if previous is not None else None,
+            page_identity=previous.page_identity if previous is not None else PageIdentity(),
+            artifact_dependencies=(
+                list(previous.artifact_dependencies)
+                if previous is not None
+                else [file.target_relative_pdf]
+            ),
         )
+        if batch_period is not None:
+            assign_entry_context(
+                manifest_entry,
+                employee_relative_dir=file.employee_name,
+                batch_period=batch_period,
+            )
         _persist_manifest_entry(manifest, manifest_store, manifest_entry, manifest_lock)
 
         duration_ms = int(round((time.perf_counter() - started_at) * 1000.0))
@@ -308,6 +346,8 @@ def _process_one_file(
             target_relative_pdf=file.target_relative_pdf,
             manifest=manifest,
             pipeline_version=pipeline_version,
+            batch_period=batch_period,
+            employee_relative_dir=file.employee_name,
         )
         _best_effort_persist_failure(manifest, manifest_store, failure_entry, manifest_lock)
 
@@ -356,6 +396,8 @@ def run_batch(
     manifest_store: Optional[ManifestStore] = None,
     pipeline_version: str = DEFAULT_PIPELINE_VERSION,
     emit: Optional[EventEmitter] = None,
+    batch_period: Optional[BatchPeriod] = None,
+    process_files: Optional[List[DiscoveredFile]] = None,
 ) -> BatchRunResult:
     """Run the classified process set with resumable per-file isolation.
 
@@ -379,8 +421,10 @@ def run_batch(
     scan_mode = _normalize_scan_mode(mode)
     worker_count = clamp_worker_count(workers)
     store = manifest_store or ManifestStore()
-    process_files = list(discovery.files_to_process)
-    total = len(process_files)
+    selected_files = (
+        list(process_files) if process_files is not None else list(discovery.files_to_process)
+    )
+    total = len(selected_files)
     events: List[BaseEvent] = []
     outcomes: Dict[int, _FileOutcome] = {}
     manifest_lock = Lock()
@@ -389,7 +433,7 @@ def run_batch(
 
     futures: Dict[Future[_FileOutcome], int] = {}
     with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="scanner") as executor:
-        for index, file in enumerate(process_files, start=1):
+        for index, file in enumerate(selected_files, start=1):
             future = executor.submit(
                 _process_one_file,
                 file,
@@ -406,6 +450,7 @@ def run_batch(
                 pipeline_version,
                 events,
                 emit,
+                batch_period,
             )
             futures[future] = index
 
