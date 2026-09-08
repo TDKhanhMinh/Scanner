@@ -91,6 +91,7 @@ Chạy từ thư mục gốc:
     .\scanner\.venv\Scripts\python -m pip install -r scanner\requirements-sidecar.lock
     .\scripts\build-sidecar.ps1
     .\scripts\test-sidecar.ps1 -InputRoot "C:\path\to\representative\images"
+    .\scripts\build-windows.ps1 -SmokeTestInputRoot "C:\path\to\representative\images"
 
 Thư mục smoke test phải có ít nhất một file .jpg, .png và .webp. Script kiểm
 tra --version, --help, plan, scan-batch, JSONL protocol v1 và PDF đầu ra; state
@@ -101,6 +102,13 @@ apps/desktop/src-tauri/binaries/.
 File executable trong thư mục binaries là artifact được tạo tự động và được
 ignore khỏi Git history. Workflow Windows sidecar thực hiện build, smoke test,
 upload artifact và chạy tauri build để clean checkout luôn tái tạo đúng sidecar.
+
+build-windows.ps1 là pipeline release chính: kiểm tra product metadata/icon,
+build frontend, build sidecar, chạy smoke/relaunch test nếu có InputRoot, sau đó
+tạo các installer MSI/NSIS và build/windows/release-manifest.json. Bản cài đặt
+không cần Python, Node hoặc npm; state của scanner nằm trong
+APPDATA/attendance-scanner/state. Uninstall không được xóa thư mục input/output
+của người dùng.
 
 ## 5. Quy tắc Cam kết (Definition of Done)
 - 100% xử lý hoàn toàn local-first, không OCR/AI/cloud ở MVP.

@@ -167,6 +167,20 @@ try {
     if ($pdfCount -lt 3) {
         throw "Packaged scan-batch produced $pdfCount PDFs; expected at least 3 representative outputs."
     }
+
+    $relaunchPlan = Invoke-Sidecar -Arguments @(
+        "plan", "--input", $InputRoot, "--output", $OutputRoot
+    ) -AppDataPath $smokeAppData -TimeoutMilliseconds $timeoutMilliseconds
+    if ($relaunchPlan.ExitCode -ne 0) {
+        throw "Packaged relaunch plan smoke test failed: $($relaunchPlan.Stderr)"
+    }
+    $relaunchEvents = @(Read-Events $relaunchPlan.Stdout)
+    if ($relaunchEvents.Count -ne 1 -or $relaunchEvents[0].type -ne "scan_plan") {
+        throw "Packaged relaunch did not emit exactly one scan_plan event."
+    }
+    if ($relaunchEvents[0].filesToProcess -ne 0 -or $relaunchEvents[0].unchanged -lt 3) {
+        throw "Packaged relaunch did not preserve unchanged manifest state."
+    }
     Write-Host "Packaged sidecar smoke test passed: version/help/plan/scan-batch and $pdfCount PDF outputs." -ForegroundColor Green
 } finally {
     if (Test-Path -LiteralPath $smokeAppData) {

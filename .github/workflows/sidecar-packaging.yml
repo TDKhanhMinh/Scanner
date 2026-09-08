@@ -1,4 +1,4 @@
-name: Windows sidecar packaging
+name: Windows desktop packaging
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
       - "scanner/**"
       - "scripts/build-sidecar.ps1"
       - "scripts/test-sidecar.ps1"
+      - "scripts/build-windows.ps1"
       - "scripts/create-sidecar-fixtures.py"
       - "apps/desktop/src-tauri/**"
       - ".github/workflows/sidecar-packaging.yml"
@@ -38,10 +39,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r scanner/requirements-sidecar.lock
 
-      - name: Build and validate sidecar
-        shell: pwsh
-        run: .\scripts\build-sidecar.ps1 -PythonPath (Get-Command python).Source
-
       - name: Create smoke fixtures
         shell: pwsh
         run: |
@@ -49,21 +46,20 @@ jobs:
           python scripts/create-sidecar-fixtures.py --output $smokeRoot
           "SMOKE_INPUT=$smokeRoot" >> $env:GITHUB_ENV
 
-      - name: Run packaged sidecar smoke test
-        shell: pwsh
-        run: .\scripts\test-sidecar.ps1 -InputRoot $env:SMOKE_INPUT
-
       - name: Install desktop dependencies
         shell: pwsh
         run: npm ci
 
-      - name: Build Tauri desktop package
+      - name: Build Windows release pipeline
         shell: pwsh
-        run: npm --prefix apps/desktop run tauri build
+        run: .\scripts\build-windows.ps1 -PythonPath (Get-Command python).Source -SmokeTestInputRoot $env:SMOKE_INPUT
 
-      - name: Upload sidecar artifact
+      - name: Upload Windows release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: attendance-scanner-sidecar
-          path: apps/desktop/src-tauri/binaries/*.exe
+          name: attendance-scanner-windows-release
+          path: |
+            apps/desktop/src-tauri/binaries/*.exe
+            apps/desktop/src-tauri/target/release/bundle/**
+            build/windows/release-manifest.json
           if-no-files-found: error
