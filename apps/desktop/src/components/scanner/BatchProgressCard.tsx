@@ -1,19 +1,19 @@
+import { Button } from "@/components/ui/button";
 import {
-  CheckCircle,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import {
   AlertTriangle,
-  XCircle,
+  CheckCircle,
   FileClock,
   FolderOpen,
   Loader2,
+  XCircle,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@/components/ui/card";
 
 export interface BatchProgressCardProps {
   currentFile: string;
@@ -52,7 +52,7 @@ export function BatchProgressCard({
     : 0;
 
   return (
-    <Card className="border-border/80 bg-card/70">
+    <Card className="border-border/80 bg-card/70 mt-5">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold flex items-center gap-2">

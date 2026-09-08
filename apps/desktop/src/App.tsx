@@ -1,18 +1,17 @@
-import { useEffect, useReducer, useRef, useState } from "react";
-import { Sparkles, Scan, FileText, Info, CheckCircle2, FolderOpen } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { invoke } from "@tauri-apps/api/core";
 import { AppHeader } from "@/components/scanner/AppHeader";
-import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
 import { BatchOptionsCard } from "@/components/scanner/BatchOptionsCard";
-import { PageOrderReviewPanel } from "@/components/scanner/PageOrderReviewPanel";
-import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
-import { WorkerSettingCard } from "@/components/scanner/WorkerSettingCard";
-import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/ScanPlanSummaryCard";
 import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
 import { FileResultList } from "@/components/scanner/FileResultList";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
+import { PageOrderReviewPanel } from "@/components/scanner/PageOrderReviewPanel";
+import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
+import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/ScanPlanSummaryCard";
+import { WorkerSettingCard } from "@/components/scanner/WorkerSettingCard";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  initialScanExecutionState,
+  scanExecutionReducer,
+} from "@/lib/scanExecutionReducer";
 import {
   listenScannerDiagnostics,
   listenScannerEvents,
@@ -28,10 +27,11 @@ import type {
   ScanPlanEvent,
   ScannerEvent,
 } from "@/types/scanner";
-import {
-  initialScanExecutionState,
-  scanExecutionReducer,
-} from "@/lib/scanExecutionReducer";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { CheckCircle2, FileText, FolderOpen, Info, Scan, Sparkles } from "lucide-react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 function toPlanStats(plan: ScanPlanEvent): ScanPlanStats {
   return {
@@ -577,6 +577,27 @@ export function App() {
                   disabled={isScanning}
                 />
 
+                
+              </div>
+
+              {/* Cột phải (1 cột trên lg/desktop): Thống kê Scan Plan & CTA */}
+              <div className="lg:col-span-1 min-w-0">
+                <ScanPlanSummaryCard
+                  stats={planStats}
+                  isPlanning={isPlanning}
+                  isScanning={isScanning}
+                  period={settings.period}
+                  exportMode={settings.exportMode}
+                  canScan={
+                    Boolean(inputPath.trim()) &&
+                    isPlanReady &&
+                    !hasPlanError &&
+                    (settings.exportMode !== "GROUPED" ||
+                      reviewGroups.every((group) => resolvedReviewGroups[`${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`]))
+                  }
+                  onRefreshPlan={handleRefreshPlan}
+                  onStartScan={handleStartScan}
+                />
                 {(isScanning || processedCount > 0 || execution.phase === "completed") && (
                   <BatchProgressCard
                     currentFile={currentFile}
@@ -600,26 +621,7 @@ export function App() {
                   />
                 )}
               </div>
-
-              {/* Cột phải (1 cột trên lg/desktop): Thống kê Scan Plan & CTA */}
-              <div className="lg:col-span-1 min-w-0">
-                <ScanPlanSummaryCard
-                  stats={planStats}
-                  isPlanning={isPlanning}
-                  isScanning={isScanning}
-                  period={settings.period}
-                  exportMode={settings.exportMode}
-                  canScan={
-                    Boolean(inputPath.trim()) &&
-                    isPlanReady &&
-                    !hasPlanError &&
-                    (settings.exportMode !== "GROUPED" ||
-                      reviewGroups.every((group) => resolvedReviewGroups[`${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`]))
-                  }
-                  onRefreshPlan={handleRefreshPlan}
-                  onStartScan={handleStartScan}
-                />
-              </div>
+              
             </div>
           </TabsContent>
 
