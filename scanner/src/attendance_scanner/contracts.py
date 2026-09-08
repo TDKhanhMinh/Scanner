@@ -19,6 +19,85 @@ class ScanMode(str, Enum):
     COLOR = "color"
 
 
+class ExportMode(str, Enum):
+    """Output strategy for a scan batch."""
+
+    PER_IMAGE = "PER_IMAGE"
+    GROUPED = "GROUPED"
+
+
+class PageType(str, Enum):
+    """Known page roles for the current attendance template."""
+
+    FIRST_HALF = "FIRST_HALF"
+    SECOND_HALF = "SECOND_HALF"
+    UNKNOWN = "UNKNOWN"
+
+
+class CompletenessStatus(str, Enum):
+    """Document-group completeness/review state."""
+
+    COMPLETE = "COMPLETE"
+    INCOMPLETE = "INCOMPLETE"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+class BaseContract(BaseModel):
+    """Base contract model supporting camelCase aliases for interoperability."""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
+
+
+class BatchPeriod(BaseContract):
+    """User-selected year/month context for one scan batch."""
+
+    year: int = Field(ge=1, le=9999)
+    month: int = Field(ge=1, le=12)
+
+
+class PageIdentity(BaseContract):
+    """Typed identity and ordering metadata for one document page."""
+
+    page_type: PageType = PageType.UNKNOWN
+    page_order: Optional[int] = Field(default=None, ge=1)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    detection_method: Optional[str] = None
+
+
+class DocumentGroupKey(BaseContract):
+    """Stable group identity independent of source filename."""
+
+    employee_relative_dir: str = Field(min_length=1)
+    year: int = Field(ge=1, le=9999)
+    month: int = Field(ge=1, le=12)
+
+
+class SourcePage(BaseContract):
+    """Technical source reference paired with its page identity."""
+
+    source_relative_path: str = Field(min_length=1)
+    identity: PageIdentity = Field(default_factory=PageIdentity)
+
+
+class DocumentGroup(BaseContract):
+    """Document pages belonging to one employee and batch period."""
+
+    key: DocumentGroupKey
+    source_pages: List[SourcePage] = Field(default_factory=list)
+    completeness_status: CompletenessStatus = CompletenessStatus.AMBIGUOUS
+    review_required: bool = False
+
+    @model_validator(mode="after")
+    def require_review_for_ambiguous_group(self) -> "DocumentGroup":
+        """Never allow an ambiguous group to bypass the review workflow."""
+        if self.completeness_status == CompletenessStatus.AMBIGUOUS:
+            self.review_required = True
+        return self
+
+
 class FileClassification(str, Enum):
     """Classification state for discovered files during incremental planning."""
 
@@ -61,15 +140,6 @@ class ScannerWarningCode(str, Enum):
     DOCUMENT_NOT_DETECTED = "DOCUMENT_NOT_DETECTED"
     IMAGE_DOWNSCALED = "IMAGE_DOWNSCALED"
     WARP_FALLBACK = "WARP_FALLBACK"
-
-
-class BaseContract(BaseModel):
-    """Base contract model supporting camelCase aliases for interoperability."""
-
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel,
-    )
 
 
 class DiscoveredFile(BaseContract):
@@ -179,6 +249,8 @@ class ScanBatchRequest(BaseContract):
     output_root: Optional[str] = None
     mode: ScanMode = ScanMode.GRAY
     workers: int = Field(default=3, ge=1, le=4)
+    period: Optional[BatchPeriod] = None
+    export_mode: ExportMode = ExportMode.PER_IMAGE
 
 
 class FileResult(BaseContract):

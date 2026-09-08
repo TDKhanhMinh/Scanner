@@ -7,6 +7,49 @@ export const PROTOCOL_VERSION = 1;
 
 export type ScanMode = "gray" | "bw" | "color";
 
+export interface BatchPeriod {
+  year: number;
+  month: number;
+}
+
+export type ExportMode = "PER_IMAGE" | "GROUPED";
+export const VALID_EXPORT_MODES = ["PER_IMAGE", "GROUPED"] as const;
+
+export type PageType = "FIRST_HALF" | "SECOND_HALF" | "UNKNOWN";
+export const VALID_PAGE_TYPES = ["FIRST_HALF", "SECOND_HALF", "UNKNOWN"] as const;
+
+export type CompletenessStatus = "COMPLETE" | "INCOMPLETE" | "AMBIGUOUS";
+export const VALID_COMPLETENESS_STATUSES = [
+  "COMPLETE",
+  "INCOMPLETE",
+  "AMBIGUOUS",
+] as const;
+
+export interface PageIdentity {
+  pageType: PageType;
+  pageOrder?: number | null;
+  confidence?: number | null;
+  detectionMethod?: string | null;
+}
+
+export interface DocumentGroupKey {
+  employeeRelativeDir: string;
+  year: number;
+  month: number;
+}
+
+export interface SourcePage {
+  sourceRelativePath: string;
+  identity: PageIdentity;
+}
+
+export interface DocumentGroup {
+  key: DocumentGroupKey;
+  sourcePages: SourcePage[];
+  completenessStatus: CompletenessStatus;
+  reviewRequired: boolean;
+}
+
 export type FileClassification =
   | "new"
   | "modified"
@@ -94,6 +137,8 @@ export interface ScanBatchRequest {
   outputRoot?: string | null;
   mode: ScanMode;
   workers: number;
+  period?: BatchPeriod | null;
+  exportMode?: ExportMode;
 }
 
 export interface FileResult {

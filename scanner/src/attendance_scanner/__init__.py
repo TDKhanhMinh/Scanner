@@ -8,9 +8,14 @@ from attendance_scanner.batch import (
 )
 from attendance_scanner.contracts import (
     PROTOCOL_VERSION,
+    BatchPeriod,
     BatchSummary,
+    CompletenessStatus,
     DiscoveredFile,
     DiscoveryResult,
+    DocumentGroup,
+    DocumentGroupKey,
+    ExportMode,
     FileClassification,
     FileProcessingStatus,
     FileResult,
@@ -18,6 +23,8 @@ from attendance_scanner.contracts import (
     ImageProcessError,
     InvalidInputRootError,
     OutputNotWritableError,
+    PageIdentity,
+    PageType,
     PdfWriteError,
     ScanBatchRequest,
     ScanMode,
@@ -25,6 +32,7 @@ from attendance_scanner.contracts import (
     ScannerErrorCode,
     ScannerWarningCode,
     ScanPlan,
+    SourcePage,
     StateError,
 )
 from attendance_scanner.diagnostics import (
@@ -101,6 +109,14 @@ __version__ = "0.1.0"
 __all__ = [
     "PROTOCOL_VERSION",
     "ScanMode",
+    "ExportMode",
+    "PageType",
+    "CompletenessStatus",
+    "BatchPeriod",
+    "PageIdentity",
+    "DocumentGroupKey",
+    "SourcePage",
+    "DocumentGroup",
     "FileClassification",
     "FileProcessingStatus",
     "ScannerErrorCode",
