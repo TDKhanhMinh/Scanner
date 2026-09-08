@@ -82,8 +82,21 @@ def _resolve_output_path(output_root: Union[str, Path], relative_path: str) -> P
     root = Path(output_root).resolve()
     normalized = str(relative_path).replace("\\", "/")
     candidate = (root / Path(normalized)).resolve()
+
+    def comparison_path(path: Path) -> str:
+        """Normalize Windows extended paths before comparing containment."""
+        value = str(path)
+        if value.startswith("\\\\?\\UNC\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"):
+            value = value[4:]
+        return os.path.normcase(value)
+
     try:
-        candidate.relative_to(root)
+        root_comparison = comparison_path(root)
+        candidate_comparison = comparison_path(candidate)
+        if os.path.commonpath([root_comparison, candidate_comparison]) != root_comparison:
+            raise ValueError("resolved candidate is outside output root")
     except ValueError as exc:
         raise ValueError(f"Output path escapes output root: {relative_path!r}") from exc
     return candidate

@@ -11,7 +11,12 @@ import pytest
 from PIL import Image
 
 import attendance_scanner.cli as cli
-from attendance_scanner.batch import clamp_worker_count, default_worker_count, run_batch
+from attendance_scanner.batch import (
+    _resolve_output_path,
+    clamp_worker_count,
+    default_worker_count,
+    run_batch,
+)
 from attendance_scanner.contracts import (
     FileProcessingStatus,
     ImageDecodeError,
@@ -42,6 +47,16 @@ def test_worker_count_uses_default_and_clamps_to_supported_range():
     assert clamp_worker_count(0) == 1
     assert clamp_worker_count(2) == 2
     assert clamp_worker_count(99) == 4
+
+
+def test_output_path_resolver_accepts_existing_parent_on_windows(tmp_path: Path):
+    output_root = tmp_path / "output"
+    (output_root / "NV04").mkdir(parents=True)
+
+    resolved = _resolve_output_path(output_root, "NV04/card-002.pdf")
+
+    assert resolved.name == "card-002.pdf"
+    assert resolved.parent.name == "NV04"
 
 
 def _create_batch_context(tmp_path: Path, count: int = 4):
