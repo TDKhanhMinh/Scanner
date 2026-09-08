@@ -26,6 +26,11 @@ $sidecarPath = Join-Path $desktopRoot "src-tauri\binaries\attendance-scanner-sid
 $bundleRoot = Join-Path $desktopRoot "src-tauri\target\release\bundle"
 $manifestRoot = Join-Path $repoRoot "build\windows"
 $manifestPath = Join-Path $manifestRoot "release-manifest.json"
+$supportedTargetTriple = "x86_64-pc-windows-msvc"
+
+if ($TargetTriple -ne $supportedTargetTriple) {
+    throw "This Windows Tauri pipeline supports only '$supportedTargetTriple'; received '$TargetTriple'."
+}
 
 function Invoke-Checked {
     param(
@@ -94,7 +99,8 @@ if (-not (Test-Path -LiteralPath $sidecarPath -PathType Leaf)) {
 if (-not [string]::IsNullOrWhiteSpace($smokeInput)) {
     $smokeScript = Join-Path $PSScriptRoot "test-sidecar.ps1"
     Invoke-Checked (Get-Command pwsh -ErrorAction Stop).Source @(
-        "-NoProfile", "-File", $smokeScript, "-InputRoot", $smokeInput
+        "-NoProfile", "-File", $smokeScript, "-InputRoot", $smokeInput,
+        "-SidecarPath", $sidecarPath
     ) "[3/4] Running packaged sidecar smoke/relaunch test"
 } else {
     Write-Host "[3/4] Packaged sidecar smoke test skipped (pass -SmokeTestInputRoot to run it)." -ForegroundColor Yellow
