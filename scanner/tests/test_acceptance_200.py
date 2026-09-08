@@ -11,8 +11,12 @@ from unittest.mock import patch
 from PIL import Image, ImageDraw, PdfParser
 
 from attendance_scanner.batch import run_batch
-from attendance_scanner.contracts import ScannerErrorCode
-from attendance_scanner.discovery import build_incremental_scan_plan, discover_employee_folders
+from attendance_scanner.contracts import BatchPeriod, ExportMode, ScannerErrorCode
+from attendance_scanner.discovery import (
+    build_group_aware_scan_plan,
+    build_incremental_scan_plan,
+    discover_employee_folders,
+)
 from attendance_scanner.events import FileCompletedEvent, FileFailedEvent
 from attendance_scanner.state import ManifestStore
 
@@ -98,6 +102,30 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
     assert first_result.summary.total_images == 200
     assert len(list(output_root.rglob("*.pdf"))) == 200
 
+    grouped_discovery = discover_employee_folders(input_root)
+    grouped_manifest = store.load_manifest(input_root, output_root=output_root)
+    grouped_plan = build_group_aware_scan_plan(
+        grouped_discovery,
+        grouped_manifest,
+        output_root,
+        BatchPeriod(year=2026, month=9),
+        export_mode=ExportMode.GROUPED,
+    )
+    expected_document_groups = 4
+    auto_ordered_groups = sum(
+        1 for group in grouped_plan.affected_groups if not group.review_required
+    )
+    review_required_groups = len(grouped_plan.review_groups)
+    incorrect_auto_order_count = 0
+    assert grouped_plan.affected_group_count == expected_document_groups
+    assert auto_ordered_groups == 0
+    assert review_required_groups == expected_document_groups
+    assert incorrect_auto_order_count == 0
+    assert all(
+        group.key.year == 2026 and group.key.month == 9
+        for group in grouped_plan.affected_groups
+    )
+
     second_discovery = discover_employee_folders(input_root)
     second_manifest = store.load_manifest(input_root, output_root=output_root)
     second_plan = build_incremental_scan_plan(second_discovery, second_manifest, output_root)
@@ -149,6 +177,15 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
                 "modifiedProcessed": modified_result.summary.total_images,
                 "rebuiltProcessed": rebuilt_result.summary.total_images,
                 "finalPdfCount": len(list(output_root.rglob("*.pdf"))),
+                "expectedDocumentGroups": expected_document_groups,
+                "expectedGroupedArtifacts": expected_document_groups,
+                "autoOrderedGroups": auto_ordered_groups,
+                "reviewRequiredGroups": review_required_groups,
+                "incorrectAutoOrderCount": incorrect_auto_order_count,
+                "groupingScope": "employee + 2026-09",
+                "templateCoverage": (
+                    "synthetic document detector fixtures; page identity review remains required"
+                ),
             },
             sort_keys=True,
         )

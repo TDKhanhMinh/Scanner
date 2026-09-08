@@ -15,6 +15,7 @@ const REASON_LABELS: Record<string, string> = {
   unknown_page_identity: "Không nhận diện chắc chắn loại page",
   duplicate_page_order: "Trùng thứ tự page được nhận diện",
   duplicate_or_missing_page_order: "Thiếu hoặc trùng thứ tự page",
+  missing_expected_page: "Thiếu page bắt buộc (Page 1 hoặc Page 2)",
   source_removed: "Một source page đã bị xóa",
   manual_order_invalidated: "Source đã thay đổi sau manual override",
   missing_grouped_output: "Thiếu grouped PDF cần dựng lại",

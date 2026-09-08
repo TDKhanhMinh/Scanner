@@ -34,8 +34,10 @@ def _seed_grouped_context(tmp_path: Path):
     files = {
         "A/first.png": 160,
         "A/second.png": 170,
-        "B/only.png": 180,
-        "A_old/only.png": 190,
+        "B/first.png": 180,
+        "B/second.png": 181,
+        "A_old/first.png": 190,
+        "A_old/second.png": 191,
     }
     for relative_path, value in files.items():
         _write_image(input_root / relative_path, value)
@@ -45,8 +47,8 @@ def _seed_grouped_context(tmp_path: Path):
     period = BatchPeriod(year=2026, month=9)
     groups = {
         "A:2026-09": ["A/first.png", "A/second.png"],
-        "B:2026-09": ["B/only.png"],
-        "A_old:2026-08": ["A_old/only.png"],
+        "B:2026-09": ["B/first.png", "B/second.png"],
+        "A_old:2026-08": ["A_old/first.png", "A_old/second.png"],
     }
     for storage_key, source_paths in groups.items():
         employee_name, month = storage_key.split(":")
@@ -78,13 +80,13 @@ def _seed_grouped_context(tmp_path: Path):
         )
         for source_path in source_paths:
             page_identity = PageIdentity()
-            if employee_name == "A" and source_path.endswith("first.png"):
+            if source_path.endswith("first.png"):
                 page_identity = PageIdentity(
                     page_type=PageType.FIRST_HALF,
                     page_order=1,
                     confidence=0.95,
                 )
-            elif employee_name == "A" and source_path.endswith("second.png"):
+            elif source_path.endswith("second.png"):
                 page_identity = PageIdentity(
                     page_type=PageType.SECOND_HALF,
                     page_order=2,

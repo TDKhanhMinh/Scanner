@@ -493,6 +493,8 @@ def build_group_aware_scan_plan(
                 ]
                 if len(known_orders) != len(set(known_orders)):
                     reasons.append("duplicate_page_order")
+                if len(entries) < 2 or not {1, 2}.issubset(set(known_orders)):
+                    reasons.append("missing_expected_page")
         if persisted_group and not _group_artifacts_exist(effective_output_root, artifact_paths):
             reasons.append("missing_grouped_output")
         if not reasons:
@@ -516,13 +518,18 @@ def build_group_aware_scan_plan(
             if persisted_group
             else CompletenessStatus.AMBIGUOUS
         )
-        if missing_sources:
+        if missing_sources or "missing_expected_page" in reasons:
             status = CompletenessStatus.INCOMPLETE
         review_required = persisted_group.review_required if persisted_group else False
         review_required = review_required or bool(missing_sources)
         review_required = review_required or any(
             reason
-            in {"unknown_page_identity", "duplicate_page_order", "manual_order_invalidated"}
+            in {
+                "unknown_page_identity",
+                "duplicate_page_order",
+                "manual_order_invalidated",
+                "missing_expected_page",
+            }
             for reason in reasons
         )
         if review_required and status == CompletenessStatus.COMPLETE:
