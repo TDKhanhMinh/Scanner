@@ -26,6 +26,7 @@ from attendance_scanner.contracts import (
     PageIdentity,
     PageType,
     PdfWriteError,
+    ReviewGroup,
     ScanBatchRequest,
     ScanMode,
     ScannerError,
@@ -127,6 +128,8 @@ from attendance_scanner.state import (
     assign_entry_context,
     compute_root_id,
     get_default_state_dir,
+    set_manual_group_order,
+    source_order_fingerprint,
 )
 
 __version__ = "0.1.0"
@@ -142,6 +145,7 @@ __all__ = [
     "DocumentGroupKey",
     "SourcePage",
     "DocumentGroup",
+    "ReviewGroup",
     "FileClassification",
     "FileProcessingStatus",
     "ScannerErrorCode",
@@ -230,6 +234,8 @@ __all__ = [
     "ManifestArtifact",
     "ManifestGroup",
     "assign_entry_context",
+    "set_manual_group_order",
+    "source_order_fingerprint",
     "ManifestEntry",
     "Manifest",
     "ManifestStore",

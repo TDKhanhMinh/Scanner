@@ -36,6 +36,7 @@ export interface ScannerRequest {
   workers?: number | null;
   period?: BatchPeriod | null;
   exportMode?: ExportMode | null;
+  manualOrder?: Record<string, string[]> | null;
 }
 
 export async function planScan(request: ScannerRequest): Promise<ScanPlanEvent> {
@@ -58,6 +59,7 @@ export async function startScan(request: ScannerRequest): Promise<ScanRunOutcome
     year: request.period?.year ?? null,
     month: request.period?.month ?? null,
     exportMode: request.exportMode ?? null,
+    manualOrder: request.manualOrder ?? null,
   });
 }
 

@@ -5,6 +5,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { AppHeader } from "@/components/scanner/AppHeader";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
 import { BatchOptionsCard } from "@/components/scanner/BatchOptionsCard";
+import { PageOrderReviewPanel } from "@/components/scanner/PageOrderReviewPanel";
 import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
 import { WorkerSettingCard } from "@/components/scanner/WorkerSettingCard";
 import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/ScanPlanSummaryCard";
@@ -22,6 +23,7 @@ import {
 import type {
   BatchPeriod,
   ExportMode,
+  ReviewGroup,
   ScanPlanEvent,
   ScannerEvent,
 } from "@/types/scanner";
@@ -71,6 +73,13 @@ export function App() {
     exportMode: "PER_IMAGE",
   });
   const [activeTab, setActiveTab] = useState<string>("config");
+  const [reviewGroups, setReviewGroups] = useState<ReviewGroup[]>([]);
+  const [resolvedReviewGroups, setResolvedReviewGroups] = useState<
+    Record<string, "resolved" | "skipped">
+  >({});
+  const [manualOrderOverrides, setManualOrderOverrides] = useState<
+    Record<string, string[]>
+  >({});
 
   // Incremental scan plan state loaded from the Tauri scanner bridge.
   const [planStats, setPlanStats] = useState<ScanPlanStats>({
@@ -140,6 +149,9 @@ export function App() {
           setPlanStats(toPlanStats(plan));
           setInputPath(plan.inputRoot);
           setOutputPath(plan.outputRoot);
+          setReviewGroups(plan.reviewGroups ?? []);
+          setResolvedReviewGroups({});
+          setManualOrderOverrides({});
           setIsPlanReady(true);
         }
       })
@@ -155,6 +167,9 @@ export function App() {
             unsupportedFiles: 0,
           });
           setErrorMessage(scannerErrorMessage(error));
+          setReviewGroups([]);
+          setResolvedReviewGroups({});
+          setManualOrderOverrides({});
           setHasPlanError(true);
           setIsPlanReady(false);
         }
@@ -184,6 +199,9 @@ export function App() {
   const handleInputChange = (path: string) => {
     setInputPath(path);
     dispatchExecution({ type: "reset" });
+    setReviewGroups([]);
+    setResolvedReviewGroups({});
+    setManualOrderOverrides({});
     planRequestId.current += 1;
     setIsPlanReady(false);
     const trimmed = path.trim();
@@ -224,6 +242,9 @@ export function App() {
     const nextSettings = { ...settings, period };
     setSettings(nextSettings);
     dispatchExecution({ type: "reset" });
+    setReviewGroups([]);
+    setResolvedReviewGroups({});
+    setManualOrderOverrides({});
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -235,6 +256,9 @@ export function App() {
     const nextSettings = { ...settings, exportMode };
     setSettings(nextSettings);
     dispatchExecution({ type: "reset" });
+    setReviewGroups([]);
+    setResolvedReviewGroups({});
+    setManualOrderOverrides({});
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -268,6 +292,9 @@ export function App() {
     const input = inputPath.trim();
     const nextOutputPath = path.trim() || (input ? `${input}_pdf` : "");
     dispatchExecution({ type: "reset" });
+    setReviewGroups([]);
+    setResolvedReviewGroups({});
+    setManualOrderOverrides({});
     planRequestId.current += 1;
     setIsPlanReady(false);
     setHasPlanError(false);
@@ -303,7 +330,17 @@ export function App() {
     dispatchExecution({ type: "scanner_event", event });
     if (event.type === "scan_plan") {
       setPlanStats(toPlanStats(event));
+      setReviewGroups(event.reviewGroups ?? []);
     }
+  };
+
+  const handleResolveReviewGroup = (groupId: string, orderedPaths: string[]) => {
+    setManualOrderOverrides((current) => ({ ...current, [groupId]: orderedPaths }));
+    setResolvedReviewGroups((current) => ({ ...current, [groupId]: "resolved" }));
+  };
+
+  const handleSkipReviewGroup = (groupId: string) => {
+    setResolvedReviewGroups((current) => ({ ...current, [groupId]: "skipped" }));
   };
 
   const handleStartScan = () => {
@@ -337,6 +374,7 @@ export function App() {
           workers: settings.workers,
           period: settings.period,
           exportMode: settings.exportMode,
+          manualOrder: manualOrderOverrides,
         });
       } catch (error: unknown) {
         if (requestId === scanRequestId.current) {
@@ -425,6 +463,15 @@ export function App() {
                   disabled={isScanning}
                 />
 
+                {settings.exportMode === "GROUPED" && reviewGroups.length > 0 && (
+                  <PageOrderReviewPanel
+                    groups={reviewGroups}
+                    resolvedGroups={resolvedReviewGroups}
+                    onResolve={handleResolveReviewGroup}
+                    onSkip={handleSkipReviewGroup}
+                  />
+                )}
+
                 <ScanModeSelector
                   mode={scanMode}
                   onSelectMode={(mode) => setSettings((previous) => ({ ...previous, mode }))}
@@ -471,7 +518,13 @@ export function App() {
                   isScanning={isScanning}
                   period={settings.period}
                   exportMode={settings.exportMode}
-                  canScan={Boolean(inputPath.trim()) && isPlanReady && !hasPlanError}
+                  canScan={
+                    Boolean(inputPath.trim()) &&
+                    isPlanReady &&
+                    !hasPlanError &&
+                    (settings.exportMode !== "GROUPED" ||
+                      reviewGroups.every((group) => resolvedReviewGroups[`${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`]))
+                  }
                   onRefreshPlan={handleRefreshPlan}
                   onStartScan={handleStartScan}
                 />

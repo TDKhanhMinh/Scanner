@@ -1,6 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_shell::{
@@ -100,6 +101,8 @@ pub struct ScanPlanPayload {
     pub ambiguous_groups: u64,
     #[serde(default)]
     pub pages_needing_review: u64,
+    #[serde(default)]
+    pub review_groups: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -244,6 +247,45 @@ fn validate_request(
     Ok(())
 }
 
+fn validate_manual_order(value: Option<&Value>) -> Result<(), ScannerBridgeError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| ScannerBridgeError::InvalidRequest {
+            message: "manualOrder must be an object mapping group ids to source paths".to_string(),
+        })?;
+    for (group_id, paths) in object {
+        if group_id.trim().is_empty() {
+            return Err(ScannerBridgeError::InvalidRequest {
+                message: "manualOrder group ids must be non-empty".to_string(),
+            });
+        }
+        let paths = paths
+            .as_array()
+            .ok_or_else(|| ScannerBridgeError::InvalidRequest {
+                message: format!("manualOrder value for {group_id} must be an array"),
+            })?;
+        let mut seen = HashSet::new();
+        for path in paths {
+            let path = path
+                .as_str()
+                .ok_or_else(|| ScannerBridgeError::InvalidRequest {
+                    message: format!("manualOrder paths for {group_id} must be strings"),
+                })?;
+            if path.trim().is_empty() || !seen.insert(path.replace('\\', "/")) {
+                return Err(ScannerBridgeError::InvalidRequest {
+                    message: format!(
+                        "manualOrder paths for {group_id} must be non-empty and unique"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_sidecar_args(
     command: &str,
@@ -254,6 +296,7 @@ fn build_sidecar_args(
     year: Option<u32>,
     month: Option<u32>,
     export_mode: Option<&str>,
+    manual_order_json: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![
         command.to_string(),
@@ -277,6 +320,12 @@ fn build_sidecar_args(
     }
     if let Some(export_mode) = export_mode {
         args.extend(["--export-mode".to_string(), export_mode.to_string()]);
+    }
+    if let Some(manual_order_json) = manual_order_json {
+        args.extend([
+            "--manual-order-json".to_string(),
+            manual_order_json.to_string(),
+        ]);
     }
     args
 }
@@ -569,6 +618,7 @@ async fn plan_scan(
         year,
         month,
         export_mode.as_deref(),
+        None,
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;
@@ -598,6 +648,7 @@ async fn start_scan(
     year: Option<u32>,
     month: Option<u32>,
     export_mode: Option<String>,
+    manual_order: Option<Value>,
 ) -> Result<ScanRunOutcome, ScannerBridgeError> {
     validate_request(
         input_root.as_str(),
@@ -608,6 +659,14 @@ async fn start_scan(
         month,
         export_mode.as_deref(),
     )?;
+    validate_manual_order(manual_order.as_ref())?;
+    let manual_order_json = manual_order
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| ScannerBridgeError::InvalidRequest {
+            message: format!("manualOrder could not be serialized: {error}"),
+        })?;
     let args = build_sidecar_args(
         "scan-batch",
         input_root.as_str(),
@@ -617,6 +676,7 @@ async fn start_scan(
         year,
         month,
         export_mode.as_deref(),
+        manual_order_json.as_deref(),
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;
@@ -712,6 +772,7 @@ mod tests {
             Some(r"D:\Attendance Output"),
             Some("gray"),
             Some(3),
+            None,
             None,
             None,
             None,
@@ -838,6 +899,7 @@ mod tests {
             Some(2026),
             Some(9),
             Some("grouped"),
+            None,
         );
         assert_eq!(
             args,
@@ -857,6 +919,33 @@ mod tests {
                 "grouped",
             ]
         );
+    }
+
+    #[test]
+    fn manual_order_is_validated_and_forwarded_as_one_json_argument() {
+        let valid = serde_json::json!({
+            "NV01:2026-09": ["NV01/page-2.png", "NV01/page-1.png"]
+        });
+        assert!(validate_manual_order(Some(&valid)).is_ok());
+        assert!(validate_manual_order(Some(&serde_json::json!({
+            "NV01:2026-09": ["NV01/page-1.png", "NV01/page-1.png"]
+        })))
+        .is_err());
+
+        let encoded = serde_json::to_string(&valid).expect("manual order JSON should serialize");
+        let args = build_sidecar_args(
+            "scan-batch",
+            "D:\\Input",
+            None,
+            Some("gray"),
+            Some(2),
+            Some(2026),
+            Some(9),
+            Some("grouped"),
+            Some(&encoded),
+        );
+        assert_eq!(args[args.len() - 2], "--manual-order-json");
+        assert_eq!(args.last(), Some(&encoded));
     }
 
     #[test]

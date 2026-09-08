@@ -119,6 +119,8 @@ class ManifestGroup(BaseContract):
     artifact_relative_paths: List[str] = Field(default_factory=list)
     completeness_status: CompletenessStatus = CompletenessStatus.AMBIGUOUS
     review_required: bool = False
+    manual_order: List[str] = Field(default_factory=list)
+    manual_order_fingerprint: Optional[str] = None
 
     @model_validator(mode="after")
     def require_review_for_ambiguous_group(self) -> "ManifestGroup":
@@ -210,6 +212,48 @@ def assign_entry_context(
     if page_identity is not None:
         entry.page_identity = page_identity
     return entry
+
+
+def source_order_fingerprint(entries: List[ManifestEntry]) -> str:
+    """Fingerprint source identity/metadata so manual order invalidates on changes."""
+    normalized_entries = []
+    for entry in sorted(
+        entries, key=lambda item: item.relative_path.replace("\\", "/")
+    ):
+        relative_path = entry.relative_path.replace("\\", "/")
+        normalized_entries.append(
+            f"{relative_path}:{entry.size}:{entry.mtime_ns}:{entry.sha256 or ''}"
+        )
+    normalized = "|".join(normalized_entries)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def set_manual_group_order(
+    manifest: Manifest,
+    *,
+    group_key: DocumentGroupKey,
+    ordered_source_paths: List[str],
+    source_entries: List[ManifestEntry],
+) -> ManifestGroup:
+    """Persist an explicit page order and bind it to current source fingerprints."""
+    normalized_order = [path.replace("\\", "/") for path in ordered_source_paths]
+    expected_paths = {
+        entry.relative_path.replace("\\", "/") for entry in source_entries
+    }
+    if (
+        len(normalized_order) != len(set(normalized_order))
+        or set(normalized_order) != expected_paths
+    ):
+        raise ValueError("Manual group order must contain each current source exactly once")
+    storage_key = _group_storage_key(group_key)
+    group = manifest.groups.get(storage_key) or ManifestGroup(key=group_key)
+    group.source_relative_paths = normalized_order
+    group.manual_order = normalized_order
+    group.manual_order_fingerprint = source_order_fingerprint(source_entries)
+    group.review_required = False
+    group.completeness_status = CompletenessStatus.COMPLETE
+    manifest.set_group(group)
+    return group
 
 
 def _migrate_v1_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:

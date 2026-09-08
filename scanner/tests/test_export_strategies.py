@@ -110,6 +110,44 @@ def test_grouped_export_manual_order_can_export_observed_order(tmp_path: Path):
     assert artifacts[0].pdf.page_count == 2
 
 
+def test_grouped_export_uses_explicit_review_order_for_unknown_pages(tmp_path: Path):
+    pages = [
+        _page("NV01/page-one.png", employee="NV01"),
+        _page("NV01/page-two.png", employee="NV01"),
+    ]
+
+    artifacts = export_grouped(
+        pages,
+        tmp_path,
+        BatchPeriod(year=2026, month=9),
+        manual_orders={
+            "NV01:2026-09": ["NV01/page-two.png", "NV01/page-one.png"],
+        },
+    )
+
+    assert artifacts[0].source_relative_paths == [
+        "NV01/page-two.png",
+        "NV01/page-one.png",
+    ]
+    assert artifacts[0].pdf.page_count == 2
+
+
+def test_grouped_export_rejects_explicit_order_with_missing_source(tmp_path: Path):
+    pages = [
+        _page("NV01/page-one.png", employee="NV01"),
+        _page("NV01/page-two.png", employee="NV01"),
+    ]
+
+    with pytest.raises(ExportReviewRequiredError, match="does not match current sources"):
+        export_grouped(
+            pages,
+            tmp_path,
+            BatchPeriod(year=2026, month=9),
+            manual_orders={"NV01:2026-09": ["NV01/page-one.png"]},
+        )
+    assert not list(tmp_path.rglob("*.pdf"))
+
+
 def test_multi_page_export_replaces_existing_output_atomically(tmp_path: Path):
     target = tmp_path / "existing.pdf"
     target.write_bytes(b"old artifact")

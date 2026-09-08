@@ -17,10 +17,18 @@ from attendance_scanner.contracts import (
     FileClassification,
     FileProcessingStatus,
     InvalidInputRootError,
+    PageIdentity,
+    PageType,
+    ReviewGroup,
     ScanPlan,
+    SourcePage,
 )
 from attendance_scanner.fingerprint import compute_sha256
-from attendance_scanner.state import Manifest, ManifestEntry
+from attendance_scanner.state import (
+    Manifest,
+    ManifestEntry,
+    source_order_fingerprint,
+)
 
 DEFAULT_PIPELINE_VERSION = "0.1.0"
 
@@ -47,6 +55,7 @@ class GroupAwareScanPlan:
     source_plan: ScanPlan
     affected_groups: List[GroupRebuildPlan]
     process_relative_paths: List[str]
+    review_groups: List[ReviewGroup]
 
     @property
     def affected_group_count(self) -> int:
@@ -442,6 +451,48 @@ def build_group_aware_scan_plan(
         )
         if missing_sources:
             reasons.append("source_removed")
+        entries = [manifest.get_entry(file.relative_path) for file in files]
+        if export_mode == ExportMode.GROUPED:
+            current_entries = [
+                entry.model_copy(
+                    update={
+                        "size": file.size,
+                        "mtime_ns": file.mtime_ns,
+                        "sha256": file.sha256 or entry.sha256,
+                    }
+                )
+                for file, entry in zip(files, entries, strict=True)
+                if entry is not None
+            ]
+            current_paths = {
+                entry.relative_path.replace("\\", "/") for entry in current_entries
+            }
+            persisted_order = list(persisted_group.manual_order) if persisted_group else []
+            manual_order_valid = bool(
+                persisted_group
+                and persisted_order
+                and persisted_group.manual_order_fingerprint
+                and len(current_entries) == len(entries)
+                and len(persisted_order) == len(set(persisted_order))
+                and set(persisted_order) == current_paths
+                and source_order_fingerprint(current_entries)
+                == persisted_group.manual_order_fingerprint
+            )
+            if persisted_order and not manual_order_valid:
+                reasons.append("manual_order_invalidated")
+            if not manual_order_valid:
+                if any(
+                    entry is None or entry.page_identity.page_type == PageType.UNKNOWN
+                    for entry in entries
+                ):
+                    reasons.append("unknown_page_identity")
+                known_orders = [
+                    entry.page_identity.page_order
+                    for entry in entries
+                    if entry is not None and entry.page_identity.page_order is not None
+                ]
+                if len(known_orders) != len(set(known_orders)):
+                    reasons.append("duplicate_page_order")
         if persisted_group and not _group_artifacts_exist(effective_output_root, artifact_paths):
             reasons.append("missing_grouped_output")
         if not reasons:
@@ -469,6 +520,13 @@ def build_group_aware_scan_plan(
             status = CompletenessStatus.INCOMPLETE
         review_required = persisted_group.review_required if persisted_group else False
         review_required = review_required or bool(missing_sources)
+        review_required = review_required or any(
+            reason
+            in {"unknown_page_identity", "duplicate_page_order", "manual_order_invalidated"}
+            for reason in reasons
+        )
+        if review_required and status == CompletenessStatus.COMPLETE:
+            status = CompletenessStatus.AMBIGUOUS
         plan = GroupRebuildPlan(
             key=key,
             source_relative_paths=source_paths,
@@ -517,12 +575,38 @@ def build_group_aware_scan_plan(
     else:
         process_paths = all_process_paths
 
+    review_groups: List[ReviewGroup] = []
+    for group in affected_groups:
+        if not group.review_required and group.completeness_status != CompletenessStatus.AMBIGUOUS:
+            continue
+        source_pages: List[SourcePage] = []
+        for relative_path in group.source_relative_paths:
+            entry = manifest.get_entry(relative_path)
+            source_pages.append(
+                SourcePage(
+                    source_relative_path=relative_path,
+                    identity=entry.page_identity if entry is not None else PageIdentity(),
+                )
+            )
+        persisted_group = manifest.groups.get(_group_storage_key(group.key))
+        review_groups.append(
+            ReviewGroup(
+                key=group.key,
+                source_pages=source_pages,
+                reasons=list(group.reasons),
+                completeness_status=group.completeness_status,
+                review_required=True,
+                manual_order=(list(persisted_group.manual_order) if persisted_group else []),
+            )
+        )
+
     return GroupAwareScanPlan(
         export_mode=export_mode,
         period=period,
         source_plan=source_plan,
         affected_groups=affected_groups,
         process_relative_paths=process_paths,
+        review_groups=review_groups,
     )
 
 

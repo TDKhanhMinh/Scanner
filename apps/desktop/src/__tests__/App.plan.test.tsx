@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
-import { planScan } from "@/lib/scannerBridge";
+import { planScan, startScan } from "@/lib/scannerBridge";
 import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
 
 vi.mock("@/lib/scannerBridge", () => ({
@@ -34,6 +34,24 @@ const validPlan = {
   collisions: ["NV01/card"],
   outdatedPipelineCount: 0,
   unsupportedCount: 2,
+};
+
+const ambiguousGroup = {
+  key: { employeeRelativeDir: "NV01", year: 2026, month: 9 },
+  sourcePages: [
+    {
+      sourceRelativePath: "NV01/page-one.png",
+      identity: { pageType: "UNKNOWN" as const, pageOrder: null, confidence: 0.4 },
+    },
+    {
+      sourceRelativePath: "NV01/page-two.png",
+      identity: { pageType: "UNKNOWN" as const, pageOrder: null, confidence: 0.4 },
+    },
+  ],
+  reasons: ["unknown_page_identity"],
+  completenessStatus: "AMBIGUOUS" as const,
+  reviewRequired: true,
+  manualOrder: [],
 };
 
 async function enterInputPath(path = "C:/Attendance Input") {
@@ -160,5 +178,44 @@ describe("App scan plan states", () => {
       period: { year: 2025, month: 8 },
       exportMode: "GROUPED",
     });
+  });
+
+  it("blocks grouped scanning until every ambiguous group is resolved or skipped", async () => {
+    vi.mocked(planScan)
+      .mockResolvedValueOnce(validPlan)
+      .mockResolvedValueOnce({
+        ...validPlan,
+        period: { year: 2026, month: 9 },
+        exportMode: "GROUPED" as const,
+        reviewGroups: [ambiguousGroup],
+      });
+    vi.mocked(startScan).mockResolvedValue({ exitCode: 0 });
+    render(<App />);
+    await enterInputPath();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Nhiều ảnh → một PDF/i }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    const scanButton = screen.getByRole("button", { name: /Quét các file mới \(4\)/i });
+    expect(screen.getByText(/Cần xác nhận thứ tự page/i)).toBeInTheDocument();
+    expect(scanButton).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Xác nhận thứ tự page/i }));
+    expect(scanButton).toBeEnabled();
+    fireEvent.click(scanButton);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(startScan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exportMode: "GROUPED",
+        manualOrder: {
+          "NV01:2026-09": ["NV01/page-one.png", "NV01/page-two.png"],
+        },
+      }),
+    );
   });
 });

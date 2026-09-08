@@ -24,6 +24,8 @@ from attendance_scanner.state import (
     ManifestStore,
     assign_entry_context,
     compute_root_id,
+    set_manual_group_order,
+    source_order_fingerprint,
 )
 
 
@@ -164,3 +166,45 @@ def test_migration_failure_keeps_original_v1_file_and_returns_typed_state_error(
     assert getattr(exc_info.value, "code", None) == ScannerErrorCode.STATE_READ_FAILED
     assert manifest_path.read_text(encoding="utf-8") == original
     assert not list(store.state_dir.glob("*.corrupt.*"))
+
+
+def test_manual_group_order_round_trips_with_source_fingerprint(tmp_path: Path):
+    input_root = tmp_path / "employees"
+    input_root.mkdir()
+    store = ManifestStore(state_dir=tmp_path / "state")
+    manifest = store.load_manifest(input_root, output_root=tmp_path / "output")
+    key = DocumentGroupKey(employee_relative_dir="NV01", year=2026, month=9)
+    entries = [
+        ManifestEntry(
+            relative_path="NV01/page-1.png",
+            size=10,
+            mtime_ns=20,
+            status=FileProcessingStatus.SUCCESS,
+            processed_at="2026-09-01T00:00:00Z",
+        ),
+        ManifestEntry(
+            relative_path="NV01/page-2.png",
+            size=11,
+            mtime_ns=21,
+            status=FileProcessingStatus.SUCCESS,
+            processed_at="2026-09-01T00:00:00Z",
+        ),
+    ]
+    original_fingerprint = source_order_fingerprint(entries)
+
+    group = set_manual_group_order(
+        manifest,
+        group_key=key,
+        ordered_source_paths=["NV01/page-2.png", "NV01/page-1.png"],
+        source_entries=entries,
+    )
+    store.save_manifest(manifest)
+    restored = store.load_manifest(input_root, output_root=tmp_path / "output")
+
+    assert restored.groups["NV01:2026-09"].manual_order == [
+        "NV01/page-2.png",
+        "NV01/page-1.png",
+    ]
+    assert group.manual_order_fingerprint == original_fingerprint
+    changed = [entries[0].model_copy(update={"mtime_ns": 99}), entries[1]]
+    assert source_order_fingerprint(changed) != group.manual_order_fingerprint

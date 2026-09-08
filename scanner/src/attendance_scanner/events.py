@@ -11,6 +11,7 @@ from attendance_scanner.contracts import (
     BatchPeriod,
     BatchSummary,
     ExportMode,
+    ReviewGroup,
     ScannerErrorCode,
     ScanPlan,
 )
@@ -72,6 +73,7 @@ class ScanPlanEvent(BaseEvent):
     incomplete_groups: int = Field(default=0, ge=0)
     ambiguous_groups: int = Field(default=0, ge=0)
     pages_needing_review: int = Field(default=0, ge=0)
+    review_groups: List[ReviewGroup] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -157,6 +159,7 @@ class ScanPlanEvent(BaseEvent):
         incomplete_groups: int = 0,
         ambiguous_groups: int = 0,
         pages_needing_review: int = 0,
+        review_groups: Optional[List[ReviewGroup]] = None,
     ) -> "ScanPlanEvent":
         """Construct ScanPlanEvent from ScanPlan contract model."""
         if timestamp is not None:
@@ -181,6 +184,7 @@ class ScanPlanEvent(BaseEvent):
                 incomplete_groups=incomplete_groups,
                 ambiguous_groups=ambiguous_groups,
                 pages_needing_review=pages_needing_review,
+                review_groups=review_groups or [],
                 timestamp=timestamp,
             )
         return cls(
@@ -204,6 +208,7 @@ class ScanPlanEvent(BaseEvent):
             incomplete_groups=incomplete_groups,
             ambiguous_groups=ambiguous_groups,
             pages_needing_review=pages_needing_review,
+            review_groups=review_groups or [],
         )
 
 

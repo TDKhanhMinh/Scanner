@@ -18,6 +18,7 @@ from attendance_scanner.batch import (
     run_batch,
 )
 from attendance_scanner.contracts import (
+    BatchPeriod,
     FileProcessingStatus,
     ImageDecodeError,
     ScanMode,
@@ -157,6 +158,36 @@ def test_batch_workers_are_bounded_and_manifest_is_checkpointed(tmp_path: Path):
         manifest.get_entry(item.relative_path).status == FileProcessingStatus.SUCCESS
         for item in discovery.files
     )
+
+
+def test_batch_persists_resolved_manual_group_order(tmp_path: Path):
+    _, output_root, discovery, manifest, store = _create_batch_context(tmp_path, count=2)
+
+    with (
+        patch(
+            "attendance_scanner.batch.scan_one",
+            side_effect=lambda source, mode, *, config=None: _scan_result(mode),
+        ),
+        patch("attendance_scanner.batch.export_single_page_pdf", side_effect=_fake_export),
+    ):
+        result = run_batch(
+            discovery=discovery,
+            manifest=manifest,
+            output_root=output_root,
+            workers=1,
+            manifest_store=store,
+            batch_period=BatchPeriod(year=2026, month=9),
+            manual_orders={
+                "NV01:2026-09": ["NV01/2.png", "NV01/1.png"],
+            },
+        )
+
+    assert result.exit_code == 0
+    assert manifest.groups["NV01:2026-09"].manual_order == [
+        "NV01/2.png",
+        "NV01/1.png",
+    ]
+    assert manifest.groups["NV01:2026-09"].review_required is False
 
 
 def test_corrupt_file_isolated_and_batch_returns_exit_code_2(tmp_path: Path):

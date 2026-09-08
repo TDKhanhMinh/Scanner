@@ -10,6 +10,8 @@ from attendance_scanner.contracts import (
     DocumentGroupKey,
     ExportMode,
     FileProcessingStatus,
+    PageIdentity,
+    PageType,
 )
 from attendance_scanner.discovery import build_group_aware_scan_plan, discover_employee_folders
 from attendance_scanner.state import (
@@ -75,6 +77,25 @@ def _seed_grouped_context(tmp_path: Path):
             )
         )
         for source_path in source_paths:
+            page_identity = PageIdentity()
+            if employee_name == "A" and source_path.endswith("first.png"):
+                page_identity = PageIdentity(
+                    page_type=PageType.FIRST_HALF,
+                    page_order=1,
+                    confidence=0.95,
+                )
+            elif employee_name == "A" and source_path.endswith("second.png"):
+                page_identity = PageIdentity(
+                    page_type=PageType.SECOND_HALF,
+                    page_order=2,
+                    confidence=0.95,
+                )
+            else:
+                page_identity = PageIdentity(
+                    page_type=PageType.FIRST_HALF,
+                    page_order=1,
+                    confidence=0.95,
+                )
             manifest.set_entry(
                 ManifestEntry(
                     relative_path=source_path,
@@ -86,6 +107,7 @@ def _seed_grouped_context(tmp_path: Path):
                     processed_at="2026-09-01T00:00:00Z",
                     period=period if employee_name != "A_old" else BatchPeriod(year=2026, month=8),
                     group_key=key,
+                    page_identity=page_identity,
                 )
             )
     store.save_manifest(manifest)
@@ -162,3 +184,42 @@ def test_removed_source_marks_group_incomplete_without_deleting_artifact(tmp_pat
     assert affected.review_required is True
     assert "source_removed" in affected.reasons
     assert (output_root / "A/2026-09_A.pdf").is_file()
+
+
+def test_persisted_manual_order_suppresses_review_until_source_changes(tmp_path: Path):
+    input_root, output_root, manifest, store, period = _seed_grouped_context(tmp_path)
+    key = DocumentGroupKey(employee_relative_dir="A", year=2026, month=9)
+    entries = [manifest.get_entry(path) for path in ["A/first.png", "A/second.png"]]
+    assert all(entry is not None for entry in entries)
+
+    from attendance_scanner.state import set_manual_group_order
+
+    set_manual_group_order(
+        manifest,
+        group_key=key,
+        ordered_source_paths=["A/second.png", "A/first.png"],
+        source_entries=[entry for entry in entries if entry is not None],
+    )
+    store.save_manifest(manifest)
+
+    plan = build_group_aware_scan_plan(
+        discover_employee_folders(input_root),
+        manifest,
+        output_root,
+        period,
+        export_mode=ExportMode.GROUPED,
+    )
+    assert plan.affected_group_count == 0
+    assert plan.review_groups == []
+
+    _write_image(input_root / "A/first.png", 241)
+    changed_plan = build_group_aware_scan_plan(
+        discover_employee_folders(input_root),
+        manifest,
+        output_root,
+        period,
+        export_mode=ExportMode.GROUPED,
+    )
+    assert changed_plan.affected_group_count == 1
+    assert "manual_order_invalidated" in changed_plan.affected_groups[0].reasons
+    assert changed_plan.review_groups[0].review_required is True

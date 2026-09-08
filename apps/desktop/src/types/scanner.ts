@@ -51,6 +51,15 @@ export interface DocumentGroup {
   reviewRequired: boolean;
 }
 
+export interface ReviewGroup {
+  key: DocumentGroupKey;
+  sourcePages: SourcePage[];
+  reasons: string[];
+  completenessStatus: CompletenessStatus;
+  reviewRequired: boolean;
+  manualOrder: string[];
+}
+
 export type FileClassification =
   | "new"
   | "modified"
@@ -140,6 +149,7 @@ export interface ScanBatchRequest {
   workers: number;
   period?: BatchPeriod | null;
   exportMode?: ExportMode;
+  manualOrder?: Record<string, string[]> | null;
 }
 
 export interface FileResult {
@@ -196,6 +206,7 @@ export interface ScanPlanEvent extends BaseEvent {
   incompleteGroups?: number;
   ambiguousGroups?: number;
   pagesNeedingReview?: number;
+  reviewGroups?: ReviewGroup[];
   // Backward-compatible aliases
   totalEmployees?: number;
   newCount?: number;

@@ -17,6 +17,7 @@ from attendance_scanner.contracts import (
     BatchSummary,
     DiscoveredFile,
     DiscoveryResult,
+    DocumentGroupKey,
     FileProcessingStatus,
     FileResult,
     ImageProcessError,
@@ -47,11 +48,58 @@ from attendance_scanner.state import (
     ManifestEntry,
     ManifestStore,
     assign_entry_context,
+    set_manual_group_order,
 )
 
 logger = logging.getLogger(__name__)
 
 EventEmitter = Callable[[BaseEvent], None]
+
+
+def _persist_manual_orders(
+    manifest: Manifest,
+    manifest_store: ManifestStore,
+    discovery: DiscoveryResult,
+    period: Optional[BatchPeriod],
+    manual_orders: Optional[Dict[str, List[str]]],
+) -> None:
+    """Persist resolved UI orders after all current source entries are available."""
+    if period is None or not manual_orders:
+        return
+    discovered_by_employee: Dict[str, List[str]] = {}
+    for file in discovery.files:
+        discovered_by_employee.setdefault(file.employee_name, []).append(
+            file.relative_path.replace("\\", "/")
+        )
+    changed = False
+    for group_id, ordered_paths in manual_orders.items():
+        if ":" not in group_id:
+            continue
+        employee, period_text = group_id.rsplit(":", 1)
+        try:
+            year_text, month_text = period_text.split("-", 1)
+            group_period = BatchPeriod(year=int(year_text), month=int(month_text))
+        except (ValueError, TypeError):
+            continue
+        if group_period != period or employee not in discovered_by_employee:
+            continue
+        source_paths = discovered_by_employee[employee]
+        source_entries = [manifest.get_entry(path) for path in source_paths]
+        if any(entry is None for entry in source_entries):
+            continue
+        set_manual_group_order(
+            manifest,
+            group_key=DocumentGroupKey(
+                employee_relative_dir=employee,
+                year=group_period.year,
+                month=group_period.month,
+            ),
+            ordered_source_paths=ordered_paths,
+            source_entries=[entry for entry in source_entries if entry is not None],
+        )
+        changed = True
+    if changed:
+        manifest_store.save_manifest(manifest)
 
 
 def default_worker_count() -> int:
@@ -398,6 +446,7 @@ def run_batch(
     emit: Optional[EventEmitter] = None,
     batch_period: Optional[BatchPeriod] = None,
     process_files: Optional[List[DiscoveredFile]] = None,
+    manual_orders: Optional[Dict[str, List[str]]] = None,
 ) -> BatchRunResult:
     """Run the classified process set with resumable per-file isolation.
 
@@ -482,6 +531,7 @@ def run_batch(
         skipped=max(0, discovery.image_count - total),
         duration_ms=int(round((time.perf_counter() - batch_started_at) * 1000.0)),
     )
+    _persist_manual_orders(manifest, store, discovery, batch_period, manual_orders)
     _emit_event(ScanCompletedEvent.from_summary(summary), events, emit, event_lock)
 
     return BatchRunResult(

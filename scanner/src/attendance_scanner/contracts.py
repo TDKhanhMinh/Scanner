@@ -83,6 +83,17 @@ class SourcePage(BaseContract):
     identity: PageIdentity = Field(default_factory=PageIdentity)
 
 
+class ReviewGroup(BaseContract):
+    """Review payload shown before an ambiguous grouped export."""
+
+    key: DocumentGroupKey
+    source_pages: List[SourcePage] = Field(default_factory=list)
+    reasons: List[str] = Field(default_factory=list)
+    completeness_status: CompletenessStatus = CompletenessStatus.AMBIGUOUS
+    review_required: bool = True
+    manual_order: List[str] = Field(default_factory=list)
+
+
 class DocumentGroup(BaseContract):
     """Document pages belonging to one employee and batch period."""
 

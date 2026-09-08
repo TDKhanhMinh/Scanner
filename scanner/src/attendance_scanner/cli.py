@@ -1,6 +1,7 @@
 """CLI entrypoint for Attendance Scanner sidecar."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import List, NoReturn, Optional
@@ -11,6 +12,7 @@ from attendance_scanner.contracts import (
     DiscoveryResult,
     ExportMode,
     OutputNotWritableError,
+    ReviewGroup,
     ScanPlan,
 )
 from attendance_scanner.diagnostics import (
@@ -118,12 +120,37 @@ def _parse_export_mode(value: str) -> ExportMode:
         raise CliArgumentError(f"Unsupported export mode: {value}") from exc
 
 
+def _parse_manual_orders(value: Optional[str]) -> Optional[dict[str, List[str]]]:
+    """Parse explicit grouped page orders from the desktop bridge payload."""
+    if value is None:
+        return None
+    try:
+        raw = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise CliArgumentError("--manual-order-json must contain a JSON object") from exc
+    if not isinstance(raw, dict):
+        raise CliArgumentError("--manual-order-json must contain a JSON object")
+    parsed: dict[str, List[str]] = {}
+    for group_id, paths in raw.items():
+        if not isinstance(group_id, str) or not group_id.strip():
+            raise CliArgumentError("Manual order group ids must be non-empty strings")
+        if not isinstance(paths, list) or not all(
+            isinstance(path, str) and path.strip() for path in paths
+        ):
+            raise CliArgumentError("Manual order values must be lists of non-empty paths")
+        normalized_paths = [path.replace("\\", "/") for path in paths]
+        if len(normalized_paths) != len(set(normalized_paths)):
+            raise CliArgumentError(f"Manual order contains duplicate paths for {group_id!r}")
+        parsed[group_id] = normalized_paths
+    return parsed
+
+
 def _group_summary(
     input_root: str,
     output_root: str,
     period: BatchPeriod,
     export_mode: ExportMode,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], List[ReviewGroup]]:
     """Summarize affected document groups for a typed scan-plan event."""
     discovery = discover_employee_folders(input_root)
     manifest = ManifestStore().load_manifest(input_root, output_root=output_root)
@@ -152,7 +179,7 @@ def _group_summary(
         field = f"{group.completeness_status.value.lower()}_groups"
         if field in counts:
             counts[field] += 1
-    return counts
+    return counts, group_plan.review_groups
 
 
 def _plan_event(
@@ -166,7 +193,7 @@ def _plan_event(
     """Create a typed plan event with document-aware summary counters."""
     if period is None:
         return ScanPlanEvent.from_plan(plan, period=None, export_mode=export_mode)
-    counts = _group_summary(input_root, output_root, period, export_mode)
+    counts, review_groups = _group_summary(input_root, output_root, period, export_mode)
     return ScanPlanEvent.from_plan(
         plan,
         period=period,
@@ -177,6 +204,7 @@ def _plan_event(
         incomplete_groups=counts["incomplete_groups"],
         ambiguous_groups=counts["ambiguous_groups"],
         pages_needing_review=counts["pages_needing_review"],
+        review_groups=review_groups,
     )
 
 
@@ -277,6 +305,11 @@ def create_parser() -> argparse.ArgumentParser:
         default="per-image",
         help="PDF export strategy (default: per-image)",
     )
+    scan_parser.add_argument(
+        "--manual-order-json",
+        default=None,
+        help="JSON object mapping employee:YYYY-MM groups to ordered source paths",
+    )
 
     return parser
 
@@ -305,6 +338,7 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
     try:
         period = _parse_batch_period(args)
         export_mode = _parse_export_mode(args.export_mode)
+        manual_orders = _parse_manual_orders(args.manual_order_json)
         discovery, manifest, store, effective_output_root, plan = _prepare_plan(
             args.input,
             args.output,
@@ -327,6 +361,7 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             manifest_store=store,
             emit=emit_jsonl_event,
             batch_period=period,
+            manual_orders=manual_orders,
         )
         sys.stdout.flush()
         return result.exit_code

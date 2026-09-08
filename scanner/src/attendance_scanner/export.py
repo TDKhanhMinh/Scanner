@@ -161,6 +161,7 @@ def export_grouped(
     *,
     config: Optional[PdfExportConfig] = None,
     manual_order: bool = False,
+    manual_orders: Optional[Dict[str, List[str]]] = None,
 ) -> List[ExportArtifact]:
     """Export one multi-page PDF per employee/period group."""
     groups: Dict[str, List[ExportPage]] = {}
@@ -169,15 +170,27 @@ def export_grouped(
 
     artifacts: List[ExportArtifact] = []
     for employee_name, group_pages in groups.items():
-        decision = order_source_pages([page.identity for page in group_pages])
-        if decision.review_required and not manual_order:
-            raise ExportReviewRequiredError(
-                f"Grouped export requires page-order review for employee {employee_name!r}: "
-                f"{decision.reason}"
-            )
-
         by_source = {page.source_relative_path: page for page in group_pages}
-        ordered_pages = [by_source[source.source_relative_path] for source in decision.ordered]
+        group_key = f"{employee_name}:{period.year:04d}-{period.month:02d}"
+        explicit_order = manual_orders.get(group_key) if manual_orders else None
+        if explicit_order is not None:
+            normalized_order = [path.replace("\\", "/") for path in explicit_order]
+            if (
+                len(normalized_order) != len(set(normalized_order))
+                or set(normalized_order) != set(by_source)
+            ):
+                raise ExportReviewRequiredError(
+                    f"Manual page order does not match current sources for group {group_key!r}"
+                )
+            ordered_pages = [by_source[source] for source in normalized_order]
+        else:
+            decision = order_source_pages([page.identity for page in group_pages])
+            if decision.review_required and not manual_order:
+                raise ExportReviewRequiredError(
+                    f"Grouped export requires page-order review for employee {employee_name!r}: "
+                    f"{decision.reason}"
+                )
+            ordered_pages = [by_source[source.source_relative_path] for source in decision.ordered]
         target_name = (
             f"{period.year:04d}-{period.month:02d}_"
             f"{sanitize_filename_component(employee_name)}.pdf"
@@ -204,6 +217,7 @@ def export_pages(
     *,
     config: Optional[PdfExportConfig] = None,
     manual_order: bool = False,
+    manual_orders: Optional[Dict[str, List[str]]] = None,
 ) -> List[ExportArtifact]:
     """Dispatch to a pluggable export strategy without re-running scan pipeline work."""
     if mode == ExportMode.PER_IMAGE:
@@ -215,5 +229,6 @@ def export_pages(
             period,
             config=config,
             manual_order=manual_order,
+            manual_orders=manual_orders,
         )
     raise ValueError(f"Unsupported export mode: {mode!r}")
