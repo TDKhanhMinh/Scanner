@@ -110,6 +110,11 @@ không cần Python, Node hoặc npm; state của scanner nằm trong
 APPDATA/attendance-scanner/state. Uninstall không được xóa thư mục input/output
 của người dùng.
 
+Tài liệu vận hành và handoff kỹ thuật:
+
+- docs/OPERATOR_GUIDE.md
+- docs/DEVELOPER_HANDOFF.md
+
 ## 5. Quy tắc Cam kết (Definition of Done)
 - 100% xử lý hoàn toàn local-first, không OCR/AI/cloud ở MVP.
 - Không hardcode đường dẫn tuyệt đối của máy lập trình viên.
