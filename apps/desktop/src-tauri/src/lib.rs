@@ -58,6 +58,8 @@ pub struct ScanPlanPayload {
     pub files_to_process: u64,
     #[serde(default)]
     pub outdated_pipeline_count: u64,
+    #[serde(default)]
+    pub unsupported_count: u64,
     pub collisions: Vec<String>,
 }
 
@@ -525,6 +527,7 @@ fn hide_helper_windows() {
 pub fn run() {
     let app = tauri::Builder::default()
         .manage(ScannerState::default())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![greet, plan_scan, start_scan])

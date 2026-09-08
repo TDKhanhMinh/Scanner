@@ -60,6 +60,7 @@ class ScanPlanEvent(BaseEvent):
     unchanged: int = Field(default=0, ge=0)
     files_to_process: int = Field(default=0, ge=0)
     outdated_pipeline_count: int = Field(default=0, ge=0)
+    unsupported_count: int = Field(default=0, ge=0)
     collisions: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -147,6 +148,7 @@ class ScanPlanEvent(BaseEvent):
                 unchanged=plan.unchanged,
                 files_to_process=plan.files_to_process,
                 outdated_pipeline_count=plan.outdated_pipeline_count,
+                unsupported_count=plan.unsupported_count,
                 collisions=list(plan.collisions),
                 timestamp=timestamp,
             )
@@ -161,6 +163,7 @@ class ScanPlanEvent(BaseEvent):
             unchanged=plan.unchanged,
             files_to_process=plan.files_to_process,
             outdated_pipeline_count=plan.outdated_pipeline_count,
+            unsupported_count=plan.unsupported_count,
             collisions=list(plan.collisions),
         )
 

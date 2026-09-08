@@ -156,6 +156,10 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         raw.outdatedPipelineCount >= 0
           ? raw.outdatedPipelineCount
           : 0;
+      raw.unsupportedCount =
+        typeof raw.unsupportedCount === "number" && raw.unsupportedCount >= 0
+          ? raw.unsupportedCount
+          : 0;
       raw.collisions = Array.isArray(raw.collisions) ? raw.collisions : [];
 
       return raw as unknown as ScannerEvent;

@@ -98,6 +98,7 @@ class ScanPlan(BaseContract):
     unchanged: int = 0
     files_to_process: int = 0
     outdated_pipeline_count: int = 0
+    unsupported_count: int = 0
     collisions: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -331,5 +332,6 @@ class DiscoveryResult(BaseContract):
             unchanged=counts[FileClassification.UNCHANGED],
             files_to_process=files_to_process,
             outdated_pipeline_count=self.outdated_pipeline_count,
+            unsupported_count=self.unsupported_count,
             collisions=list(self.collisions),
         )

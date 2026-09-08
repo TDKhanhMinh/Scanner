@@ -79,6 +79,7 @@ export interface ScanPlan {
   filesToProcess: number;
   collisions: string[];
   outdatedPipelineCount: number;
+  unsupportedCount: number;
   // Backward-compatible aliases
   totalEmployees?: number;
   newCount?: number;
@@ -138,6 +139,7 @@ export interface ScanPlanEvent extends BaseEvent {
   filesToProcess: number;
   collisions: string[];
   outdatedPipelineCount: number;
+  unsupportedCount: number;
   // Backward-compatible aliases
   totalEmployees?: number;
   newCount?: number;

@@ -171,6 +171,7 @@ def test_case_insensitive_extensions_and_unsupported_filtering(tmp_path: Path):
     result = discover_employee_folders(tmp_path)
     assert result.image_count == 4
     assert result.unsupported_count == 3  # notes.txt, attendance.pdf, timesheet.docx
+    assert result.to_scan_plan().unsupported_count == 3
 
 
 def test_nested_directories_ignored(tmp_path: Path):

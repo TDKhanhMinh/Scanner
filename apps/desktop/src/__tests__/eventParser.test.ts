@@ -31,6 +31,7 @@ describe("eventParser", () => {
       unchanged: 0,
       filesToProcess: 48,
       collisions: [],
+      unsupportedCount: 2,
     });
 
     const event = parseScannerEvent(json);
@@ -45,6 +46,7 @@ describe("eventParser", () => {
       expect(event.modified).toBe(8);
       expect(event.unchanged).toBe(0);
       expect(event.filesToProcess).toBe(48);
+      expect(event.unsupportedCount).toBe(2);
     } else {
       throw new Error("Expected ScanPlanEvent");
     }

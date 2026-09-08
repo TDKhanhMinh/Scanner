@@ -26,6 +26,7 @@ export interface ScanPlanStats {
   modifiedFiles: number;
   unchangedFiles: number;
   rebuildFiles?: number;
+  unsupportedFiles?: number;
   collisions?: string[];
 }
 
@@ -47,6 +48,7 @@ export function ScanPlanSummaryCard({
   onStartScan,
 }: ScanPlanSummaryCardProps) {
   const rebuildFiles = stats.rebuildFiles ?? 0;
+  const unsupportedFiles = stats.unsupportedFiles ?? 0;
   const filesToProcess = stats.newFiles + stats.modifiedFiles + rebuildFiles;
 
   return (
@@ -71,7 +73,9 @@ export function ScanPlanSummaryCard({
             </Button>
           </div>
           <CardDescription className="text-xs">
-            Hệ thống tự nhận diện file mới và file đã sửa đổi
+            {isPlanning
+              ? "Đang phân tích thư mục và manifest..."
+              : "Hệ thống tự nhận diện file mới và file đã sửa đổi"}
           </CardDescription>
         </CardHeader>
 
@@ -143,6 +147,31 @@ export function ScanPlanSummaryCard({
               {filesToProcess} file
             </span>
           </div>
+
+          {(unsupportedFiles > 0 || (stats.collisions?.length ?? 0) > 0) && (
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-300">
+              <div className="flex items-center gap-1.5 font-semibold">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Cần lưu ý trước khi quét
+              </div>
+              {unsupportedFiles > 0 && (
+                <p className="mt-1.5">
+                  Bỏ qua {unsupportedFiles} file không thuộc định dạng ảnh được hỗ trợ.
+                </p>
+              )}
+              {(stats.collisions?.length ?? 0) > 0 && (
+                <p className="mt-1.5">
+                  Có {stats.collisions?.length} tên PDF có nguy cơ trùng; hệ thống đã áp dụng hậu tố ổn định.
+                </p>
+              )}
+            </div>
+          )}
+
+          {!isPlanning && canScan && stats.totalImages === 0 && (
+            <p className="rounded-xl border border-dashed border-border/80 p-3 text-xs text-muted-foreground">
+              Không tìm thấy ảnh hợp lệ trực tiếp trong các thư mục nhân viên.
+            </p>
+          )}
         </CardContent>
       </div>
 
@@ -150,7 +179,7 @@ export function ScanPlanSummaryCard({
         <Button
           type="button"
           onClick={onStartScan}
-          disabled={!canScan || isScanning || filesToProcess === 0}
+          disabled={!canScan || isPlanning || isScanning || filesToProcess === 0}
           className="w-full shadow-md shadow-primary/20 text-sm font-semibold"
           size="lg"
         >

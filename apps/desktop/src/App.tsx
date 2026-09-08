@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, Scan, FileText, Info } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { AppHeader } from "@/components/scanner/AppHeader";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
 import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
+import { WorkerSettingCard } from "@/components/scanner/WorkerSettingCard";
 import { ScanPlanSummaryCard, type ScanPlanStats } from "@/components/scanner/ScanPlanSummaryCard";
 import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
 import { FileResultList, type FileResultItem } from "@/components/scanner/FileResultList";
@@ -29,7 +31,14 @@ function toPlanStats(plan: ScanPlanEvent): ScanPlanStats {
     modifiedFiles: plan.modified,
     unchangedFiles: plan.unchanged,
     rebuildFiles: plan.rebuild,
+    unsupportedFiles: plan.unsupportedCount,
+    collisions: plan.collisions,
   };
+}
+
+interface ScannerSettings {
+  mode: ScanFilterMode;
+  workers: number | null;
 }
 
 function sourceFileName(relativePath: string): string {
@@ -65,7 +74,10 @@ function failedResultItem(event: FileFailedEvent): FileResultItem {
 export function App() {
   const [inputPath, setInputPath] = useState<string>("");
   const [outputPath, setOutputPath] = useState<string>("");
-  const [scanMode, setScanMode] = useState<ScanFilterMode>("gray");
+  const [settings, setSettings] = useState<ScannerSettings>({
+    mode: "gray",
+    workers: null,
+  });
   const [activeTab, setActiveTab] = useState<string>("config");
 
   // Incremental scan plan state loaded from the Tauri scanner bridge.
@@ -76,6 +88,7 @@ export function App() {
     modifiedFiles: 0,
     unchangedFiles: 0,
     rebuildFiles: 0,
+    unsupportedFiles: 0,
   });
 
   // Batch progress state
@@ -85,14 +98,26 @@ export function App() {
   const [currentFile, setCurrentFile] = useState<string>("");
   const [results, setResults] = useState<FileResultItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [hasPlanError, setHasPlanError] = useState<boolean>(false);
   const planRequestId = useRef(0);
   const scanRequestId = useRef(0);
   const planDebounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scanMode = settings.mode;
+
+  useEffect(() => {
+    return () => {
+      if (planDebounceTimer.current !== undefined) {
+        clearTimeout(planDebounceTimer.current);
+      }
+      planRequestId.current += 1;
+    };
+  }, []);
 
   const requestPlan = (path: string, nextOutputPath: string) => {
     const requestId = ++planRequestId.current;
     setIsPlanning(true);
     setErrorMessage("");
+    setHasPlanError(false);
 
     void planScan({
       inputRoot: path,
@@ -102,6 +127,8 @@ export function App() {
       .then((plan) => {
         if (requestId === planRequestId.current) {
           setPlanStats(toPlanStats(plan));
+          setInputPath(plan.inputRoot);
+          setOutputPath(plan.outputRoot);
         }
       })
       .catch((error: unknown) => {
@@ -113,8 +140,10 @@ export function App() {
             modifiedFiles: 0,
             unchangedFiles: 0,
             rebuildFiles: 0,
+            unsupportedFiles: 0,
           });
           setErrorMessage(scannerErrorMessage(error));
+          setHasPlanError(true);
         }
       })
       .finally(() => {
@@ -151,6 +180,7 @@ export function App() {
       planRequestId.current += 1;
       setIsPlanning(false);
       setErrorMessage("");
+      setHasPlanError(false);
       setPlanStats({
         totalEmployees: 0,
         totalImages: 0,
@@ -158,15 +188,53 @@ export function App() {
         modifiedFiles: 0,
         unchangedFiles: 0,
         rebuildFiles: 0,
+        unsupportedFiles: 0,
       });
     }
   };
 
-  const handleSelectFolder = () => {
-    const selected = prompt("Nhập đường dẫn thư mục ảnh nhân viên:", inputPath || "");
-    if (selected !== null) {
-      handleInputChange(selected);
+  const chooseDirectory = async (title: string): Promise<string | null> => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title,
+      });
+      return typeof selected === "string" ? selected : null;
+    } catch (error: unknown) {
+      setErrorMessage(scannerErrorMessage(error));
+      return null;
     }
+  };
+
+  const handleSelectInputFolder = () => {
+    void chooseDirectory("Chọn thư mục ảnh chấm công gốc").then((selected) => {
+      if (selected) {
+        handleInputChange(selected);
+      }
+    });
+  };
+
+  const handleOutputChange = (path: string) => {
+    const input = inputPath.trim();
+    const nextOutputPath = path.trim() || (input ? `${input}_pdf` : "");
+    setOutputPath(nextOutputPath);
+    if (input) {
+      schedulePlan(input, nextOutputPath);
+    }
+  };
+
+  const handleSelectOutputFolder = () => {
+    void chooseDirectory("Chọn thư mục xuất PDF").then((selected) => {
+      if (selected) {
+        handleOutputChange(selected);
+      }
+    });
+  };
+
+  const handleResetOutputFolder = () => {
+    if (!inputPath.trim()) return;
+    handleOutputChange(`${inputPath.trim()}_pdf`);
   };
 
   const handleRefreshPlan = () => {
@@ -227,7 +295,7 @@ export function App() {
           inputRoot: inputPath,
           outputRoot: outputPath || `${inputPath}_pdf`,
           mode: scanMode,
-          workers: 3,
+          workers: settings.workers,
         });
       } catch (error: unknown) {
         if (requestId === scanRequestId.current) {
@@ -304,13 +372,24 @@ export function App() {
                   inputPath={inputPath}
                   outputPath={outputPath}
                   onInputChange={handleInputChange}
-                  onSelectInputFolder={handleSelectFolder}
+                  onOutputChange={handleOutputChange}
+                  onSelectInputFolder={handleSelectInputFolder}
+                  onSelectOutputFolder={handleSelectOutputFolder}
+                  onResetOutputFolder={handleResetOutputFolder}
                   disabled={isScanning}
                 />
 
                 <ScanModeSelector
                   mode={scanMode}
-                  onSelectMode={setScanMode}
+                  onSelectMode={(mode) => setSettings((previous) => ({ ...previous, mode }))}
+                  disabled={isScanning}
+                />
+
+                <WorkerSettingCard
+                  workers={settings.workers}
+                  onWorkersChange={(workers) =>
+                    setSettings((previous) => ({ ...previous, workers }))
+                  }
                   disabled={isScanning}
                 />
 
@@ -338,7 +417,7 @@ export function App() {
                   stats={planStats}
                   isPlanning={isPlanning}
                   isScanning={isScanning}
-                  canScan={Boolean(inputPath)}
+                  canScan={Boolean(inputPath.trim()) && !hasPlanError}
                   onRefreshPlan={handleRefreshPlan}
                   onStartScan={handleStartScan}
                 />

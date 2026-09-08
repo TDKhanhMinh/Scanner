@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 import { describe, it, expect } from "vitest";
 import App from "../App";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,9 @@ describe("App with shadcn UI tests", () => {
     render(<App />);
     const input = screen.getByPlaceholderText(/Nhập hoặc chọn đường dẫn thư mục/i);
     fireEvent.change(input, { target: { value: "C:\\attendance\\custom_folder" } });
-    expect(screen.getAllByText(/C:\\attendance\\custom_folder/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/C:\\attendance\\custom_folder_pdf/i).length).toBeGreaterThan(0);
+    expect(input).toHaveValue("C:\\attendance\\custom_folder");
+    expect(screen.getByLabelText("Thư mục xuất PDF")).toHaveValue(
+      "C:\\attendance\\custom_folder_pdf",
+    );
   });
 });

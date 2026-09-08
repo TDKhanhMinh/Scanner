@@ -1,4 +1,4 @@
-import { FolderOpen, FolderCheck, AlertTriangle } from "lucide-react";
+import { AlertTriangle, FolderCheck, FolderOpen, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,7 +12,10 @@ export interface FolderSelectorCardProps {
   inputPath: string;
   outputPath: string;
   onInputChange?: (path: string) => void;
+  onOutputChange?: (path: string) => void;
   onSelectInputFolder: () => void;
+  onSelectOutputFolder?: () => void;
+  onResetOutputFolder?: () => void;
   disabled?: boolean;
 }
 
@@ -20,7 +23,10 @@ export function FolderSelectorCard({
   inputPath,
   outputPath,
   onInputChange,
+  onOutputChange,
   onSelectInputFolder,
+  onSelectOutputFolder,
+  onResetOutputFolder,
   disabled = false,
 }: FolderSelectorCardProps) {
   const defaultOutputPath = inputPath ? `${inputPath}_pdf` : "";
@@ -50,6 +56,7 @@ export function FolderSelectorCard({
           <div className="flex-1 min-w-0 bg-secondary/50 border border-border rounded-xl px-3.5 py-2 text-sm text-foreground font-mono flex items-center gap-2 focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent transition-all">
             <FolderOpen className="w-4 h-4 text-muted-foreground shrink-0" />
             <input
+              id="input-folder-path"
               type="text"
               value={inputPath}
               onChange={(e) => onInputChange?.(e.target.value)}
@@ -73,13 +80,50 @@ export function FolderSelectorCard({
 
         {/* Output folder preview */}
         {inputPath ? (
-          <div className="rounded-xl bg-secondary/30 border border-border/60 p-3 flex items-start gap-2.5 text-xs text-muted-foreground">
-            <FolderCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <span className="font-semibold text-foreground">Thư mục xuất PDF riêng biệt: </span>
-              <code className="text-primary font-mono text-[11px] sm:text-xs break-all">
-                {outputPath || defaultOutputPath}
-              </code>
+          <div className="rounded-xl bg-secondary/30 border border-border/60 p-3 space-y-2.5 text-xs text-muted-foreground">
+            <div className="flex items-start gap-2.5">
+              <FolderCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <span className="font-semibold text-foreground">Thư mục xuất PDF riêng biệt</span>
+                <p className="mt-0.5 text-muted-foreground">
+                  Mặc định là sibling <code className="font-mono">_pdf</code> để tránh quét nhầm output.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                id="output-folder-path"
+                type="text"
+                value={outputPath || defaultOutputPath}
+                onChange={(event) => onOutputChange?.(event.target.value)}
+                disabled={disabled}
+                aria-label="Thư mục xuất PDF"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-background/60 px-3 py-2 font-mono text-[11px] text-primary focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onSelectOutputFolder}
+                disabled={disabled || !onSelectOutputFolder}
+                className="min-h-[40px] shrink-0"
+              >
+                <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                Chọn output
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onResetOutputFolder}
+                disabled={disabled || !onResetOutputFolder}
+                className="min-h-[40px] shrink-0"
+                title="Khôi phục thư mục output mặc định"
+              >
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                Mặc định
+              </Button>
             </div>
           </div>
         ) : (

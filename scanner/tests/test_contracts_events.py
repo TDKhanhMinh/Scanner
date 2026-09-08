@@ -53,6 +53,7 @@ def test_contracts_models_instantiation():
         modified=2,
         unchanged=0,
         files_to_process=20,
+        unsupported_count=2,
         collisions=[],
     )
     assert plan.employees == 5
@@ -60,6 +61,7 @@ def test_contracts_models_instantiation():
     assert plan.new == 18
     assert plan.new_count == 18
     assert plan.files_to_process == 20
+    assert plan.unsupported_count == 2
 
     req = ScanBatchRequest(
         input_root="/input",
