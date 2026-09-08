@@ -150,6 +150,61 @@ def _validate_grouped_run(
             )
 
 
+_GROUP_EXPORT_BLOCKED_MESSAGE = (
+    "Grouped artifact was not committed because another source page in this group failed"
+)
+
+
+def _block_failed_groups(
+    outcomes: Dict[int, _FileOutcome],
+    selected_files: List[DiscoveredFile],
+    group_plan: GroupAwareScanPlan,
+    manifest: Manifest,
+    manifest_store: ManifestStore,
+) -> None:
+    """Keep file results and manifest state consistent when a group cannot commit."""
+    outcome_by_path = {
+        file.relative_path.replace("\\", "/"): outcomes[index]
+        for index, file in enumerate(selected_files, start=1)
+    }
+    changed = False
+    for group in group_plan.affected_groups:
+        group_outcomes = [
+            outcome_by_path.get(path.replace("\\", "/"))
+            for path in group.source_relative_paths
+        ]
+        if not any(
+            outcome is not None and outcome.file_result.status == FileProcessingStatus.FAILED
+            for outcome in group_outcomes
+        ):
+            continue
+        for outcome in group_outcomes:
+            if outcome is None:
+                continue
+            outcome.file_result.target_relative_pdf = ""
+            if outcome.file_result.status != FileProcessingStatus.FAILED:
+                outcome.file_result.status = FileProcessingStatus.FAILED
+                outcome.file_result.error_code = ScannerErrorCode.GROUP_EXPORT_BLOCKED
+                outcome.file_result.error_message = _GROUP_EXPORT_BLOCKED_MESSAGE
+                outcome.completed_event = None
+                outcome.failed_event = FileFailedEvent(
+                    relative_path=outcome.file_result.relative_path,
+                    employee_name=outcome.file_result.employee_name,
+                    error_code=ScannerErrorCode.GROUP_EXPORT_BLOCKED,
+                    message=_GROUP_EXPORT_BLOCKED_MESSAGE,
+                )
+            entry = manifest.get_entry(outcome.file_result.relative_path)
+            if entry is not None:
+                entry.status = FileProcessingStatus.FAILED
+                entry.output_relative_path = None
+                entry.output_relative_paths = []
+                entry.artifact_dependencies = []
+                manifest.set_entry(entry)
+                changed = True
+    if changed:
+        manifest_store.save_manifest(manifest)
+
+
 def _export_grouped_results(
     outcomes: Dict[int, _FileOutcome],
     selected_files: List[DiscoveredFile],
@@ -733,6 +788,8 @@ def run_batch(
             elif scan_export_mode == ExportMode.PER_IMAGE and outcome.failed_event is not None:
                 _emit_event(outcome.failed_event, events, emit, event_lock)
 
+    if scan_export_mode == ExportMode.GROUPED and group_plan is not None:
+        _block_failed_groups(outcomes, selected_files, group_plan, manifest, store)
     ordered_outcomes = [outcomes[index] for index in sorted(outcomes)]
     if scan_export_mode == ExportMode.GROUPED and group_plan is not None:
         grouped_outputs = _export_grouped_results(

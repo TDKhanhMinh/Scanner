@@ -19,13 +19,18 @@ from attendance_scanner.batch import (
 )
 from attendance_scanner.contracts import (
     BatchPeriod,
+    ExportMode,
     FileProcessingStatus,
     ImageDecodeError,
     ScanMode,
     ScannerErrorCode,
     StateError,
 )
-from attendance_scanner.discovery import build_incremental_scan_plan, discover_employee_folders
+from attendance_scanner.discovery import (
+    build_group_aware_scan_plan,
+    build_incremental_scan_plan,
+    discover_employee_folders,
+)
 from attendance_scanner.events import (
     FileCompletedEvent,
     FileFailedEvent,
@@ -188,6 +193,65 @@ def test_batch_persists_resolved_manual_group_order(tmp_path: Path):
         "NV01/1.png",
     ]
     assert manifest.groups["NV01:2026-09"].review_required is False
+
+
+def test_grouped_failure_blocks_all_sibling_results_without_missing_outputs(tmp_path: Path):
+    _, output_root, discovery, manifest, store = _create_batch_context(tmp_path, count=3)
+    period = BatchPeriod(year=2026, month=9)
+    group_plan = build_group_aware_scan_plan(
+        discovery,
+        manifest,
+        output_root,
+        period,
+        export_mode=ExportMode.GROUPED,
+    )
+
+    def fake_scan(source, mode, *, config=None):
+        if Path(source).name == "2.png":
+            raise ImageDecodeError(str(source), "injected corrupt page")
+        return _scan_result(mode)
+
+    with patch("attendance_scanner.batch.scan_one", side_effect=fake_scan):
+        result = run_batch(
+            discovery=discovery,
+            manifest=manifest,
+            output_root=output_root,
+            workers=2,
+            manifest_store=store,
+            batch_period=period,
+            export_mode=ExportMode.GROUPED,
+            group_plan=group_plan,
+            manual_orders={
+                "NV01:2026-09": [
+                    "NV01/1.png",
+                    "NV01/2.png",
+                    "NV01/3.png",
+                ]
+            },
+        )
+
+    assert result.exit_code == 2
+    assert result.summary.failed == 3
+    assert result.summary.success == 0
+    assert not list(output_root.rglob("*.pdf"))
+    assert all(item.target_relative_pdf == "" for item in result.file_results)
+    failed_events = [event for event in result.events if isinstance(event, FileFailedEvent)]
+    completed_events = [
+        event for event in result.events if isinstance(event, FileCompletedEvent)
+    ]
+    assert len(failed_events) == 3
+    assert not completed_events
+    blocked = [
+        event
+        for event in failed_events
+        if event.error_code == ScannerErrorCode.GROUP_EXPORT_BLOCKED
+    ]
+    assert len(blocked) == 2
+    assert all(
+        manifest.get_entry(item.relative_path).status == FileProcessingStatus.FAILED
+        and manifest.get_entry(item.relative_path).output_relative_path is None
+        for item in discovery.files
+    )
 
 
 def test_corrupt_file_isolated_and_batch_returns_exit_code_2(tmp_path: Path):

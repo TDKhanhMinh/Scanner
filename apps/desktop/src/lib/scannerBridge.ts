@@ -100,6 +100,8 @@ const USER_MESSAGES: Record<string, string> = {
     "Không thể lưu trạng thái quét. Hãy kiểm tra quyền ghi của thư mục ứng dụng.",
   OUTPUT_COLLISION:
     "Tên file PDF bị trùng. Hãy đổi tên ảnh hoặc chọn thư mục xuất khác.",
+  GROUP_EXPORT_BLOCKED:
+    "Không thể tạo grouped PDF vì một source page trong group bị lỗi. Hãy sửa source và quét lại group.",
   SCANNER_ALREADY_RUNNING: "Một đợt quét khác đang chạy. Hãy chờ đợt quét hiện tại hoàn tất.",
   SIDECAR_LAUNCH_FAILED:
     "Không thể khởi động scanner sidecar. Hãy kiểm tra bản cài đặt và thử lại.",

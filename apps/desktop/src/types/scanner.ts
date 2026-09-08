@@ -85,6 +85,7 @@ export const VALID_SCANNER_ERROR_CODES = new Set<string>([
   "STATE_READ_FAILED",
   "STATE_WRITE_FAILED",
   "OUTPUT_COLLISION",
+  "GROUP_EXPORT_BLOCKED",
   "UNEXPECTED_ERROR",
 ]);
 
@@ -97,6 +98,7 @@ export type ScannerErrorCode =
   | "STATE_READ_FAILED"
   | "STATE_WRITE_FAILED"
   | "OUTPUT_COLLISION"
+  | "GROUP_EXPORT_BLOCKED"
   | "UNEXPECTED_ERROR";
 
 export const VALID_SCANNER_WARNING_CODES = new Set<string>([
