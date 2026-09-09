@@ -22,7 +22,7 @@ import tracemalloc
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Union
 
 import cv2
 import numpy as np
@@ -41,6 +41,7 @@ from attendance_scanner.pipeline.load import load_image
 
 BENCHMARK_RUNNER_VERSION: Literal["1.0"] = "1.0"
 DetectorName = Literal["v1_cv", "segmentation_only", "cv_v2", "hybrid", "reference"]
+PredictionProvider = Callable[[BenchmarkSample, Path], "DetectionPrediction"]
 TIMING_STAGES = (
     "segmentation_inference_ms",
     "mask_postprocess_ms",
@@ -562,6 +563,7 @@ def _score_sample(
         "mask_coverage": None,
         "mask_component_count": None,
         "component_ambiguity": None,
+        "mask_failure": None,
         "timings_ms": {},
         "memory_peak_bytes": None,
     }
@@ -571,6 +573,7 @@ def _score_sample(
 
     result["timings_ms"] = _normalized_timings(prediction.timings_ms)
     result["memory_peak_bytes"] = prediction.memory_peak_bytes
+    _score_prediction_mask(result, entry, prediction)
     if not prediction.detected:
         result["failure_reason"] = _failure_name(prediction.failure_reason or "not_detected")
         return result
@@ -593,32 +596,41 @@ def _score_sample(
         sample.height,
     )
 
-    if prediction.mask_path is not None:
-        try:
-            predicted_mask = _load_mask(
-                entry.image_root,
-                prediction.mask_path,
-                sample.width,
-                sample.height,
-                label="prediction mask",
-            )
-            result["mask_coverage"] = float(predicted_mask.mean())
-            components, _ = cv2.connectedComponents(predicted_mask.astype(np.uint8), connectivity=8)
-            component_count = max(0, int(components) - 1)
-            result["mask_component_count"] = component_count
-            result["component_ambiguity"] = component_count > 1
-            if sample.mask_path is not None:
-                expected_mask = _load_mask(
-                    entry.image_root,
-                    sample.mask_path,
-                    sample.width,
-                    sample.height,
-                    label="ground-truth mask",
-                )
-                result["mask_iou"] = mask_iou(predicted_mask, expected_mask)
-        except ValueError as exc:
-            result["mask_failure"] = _failure_name(str(exc))
     return result
+
+
+def _score_prediction_mask(
+    result: Dict[str, Any],
+    entry: BenchmarkEntry,
+    prediction: DetectionPrediction,
+) -> None:
+    """Score an optional mask independently of corner success/mask-only status."""
+    if prediction.mask_path is None:
+        return
+    try:
+        predicted_mask = _load_mask(
+            entry.image_root,
+            prediction.mask_path,
+            entry.sample.width,
+            entry.sample.height,
+            label="prediction mask",
+        )
+        result["mask_coverage"] = float(predicted_mask.mean())
+        components, _ = cv2.connectedComponents(predicted_mask.astype(np.uint8), connectivity=8)
+        component_count = max(0, int(components) - 1)
+        result["mask_component_count"] = component_count
+        result["component_ambiguity"] = component_count > 1
+        if entry.sample.mask_path is not None:
+            expected_mask = _load_mask(
+                entry.image_root,
+                entry.sample.mask_path,
+                entry.sample.width,
+                entry.sample.height,
+                label="ground-truth mask",
+            )
+            result["mask_iou"] = mask_iou(predicted_mask, expected_mask)
+    except ValueError as exc:
+        result["mask_failure"] = _failure_name(str(exc))
 
 
 def _percentile_summary(values: Sequence[float], suffix: str = "") -> Dict[str, Optional[float]]:
@@ -773,6 +785,7 @@ def run_benchmark(
     *,
     detector: DetectorName,
     prediction_bundle: Optional[PredictionBundle] = None,
+    prediction_provider: Optional[PredictionProvider] = None,
     thresholds: Optional[BenchmarkThresholds] = None,
     model_version: Optional[str] = None,
     pipeline_version: Optional[str] = None,
@@ -781,6 +794,13 @@ def run_benchmark(
     """Run one detector adapter and return deterministic per-sample metrics."""
     entries = _flatten_entries(datasets)
     external_predictions: Optional[Dict[str, DetectionPrediction]] = None
+    if prediction_bundle is not None and prediction_provider is not None:
+        raise ValueError("Provide either prediction_bundle or prediction_provider, not both")
+    if prediction_provider is not None and detector in {"v1_cv", "reference"}:
+        raise ValueError(
+            f"Prediction provider cannot override built-in detector {detector!r}; "
+            "use a V2 adapter name for external predictions"
+        )
     if prediction_bundle is not None:
         if detector in {"v1_cv", "reference"}:
             raise ValueError(
@@ -798,12 +818,20 @@ def run_benchmark(
         unknown_ids = sorted(set(external_predictions) - known_ids)
         if unknown_ids:
             raise ValueError(f"Prediction file contains unknown sample_id: {unknown_ids[0]}")
-    elif detector in {"segmentation_only", "cv_v2", "hybrid"}:
+    elif prediction_provider is None and detector in {"segmentation_only", "cv_v2", "hybrid"}:
         raise ValueError(f"Detector {detector!r} requires a prediction JSON adapter input")
 
     scored: List[Dict[str, Any]] = []
     for entry in entries:
-        if external_predictions is not None:
+        prediction: Optional[DetectionPrediction]
+        if prediction_provider is not None:
+            prediction = prediction_provider(entry.sample, entry.image_root)
+            if prediction.sample_id != entry.sample.sample_id:
+                raise ValueError(
+                    f"Prediction provider returned {prediction.sample_id!r} for "
+                    f"{entry.sample.sample_id!r}"
+                )
+        elif external_predictions is not None:
             prediction = external_predictions.get(entry.sample.sample_id)
         elif detector == "reference":
             prediction = _run_reference_prediction(entry)
@@ -976,6 +1004,7 @@ __all__ = [
     "BenchmarkThresholds",
     "DetectionPrediction",
     "PredictionBundle",
+    "PredictionProvider",
     "corner_distance",
     "evaluate_thresholds",
     "load_benchmark_datasets",

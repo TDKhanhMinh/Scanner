@@ -157,8 +157,8 @@ def test_sigmoid_onnx_adapter_returns_original_size_internal_masks_and_summary(t
     assert float(output.probability_mask.max()) <= 1.0
     assert output.binary_mask.shape == (8, 10)
     assert output.binary_mask.dtype == np.bool_
-    assert output.transform.scale_x == 2.0
-    assert output.transform.scale_y == 2.0
+    assert output.transform.scale_x == 0.5
+    assert output.transform.scale_y == 0.5
     assert output.detection.detected is False
     assert output.detection.failure_code == "mask_only"
     assert output.detection.evidence.component_count is not None

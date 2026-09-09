@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from attendance_scanner.benchmark import BenchmarkManifest, BenchmarkSample, BenchmarkSource
 from attendance_scanner.benchmark_runner import (
@@ -192,6 +192,39 @@ def test_report_writers_and_combined_manifests(tmp_path: Path):
     assert "sample_id" in render_csv(report).splitlines()[0]
     assert markdown_path.is_file()
     assert csv_path.is_file()
+
+
+def test_provider_callback_can_score_mask_only_adapter_evidence(tmp_path: Path):
+    manifest_path = _create_manifest(tmp_path, count=1)
+    dataset_root = manifest_path.parent
+    mask = Image.new("L", (100, 100), color=0)
+    ImageDraw.Draw(mask).rectangle((10, 10, 89, 89), fill=255)
+    mask.save(dataset_root / "mask.png")
+    manifest = BenchmarkManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    manifest = BenchmarkManifest(
+        samples=[manifest.samples[0].model_copy(update={"mask_path": "mask.png"})]
+    )
+    manifest_path.write_text(manifest.dump_canonical_json(), encoding="utf-8")
+    datasets = load_benchmark_datasets([manifest_path])
+
+    def provider(sample, _image_root):  # type: ignore[no-untyped-def]
+        return DetectionPrediction(
+            sample_id=sample.sample_id,
+            detected=False,
+            failure_reason="mask_only",
+            mask_path="mask.png",
+        )
+
+    report = run_benchmark(
+        datasets,
+        detector="segmentation_only",
+        prediction_provider=provider,
+    )
+
+    assert report.metrics["detection_success_rate"] == 0.0
+    assert report.metrics["mask_iou_count"] == 1
+    assert report.metrics["mean_mask_iou"] == 1.0
+    assert report.samples[0]["failure_reason"] == "mask_only"
 
 
 def test_cli_runs_reference_report_and_gate(tmp_path: Path):

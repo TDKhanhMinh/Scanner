@@ -42,6 +42,7 @@ from attendance_scanner.benchmark_runner import (
     BenchmarkThresholds,
     DetectionPrediction,
     PredictionBundle,
+    PredictionProvider,
     corner_distance,
     evaluate_thresholds,
     load_benchmark_datasets,
@@ -140,6 +141,12 @@ from attendance_scanner.fingerprint import (
     FileFingerprint,
     compute_fast_fingerprint,
     compute_sha256,
+)
+from attendance_scanner.mask_postprocess import (
+    MaskComponent,
+    MaskPostprocessConfig,
+    MaskPostprocessResult,
+    postprocess_document_mask,
 )
 from attendance_scanner.onnx_runtime import (
     OnnxInferenceResult,
@@ -304,6 +311,7 @@ __all__ = [
     "BenchmarkThresholds",
     "DetectionPrediction",
     "PredictionBundle",
+    "PredictionProvider",
     "corner_distance",
     "evaluate_thresholds",
     "load_benchmark_datasets",
@@ -406,4 +414,8 @@ __all__ = [
     "SegmentationTransform",
     "decode_segmentation_output",
     "preprocess_segmentation_input",
+    "MaskComponent",
+    "MaskPostprocessConfig",
+    "MaskPostprocessResult",
+    "postprocess_document_mask",
 ]

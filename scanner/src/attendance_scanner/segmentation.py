@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -22,6 +22,11 @@ from attendance_scanner.detector import (
     DetectionTiming,
     DetectorEvidence,
     DocumentDetectionResult,
+)
+from attendance_scanner.mask_postprocess import (
+    MaskPostprocessConfig,
+    MaskPostprocessResult,
+    postprocess_document_mask,
 )
 from attendance_scanner.onnx_runtime import (
     OnnxInferenceService,
@@ -73,6 +78,8 @@ class SegmentationConfig(BaseModel):
 
     input_width: int = Field(default=224, gt=0, le=4096)
     input_height: int = Field(default=224, gt=0, le=4096)
+    resize_mode: Literal["stretch", "letterbox"] = "stretch"
+    letterbox_fill: Tuple[int, int, int] = (0, 0, 0)
     input_layout: Literal["nchw", "nhwc"] = "nchw"
     add_batch_dimension: bool = True
     channel_order: Literal["rgb"] = "rgb"
@@ -83,6 +90,7 @@ class SegmentationConfig(BaseModel):
     activation: Literal["auto", "logits", "probability", "sigmoid", "softmax"] = "auto"
     document_class_index: int = Field(default=1, ge=0)
     threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    postprocess: MaskPostprocessConfig = Field(default_factory=MaskPostprocessConfig)
     debug_artifact_dir: Optional[Path] = None
 
     @model_validator(mode="after")
@@ -91,6 +99,8 @@ class SegmentationConfig(BaseModel):
             raise ValueError("mean/std values must be finite")
         if any(abs(value) < 1e-9 for value in self.std):
             raise ValueError("std values must be non-zero")
+        if any(value < 0 or value > 255 for value in self.letterbox_fill):
+            raise ValueError("letterbox_fill values must be in [0,255]")
         return self
 
 
@@ -104,6 +114,40 @@ class SegmentationTransform:
     input_height: int
     scale_x: float
     scale_y: float
+    resize_mode: Literal["stretch", "letterbox"] = "stretch"
+    pad_x: int = 0
+    pad_y: int = 0
+    resized_width: int = 0
+    resized_height: int = 0
+
+    def map_points_to_source(
+        self, points: Sequence[Tuple[float, float]]
+    ) -> Tuple[Tuple[float, float], ...]:
+        """Map model-input pixel points back to EXIF-normalized source pixels."""
+        return tuple(
+            ((x - self.pad_x) / self.scale_x, (y - self.pad_y) / self.scale_y) for x, y in points
+        )
+
+    def mask_to_source(self, probability_mask: np.ndarray) -> np.ndarray:
+        """Remove letterbox padding and map a model mask to source dimensions."""
+        if self.resize_mode == "stretch":
+            crop = probability_mask
+        else:
+            mask_height, mask_width = probability_mask.shape[:2]
+            x0 = round(self.pad_x / self.input_width * mask_width)
+            y0 = round(self.pad_y / self.input_height * mask_height)
+            x1 = round((self.pad_x + self.resized_width) / self.input_width * mask_width)
+            y1 = round((self.pad_y + self.resized_height) / self.input_height * mask_height)
+            x0 = max(0, min(x0, mask_width - 1))
+            y0 = max(0, min(y0, mask_height - 1))
+            x1 = max(x0 + 1, min(x1, mask_width))
+            y1 = max(y0 + 1, min(y1, mask_height))
+            crop = probability_mask[y0:y1, x0:x1]
+        return cv2.resize(
+            crop,
+            (self.source_width, self.source_height),
+            interpolation=cv2.INTER_LINEAR,
+        ).astype(np.float32, copy=False)
 
 
 @dataclass(frozen=True)
@@ -113,6 +157,7 @@ class SegmentationOutput:
     probability_mask: np.ndarray
     binary_mask: np.ndarray
     transform: SegmentationTransform
+    postprocess: MaskPostprocessResult
     detection: DocumentDetectionResult
     debug_artifacts: Tuple[str, ...] = ()
 
@@ -124,11 +169,32 @@ def preprocess_segmentation_input(
     """Convert normalized BGR pixels to the configured model tensor."""
     try:
         rgb = cv2.cvtColor(image.image, cv2.COLOR_BGR2RGB)
-        resized = cv2.resize(
-            rgb,
-            (config.input_width, config.input_height),
-            interpolation=cv2.INTER_AREA,
-        )
+        if config.resize_mode == "stretch":
+            resized = cv2.resize(
+                rgb,
+                (config.input_width, config.input_height),
+                interpolation=cv2.INTER_AREA,
+            )
+            pad_x = pad_y = 0
+            resized_width = config.input_width
+            resized_height = config.input_height
+        else:
+            scale = min(config.input_width / image.width, config.input_height / image.height)
+            resized_width = max(1, round(image.width * scale))
+            resized_height = max(1, round(image.height * scale))
+            resized_content = cv2.resize(
+                rgb,
+                (resized_width, resized_height),
+                interpolation=cv2.INTER_AREA,
+            )
+            resized = np.full(
+                (config.input_height, config.input_width, 3),
+                config.letterbox_fill,
+                dtype=np.uint8,
+            )
+            pad_x = (config.input_width - resized_width) // 2
+            pad_y = (config.input_height - resized_height) // 2
+            resized[pad_y : pad_y + resized_height, pad_x : pad_x + resized_width] = resized_content
         tensor: np.ndarray = resized.astype(np.float32) / 255.0
         tensor = (tensor - np.asarray(config.mean, dtype=np.float32)) / np.asarray(
             config.std, dtype=np.float32
@@ -149,8 +215,13 @@ def preprocess_segmentation_input(
         source_height=image.height,
         input_width=config.input_width,
         input_height=config.input_height,
-        scale_x=image.width / config.input_width,
-        scale_y=image.height / config.input_height,
+        scale_x=(resized_width / image.width),
+        scale_y=(resized_height / image.height),
+        resize_mode=config.resize_mode,
+        pad_x=pad_x,
+        pad_y=pad_y,
+        resized_width=resized_width,
+        resized_height=resized_height,
     )
 
 
@@ -391,14 +462,13 @@ class OnnxSegmentationAdapter:
         probability_small = decode_segmentation_output(
             inference.outputs[self.config.output_index], self.config
         )
-        probability_mask = cv2.resize(
-            probability_small,
-            (image.width, image.height),
-            interpolation=cv2.INTER_LINEAR,
-        ).astype(np.float32, copy=False)
-        binary_mask = probability_mask >= self.config.threshold
-        component_count, _ = cv2.connectedComponents(binary_mask.astype(np.uint8), connectivity=8)
-        component_count = max(0, int(component_count) - 1)
+        probability_mask = transform.mask_to_source(probability_small)
+        postprocess = postprocess_document_mask(
+            probability_mask,
+            self.config.postprocess.model_copy(update={"threshold": self.config.threshold}),
+        )
+        binary_mask = postprocess.selected_mask
+        component_count = postprocess.component_count
         mask_area_ratio = float(binary_mask.mean())
         mask_confidence = float(probability_mask[binary_mask].mean()) if binary_mask.any() else 0.0
         mask_postprocess_ms = (time.perf_counter() - postprocess_started_at) * 1000.0
@@ -417,6 +487,11 @@ class OnnxSegmentationAdapter:
                     "outputIndex": self.config.output_index,
                     "outputShape": str(probability_small.shape),
                     "threshold": self.config.threshold,
+                    "componentAmbiguous": postprocess.ambiguous,
+                    "selectedComponentLabel": postprocess.selected_label or 0,
+                    "borderContact": ",".join(postprocess.border_contact),
+                    "resizeMode": self.config.resize_mode,
+                    "padding": f"{transform.pad_x},{transform.pad_y}",
                     "modelSha256": self.service.model_info.model_sha256
                     if self.service.model_info is not None
                     else "unknown",
@@ -433,6 +508,7 @@ class OnnxSegmentationAdapter:
                 "modelAttribution": self.model_card.attribution,
                 "inputShape": str(tensor.shape),
                 "channelOrder": self.config.channel_order,
+                "resizeMode": self.config.resize_mode,
             },
             failure_code="mask_only",
         )
@@ -446,6 +522,7 @@ class OnnxSegmentationAdapter:
             probability_mask=probability_mask,
             binary_mask=binary_mask,
             transform=transform,
+            postprocess=postprocess,
             detection=detection,
             debug_artifacts=debug_artifacts,
         )
