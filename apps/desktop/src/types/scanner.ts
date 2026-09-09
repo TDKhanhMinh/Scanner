@@ -105,12 +105,14 @@ export const VALID_SCANNER_WARNING_CODES = new Set<string>([
   "DOCUMENT_NOT_DETECTED",
   "IMAGE_DOWNSCALED",
   "WARP_FALLBACK",
+  "DOCUMENT_CLIPPED",
 ]);
 
 export type ScannerWarningCode =
   | "DOCUMENT_NOT_DETECTED"
   | "IMAGE_DOWNSCALED"
-  | "WARP_FALLBACK";
+  | "WARP_FALLBACK"
+  | "DOCUMENT_CLIPPED";
 
 export interface DiscoveredFile {
   employeeName: string;

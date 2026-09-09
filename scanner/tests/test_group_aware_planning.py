@@ -75,7 +75,7 @@ def _seed_grouped_context(tmp_path: Path):
                 export_mode=ExportMode.GROUPED,
                 output_relative_path=output_relative_path,
                 source_relative_paths=source_paths,
-                artifact_version="0.1.0",
+                artifact_version="0.2.0",
             )
         )
         for source_path in source_paths:
@@ -107,6 +107,7 @@ def _seed_grouped_context(tmp_path: Path):
                     output_relative_paths=[output_relative_path],
                     status=FileProcessingStatus.SUCCESS,
                     processed_at="2026-09-01T00:00:00Z",
+                    pipeline_version="0.2.0",
                     period=period if employee_name != "A_old" else BatchPeriod(year=2026, month=8),
                     group_key=key,
                     page_identity=page_identity,

@@ -92,9 +92,7 @@ def compute_destination_dimensions(
         if target_aspect_ratio <= 0:
             raise ValueError("target_aspect_ratio must be positive")
         measured_ratio = dst_w / max(dst_h, 1)
-        desired_ratio = (
-            target_aspect_ratio if measured_ratio >= 1.0 else 1.0 / target_aspect_ratio
-        )
+        desired_ratio = target_aspect_ratio if measured_ratio >= 1.0 else 1.0 / target_aspect_ratio
         if measured_ratio > desired_ratio:
             dst_h = max(dst_h, int(round(dst_w / desired_ratio)))
         else:

@@ -32,6 +32,7 @@ from attendance_scanner.contracts import (
 from attendance_scanner.page_classification import classify_page
 from attendance_scanner.pipeline.detect import (
     DetectionConfig,
+    DetectionRejectionReason,
     DetectionResult,
     detect_document_boundary,
 )
@@ -290,7 +291,7 @@ def scan_one(
     )
     stage_durations["detect_ms"] = (time.perf_counter() - t_detect_start) * 1000.0
 
-    document_detected = detection is not None
+    document_detected = bool(detection is not None and detection.accepted and not detection.clipped)
     detection_confidence: Optional[float] = detection.confidence if detection else None
     detection_area_ratio: Optional[float] = detection.area_ratio if detection else None
 
@@ -300,7 +301,7 @@ def scan_one(
     orientation_rotation_degrees = 0
     page_identity = PageIdentity()
 
-    if detection is not None:
+    if detection is not None and detection.accepted and not detection.clipped:
         try:
             classification_perspective = pipeline_cfg.perspective.model_copy(
                 update={"target_aspect_ratio": None}
@@ -310,9 +311,7 @@ def scan_one(
                 detection,
                 config=classification_perspective,
             )
-            classification_candidates = [
-                (0, classify_page(classification_warp.image))
-            ]
+            classification_candidates = [(0, classify_page(classification_warp.image))]
             if loaded.metadata.exif_orientation is None:
                 classification_candidates.extend(
                     (
@@ -343,21 +342,23 @@ def scan_one(
             else:
                 raise
     else:
-        # Fallback rule: detector failed -> use full normalized image with warning
+        # Fallback rule: detector rejected or failed -> use full unwarped image with warning
         warped_or_full = loaded
-        warning_codes.append(ScannerWarningCode.DOCUMENT_NOT_DETECTED.value)
+        if detection is not None and (
+            detection.clipped
+            or detection.rejection_reason == DetectionRejectionReason.DOCUMENT_CLIPPED
+        ):
+            warning_codes.append(ScannerWarningCode.DOCUMENT_CLIPPED.value)
+        else:
+            warning_codes.append(ScannerWarningCode.DOCUMENT_NOT_DETECTED.value)
 
     if pipeline_cfg.preferred_orientation != "natural":
         orientation_source = getattr(warped_or_full, "image", warped_or_full)
         orientation_array = np.asarray(orientation_source)
         source_height, source_width = orientation_array.shape[:2]
         should_rotate = (
-            pipeline_cfg.preferred_orientation == "landscape"
-            and source_height > source_width
-        ) or (
-            pipeline_cfg.preferred_orientation == "portrait"
-            and source_width > source_height
-        )
+            pipeline_cfg.preferred_orientation == "landscape" and source_height > source_width
+        ) or (pipeline_cfg.preferred_orientation == "portrait" and source_width > source_height)
         if should_rotate:
             # The attendance template is read left-to-right after a 90-degree
             # counter-clockwise rotation for portrait-oriented camera captures.

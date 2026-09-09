@@ -56,9 +56,7 @@ def test_unknown_errors_use_fallback_code_and_safe_message():
     assert "internal implementation detail" not in info.user_message
 
 
-def test_stderr_log_is_safe_while_file_log_keeps_traceback_diagnostics(
-    tmp_path: Path, capsys
-):
+def test_stderr_log_is_safe_while_file_log_keeps_traceback_diagnostics(tmp_path: Path, capsys):
     log_path = tmp_path / "logs" / "attendance-scanner.log"
     configure_logging(log_path)
 

@@ -219,9 +219,7 @@ def assign_entry_context(
 def source_order_fingerprint(entries: List[ManifestEntry]) -> str:
     """Fingerprint source identity/metadata so manual order invalidates on changes."""
     normalized_entries = []
-    for entry in sorted(
-        entries, key=lambda item: item.relative_path.replace("\\", "/")
-    ):
+    for entry in sorted(entries, key=lambda item: item.relative_path.replace("\\", "/")):
         relative_path = entry.relative_path.replace("\\", "/")
         normalized_entries.append(
             f"{relative_path}:{entry.size}:{entry.mtime_ns}:{entry.sha256 or ''}"
@@ -239,9 +237,7 @@ def set_manual_group_order(
 ) -> ManifestGroup:
     """Persist an explicit page order and bind it to current source fingerprints."""
     normalized_order = [path.replace("\\", "/") for path in ordered_source_paths]
-    expected_paths = {
-        entry.relative_path.replace("\\", "/") for entry in source_entries
-    }
+    expected_paths = {entry.relative_path.replace("\\", "/") for entry in source_entries}
     if (
         len(normalized_order) != len(set(normalized_order))
         or set(normalized_order) != expected_paths

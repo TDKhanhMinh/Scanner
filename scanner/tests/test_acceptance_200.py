@@ -105,9 +105,7 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
     grouped_output_root = tmp_path / "grouped-output"
     grouped_store = ManifestStore(state_dir=tmp_path / "grouped-state")
     grouped_discovery = discover_employee_folders(input_root)
-    grouped_manifest = grouped_store.load_manifest(
-        input_root, output_root=grouped_output_root
-    )
+    grouped_manifest = grouped_store.load_manifest(input_root, output_root=grouped_output_root)
     grouped_period = BatchPeriod(year=2026, month=9)
     grouped_plan = build_group_aware_scan_plan(
         grouped_discovery,
@@ -118,8 +116,7 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
     )
     manual_orders = {
         f"NV{employee_index:02d}:2026-09": [
-            f"NV{employee_index:02d}/card-{image_index:03d}.png"
-            for image_index in range(1, 51)
+            f"NV{employee_index:02d}/card-{image_index:03d}.png" for image_index in range(1, 51)
         ]
         for employee_index in range(1, 5)
     }
@@ -134,9 +131,7 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
         group_plan=grouped_plan,
         manual_orders=manual_orders,
     )
-    expected_document_groups = len(
-        {file.employee_name for file in grouped_discovery.files}
-    )
+    expected_document_groups = len({file.employee_name for file in grouped_discovery.files})
     grouped_artifacts = list(grouped_output_root.rglob("*.pdf"))
     expected_grouped_artifacts = len(grouped_artifacts)
     auto_ordered_groups = sum(
@@ -159,42 +154,29 @@ def test_200_image_incremental_acceptance_scenarios(tmp_path: Path) -> None:
     assert review_required_groups == expected_document_groups
     assert incorrect_auto_order_count == 0
     assert all(
-        group.key.year == 2026 and group.key.month == 9
-        for group in grouped_plan.affected_groups
+        group.key.year == 2026 and group.key.month == 9 for group in grouped_plan.affected_groups
     )
 
     second_discovery = discover_employee_folders(input_root)
     second_manifest = store.load_manifest(input_root, output_root=output_root)
     second_plan = build_incremental_scan_plan(second_discovery, second_manifest, output_root)
     assert second_plan.files_to_process == 0
-    second_result, _, _, _ = _run_and_count(
-        input_root, output_root, store, expected_processed=0
-    )
+    second_result, _, _, _ = _run_and_count(input_root, output_root, store, expected_processed=0)
     assert second_result.summary.skipped == 200
 
     for image_index in range(51, 61):
-        _write_valid_image(
-            input_root / "NV05" / f"card-{image_index:03d}.png", image_index
-        )
-    added_result, _, _, _ = _run_and_count(
-        input_root, output_root, store, expected_processed=10
-    )
+        _write_valid_image(input_root / "NV05" / f"card-{image_index:03d}.png", image_index)
+    added_result, _, _, _ = _run_and_count(input_root, output_root, store, expected_processed=10)
     assert added_result.summary.failed == 0
 
     for image_index in range(1, 4):
-        _write_valid_image(
-            input_root / "NV01" / f"card-{image_index:03d}.png", 1000 + image_index
-        )
-    modified_result, _, _, _ = _run_and_count(
-        input_root, output_root, store, expected_processed=3
-    )
+        _write_valid_image(input_root / "NV01" / f"card-{image_index:03d}.png", 1000 + image_index)
+    modified_result, _, _, _ = _run_and_count(input_root, output_root, store, expected_processed=3)
     assert modified_result.summary.failed == 0
 
     (output_root / "NV01" / "card-001.pdf").unlink()
     (output_root / "NV01" / "card-002.pdf").unlink()
-    rebuilt_result, _, _, _ = _run_and_count(
-        input_root, output_root, store, expected_processed=2
-    )
+    rebuilt_result, _, _, _ = _run_and_count(input_root, output_root, store, expected_processed=2)
     assert rebuilt_result.summary.failed == 0
     assert len(list(output_root.rglob("*.pdf"))) == 210
 
@@ -253,9 +235,7 @@ def test_corrupt_and_warning_files_are_isolated_and_resumable(tmp_path: Path) ->
     assert result.summary.success == 1
     failed_events = [event for event in result.events if isinstance(event, FileFailedEvent)]
     warning_events = [
-        event
-        for event in result.events
-        if isinstance(event, FileCompletedEvent) and event.warning
+        event for event in result.events if isinstance(event, FileCompletedEvent) and event.warning
     ]
     assert failed_events[0].error_code == ScannerErrorCode.IMAGE_DECODE_FAILED
     assert failed_events[0].message

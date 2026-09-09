@@ -16,9 +16,7 @@ def _run_cli(tmp_path: Path, *arguments: str) -> subprocess.CompletedProcess[str
     source_path = str(SCANNER_ROOT / "src")
     existing_python_path = environment.get("PYTHONPATH")
     environment["PYTHONPATH"] = (
-        source_path
-        if not existing_python_path
-        else source_path + os.pathsep + existing_python_path
+        source_path if not existing_python_path else source_path + os.pathsep + existing_python_path
     )
     environment["APPDATA"] = str(tmp_path / "appdata")
     return subprocess.run(
@@ -157,9 +155,7 @@ def test_grouped_scan_subprocess_requires_review_and_exports_one_ordered_pdf(tmp
     assert without_review.returncode == 1
     assert not list(output_root.rglob("*.pdf"))
 
-    manual_order = json.dumps(
-        {"NV01:2026-09": ["NV01/hash-z.png", "NV01/hash-a.png"]}
-    )
+    manual_order = json.dumps({"NV01:2026-09": ["NV01/hash-z.png", "NV01/hash-a.png"]})
     with_review = _run_cli(
         tmp_path,
         "scan-batch",
@@ -241,9 +237,7 @@ def test_grouped_scan_skip_one_group_continues_other_employees(tmp_path: Path):
         Image.new("RGB", (80, 60), color=(180, 180, 180)).save(directory / "random-2.png")
         Image.new("RGB", (80, 60), color=(190, 190, 190)).save(directory / "random-1.png")
 
-    manual_order = json.dumps(
-        {"B:2026-09": ["B/random-2.png", "B/random-1.png"]}
-    )
+    manual_order = json.dumps({"B:2026-09": ["B/random-2.png", "B/random-1.png"]})
     skipped = _run_cli(
         tmp_path,
         "scan-batch",

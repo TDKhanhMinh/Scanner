@@ -118,11 +118,16 @@ def _day_grid_features(
     )
     detected_axis = "vertical" if vertical_score >= horizontal_score else "horizontal"
     detected_count = vertical_count if detected_axis == "vertical" else horizontal_count
-    return detected_count, float((edges > 0).mean()), float(threshold), {
-        "detectedAxis": detected_axis,
-        "verticalGridCount": vertical_count,
-        "horizontalGridCount": horizontal_count,
-    }
+    return (
+        detected_count,
+        float((edges > 0).mean()),
+        float(threshold),
+        {
+            "detectedAxis": detected_axis,
+            "verticalGridCount": vertical_count,
+            "horizontalGridCount": horizontal_count,
+        },
+    )
 
 
 def _score_column_count(column_count: int, expected: int) -> float:
@@ -146,9 +151,7 @@ def classify_page(
     """
     cfg = config or PageClassificationConfig()
     gray = _as_gray(image)
-    detected_columns, ink_ratio, score_threshold, axis_diagnostics = _day_grid_features(
-        gray, cfg
-    )
+    detected_columns, ink_ratio, score_threshold, axis_diagnostics = _day_grid_features(gray, cfg)
     first_score = _score_column_count(detected_columns, cfg.first_half_columns)
     second_score = _score_column_count(detected_columns, cfg.second_half_columns)
     scores = {

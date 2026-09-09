@@ -637,7 +637,7 @@ export function App() {
               </span>
             </div>
 
-            <FileResultList items={results} />
+            <FileResultList items={results} onPreview={handlePreviewSource} />
           </TabsContent>
         </Tabs>
       </main>

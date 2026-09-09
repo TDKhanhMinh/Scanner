@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Sequence
 from attendance_scanner.contracts import (
     BatchPeriod,
     ExportMode,
+    PageIdentity,
     PageType,
     SourcePage,
 )
@@ -43,12 +44,12 @@ class ExportPage:
             "identity",
             SourcePage(
                 source_relative_path=self.source_relative_path,
-                identity={
-                    "pageType": self.page_type,
-                    "pageOrder": self.page_order,
-                    "confidence": self.confidence,
-                    "detectionMethod": self.detection_method,
-                },
+                identity=PageIdentity(
+                    page_type=self.page_type,
+                    page_order=self.page_order,
+                    confidence=self.confidence,
+                    detection_method=self.detection_method,
+                ),
             ),
         )
 
@@ -138,8 +139,7 @@ def export_per_image(
     artifacts: List[ExportArtifact] = []
     for page in pages:
         target = (
-            _output_directory(output_root, page.employee_name)
-            / names[page.source_relative_path]
+            _output_directory(output_root, page.employee_name) / names[page.source_relative_path]
         )
         pdf = export_single_page_pdf(page.image, target, config=config)
         artifacts.append(
@@ -175,9 +175,8 @@ def export_grouped(
         explicit_order = manual_orders.get(group_key) if manual_orders else None
         if explicit_order is not None:
             normalized_order = [path.replace("\\", "/") for path in explicit_order]
-            if (
-                len(normalized_order) != len(set(normalized_order))
-                or set(normalized_order) != set(by_source)
+            if len(normalized_order) != len(set(normalized_order)) or set(normalized_order) != set(
+                by_source
             ):
                 raise ExportReviewRequiredError(
                     f"Manual page order does not match current sources for group {group_key!r}"
@@ -192,8 +191,7 @@ def export_grouped(
                 )
             ordered_pages = [by_source[source.source_relative_path] for source in decision.ordered]
         target_name = (
-            f"{period.year:04d}-{period.month:02d}_"
-            f"{sanitize_filename_component(employee_name)}.pdf"
+            f"{period.year:04d}-{period.month:02d}_{sanitize_filename_component(employee_name)}.pdf"
         )
         target = _output_directory(output_root, employee_name) / target_name
         pdf = export_pdf_pages([page.image for page in ordered_pages], target, config=config)

@@ -24,24 +24,19 @@ _USER_MESSAGES: Dict[ScannerErrorCode, str] = {
         "Hãy kiểm tra đường dẫn và quyền truy cập."
     ),
     ScannerErrorCode.OUTPUT_NOT_WRITABLE: (
-        "Không thể ghi vào thư mục xuất PDF. "
-        "Hãy chọn thư mục khác hoặc kiểm tra quyền truy cập."
+        "Không thể ghi vào thư mục xuất PDF. Hãy chọn thư mục khác hoặc kiểm tra quyền truy cập."
     ),
     ScannerErrorCode.IMAGE_DECODE_FAILED: (
-        "Không thể đọc ảnh này. Hãy kiểm tra file có bị hỏng "
-        "và thuộc định dạng được hỗ trợ."
+        "Không thể đọc ảnh này. Hãy kiểm tra file có bị hỏng và thuộc định dạng được hỗ trợ."
     ),
     ScannerErrorCode.PDF_WRITE_FAILED: (
-        "Không thể tạo file PDF. Hãy kiểm tra dung lượng "
-        "và quyền ghi của thư mục xuất."
+        "Không thể tạo file PDF. Hãy kiểm tra dung lượng và quyền ghi của thư mục xuất."
     ),
     ScannerErrorCode.STATE_READ_FAILED: (
-        "Không thể đọc trạng thái quét trước đó. "
-        "Hãy thử lại hoặc chọn lại thư mục."
+        "Không thể đọc trạng thái quét trước đó. Hãy thử lại hoặc chọn lại thư mục."
     ),
     ScannerErrorCode.STATE_WRITE_FAILED: (
-        "Không thể lưu trạng thái quét. "
-        "Hãy kiểm tra quyền ghi của thư mục ứng dụng."
+        "Không thể lưu trạng thái quét. Hãy kiểm tra quyền ghi của thư mục ứng dụng."
     ),
     ScannerErrorCode.OUTPUT_COLLISION: (
         "Tên file PDF bị trùng. Hãy đổi tên ảnh hoặc chọn thư mục xuất khác."

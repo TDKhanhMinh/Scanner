@@ -28,7 +28,7 @@ from attendance_scanner.contracts import (
     ScannerErrorCode,
     ScannerWarningCode,
 )
-from attendance_scanner.pipeline.detect import DetectionResult
+from attendance_scanner.pipeline.detect import DetectionRejectionReason, DetectionResult
 from attendance_scanner.pipeline.load import load_image
 from attendance_scanner.pipeline.orchestrator import (
     PipelineConfig,
@@ -379,6 +379,42 @@ def test_scan_one_mocked_detector_isolation_not_found():
         assert result.diagnostics.warning_codes == [ScannerWarningCode.DOCUMENT_NOT_DETECTED.value]
         assert result.diagnostics.warning == ScannerWarningCode.DOCUMENT_NOT_DETECTED.value
         assert result.warning == ScannerWarningCode.DOCUMENT_NOT_DETECTED.value
+        assert result.output_width == 400
+        assert result.output_height == 300
+
+
+def test_scan_one_clipped_document_skips_warp_and_records_warning():
+    """Verify orchestrator skips warp when detection is clipped and records DOCUMENT_CLIPPED."""
+    bgr = np.full((300, 400, 3), 150, dtype=np.uint8)
+
+    clipped_detection = DetectionResult(
+        detected=True,
+        accepted=False,
+        clipped=True,
+        rejection_reason=DetectionRejectionReason.DOCUMENT_CLIPPED,
+        corners=[(0.0, 0.0), (350.0, 0.0), (350.0, 280.0), (0.0, 280.0)],
+        confidence=0.85,
+        area_ratio=0.7,
+        scale_factor=1.0,
+    )
+
+    with (
+        patch(
+            "attendance_scanner.pipeline.orchestrator.detect_document_boundary",
+            return_value=clipped_detection,
+        ) as mock_detect,
+        patch(
+            "attendance_scanner.pipeline.orchestrator.warp_perspective",
+        ) as mock_warp,
+    ):
+        result = scan_one(bgr, mode=ScanMode.GRAY)
+
+        mock_detect.assert_called_once()
+        mock_warp.assert_not_called()
+        assert result.document_detected is False
+        assert result.diagnostics.document_detected is False
+        assert ScannerWarningCode.DOCUMENT_CLIPPED.value in result.warning_codes
+        assert ScannerWarningCode.DOCUMENT_NOT_DETECTED.value not in result.warning_codes
         assert result.output_width == 400
         assert result.output_height == 300
 

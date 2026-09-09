@@ -138,9 +138,7 @@ def _validate_grouped_run(
         if group_id in skipped or group_id not in orders:
             continue
         normalized_order = [path.replace("\\", "/") for path in orders[group_id]]
-        expected_paths = {
-            path.replace("\\", "/") for path in group.source_relative_paths
-        }
+        expected_paths = {path.replace("\\", "/") for path in group.source_relative_paths}
         if (
             len(normalized_order) != len(set(normalized_order))
             or set(normalized_order) != expected_paths
@@ -170,8 +168,7 @@ def _block_failed_groups(
     changed = False
     for group in group_plan.affected_groups:
         group_outcomes = [
-            outcome_by_path.get(path.replace("\\", "/"))
-            for path in group.source_relative_paths
+            outcome_by_path.get(path.replace("\\", "/")) for path in group.source_relative_paths
         ]
         if not any(
             outcome is not None and outcome.file_result.status == FileProcessingStatus.FAILED
@@ -307,9 +304,7 @@ def _export_grouped_results(
                 artifact_relative_paths=[artifact_relative_path_text],
                 completeness_status=CompletenessStatus.COMPLETE,
                 review_required=False,
-                manual_order=(
-                    list(persisted_group.manual_order) if persisted_group else []
-                ),
+                manual_order=(list(persisted_group.manual_order) if persisted_group else []),
                 manual_order_fingerprint=(
                     persisted_group.manual_order_fingerprint if persisted_group else None
                 ),
@@ -758,9 +753,7 @@ def run_batch(
             for path in group.process_relative_paths
         }
         selected_files = [
-            file
-            for file in candidates
-            if file.relative_path.replace("\\", "/") in process_paths
+            file for file in candidates if file.relative_path.replace("\\", "/") in process_paths
         ]
     else:
         selected_files = candidates
@@ -837,9 +830,7 @@ def run_batch(
     warning_count = sum(
         1 for result in file_results if result.status == FileProcessingStatus.WARNING
     )
-    failed_count = sum(
-        1 for result in file_results if result.status == FileProcessingStatus.FAILED
-    )
+    failed_count = sum(1 for result in file_results if result.status == FileProcessingStatus.FAILED)
     summary = BatchSummary(
         total_images=total,
         success=success_count,

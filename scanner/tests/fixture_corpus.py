@@ -41,9 +41,13 @@ def _document(
     border_width: int = 4,
 ) -> None:
     canvas = np.full((height, width, 3), background, dtype=np.uint8)
-    corners = points if points is not None else np.array(
-        [[100, 80], [700, 80], [700, 520], [100, 520]],
-        dtype=np.int32,
+    corners = (
+        points
+        if points is not None
+        else np.array(
+            [[100, 80], [700, 80], [700, 520], [100, 520]],
+            dtype=np.int32,
+        )
     )
     cv2.fillConvexPoly(canvas, corners, (paper, paper, paper))
     cv2.polylines(canvas, [corners], True, (border, border, border), border_width)
@@ -138,9 +142,7 @@ def fixture_cases() -> List[FixtureCase]:
             "no_border",
             "fallback/no-detectable-border.png",
             False,
-            builder=lambda path: _save_bgr(
-                path, np.full((400, 600, 3), 128, dtype=np.uint8)
-            ),
+            builder=lambda path: _save_bgr(path, np.full((400, 600, 3), 128, dtype=np.uint8)),
         ),
         FixtureCase("portrait", "orientation/portrait.png", True, builder=_portrait_document),
         FixtureCase("landscape", "orientation/landscape.png", True, builder=_document),

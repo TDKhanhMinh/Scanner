@@ -30,7 +30,8 @@ from attendance_scanner.state import (
     source_order_fingerprint,
 )
 
-DEFAULT_PIPELINE_VERSION = "0.1.0"
+# Increment whenever scan output semantics change so existing manifests are rebuilt.
+DEFAULT_PIPELINE_VERSION = "0.2.0"
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ def _group_storage_key(key: DocumentGroupKey) -> str:
     """Return the same stable group storage key used by manifest state."""
     employee = key.employee_relative_dir.replace("\\", "/")
     return f"{employee}:{key.year:04d}-{key.month:02d}"
+
 
 _COMPLETED_STATUSES = {
     FileProcessingStatus.SUCCESS,
@@ -281,17 +283,19 @@ def _classify_file(
     entry: Optional[ManifestEntry],
     output_root: Union[str, Path],
     manifest: Manifest,
+    pipeline_version: str,
     required_output_mode: Optional[ExportMode] = None,
 ) -> FileClassification:
     """Classify one discovered file according to the AS-11 state rules."""
     if entry is None:
         return FileClassification.NEW
 
+    if entry.pipeline_version != pipeline_version:
+        return FileClassification.REBUILD
+
     if required_output_mode == ExportMode.PER_IMAGE:
         expected_output = file.target_relative_pdf.replace("\\", "/")
-        recorded_outputs = {
-            path.replace("\\", "/") for path in entry.output_relative_paths
-        }
+        recorded_outputs = {path.replace("\\", "/") for path in entry.output_relative_paths}
         if entry.output_relative_path:
             recorded_outputs.add(entry.output_relative_path.replace("\\", "/"))
         if expected_output not in recorded_outputs or not _output_paths_exist(
@@ -354,8 +358,8 @@ def classify_discovered_files(
     successfully exports them. Existing manifest entries for deleted sources are
     intentionally retained and never cause PDF deletion in the MVP.
 
-    ``pipeline_version`` is counted through ``outdated_pipeline_count`` but does
-    not force reprocessing when the source and all recorded outputs are unchanged.
+    A pipeline-version mismatch forces a rebuild even when the source and recorded
+    outputs are unchanged, because the output semantics may have changed.
     """
     effective_output_root = output_root or manifest.output_root
     outdated_count = 0
@@ -370,6 +374,7 @@ def classify_discovered_files(
             entry=entry,
             output_root=effective_output_root,
             manifest=manifest,
+            pipeline_version=pipeline_version,
             required_output_mode=required_output_mode,
         )
 
@@ -454,18 +459,14 @@ def build_group_aware_scan_plan(
             FileClassification.MODIFIED,
             FileClassification.REBUILD,
         }:
-            group_reasons.setdefault(storage_key, []).append(
-                f"source_{file.classification.value}"
-            )
+            group_reasons.setdefault(storage_key, []).append(f"source_{file.classification.value}")
 
     affected_groups: List[GroupRebuildPlan] = []
     all_process_paths: List[str] = []
     for storage_key, files in grouped_files.items():
         key = group_keys[storage_key]
         persisted_group = manifest.groups.get(storage_key)
-        artifact_paths = (
-            list(persisted_group.artifact_relative_paths) if persisted_group else []
-        )
+        artifact_paths = list(persisted_group.artifact_relative_paths) if persisted_group else []
         reasons = list(dict.fromkeys(group_reasons.get(storage_key, [])))
         missing_sources = (
             [
@@ -491,9 +492,7 @@ def build_group_aware_scan_plan(
                 for file, entry in zip(files, entries, strict=True)
                 if entry is not None
             ]
-            current_paths = {
-                entry.relative_path.replace("\\", "/") for entry in current_entries
-            }
+            current_paths = {entry.relative_path.replace("\\", "/") for entry in current_entries}
             persisted_order = list(persisted_group.manual_order) if persisted_group else []
             manual_order_valid = bool(
                 persisted_group
@@ -543,9 +542,7 @@ def build_group_aware_scan_plan(
                 }
             ]
         status = (
-            persisted_group.completeness_status
-            if persisted_group
-            else CompletenessStatus.AMBIGUOUS
+            persisted_group.completeness_status if persisted_group else CompletenessStatus.AMBIGUOUS
         )
         if missing_sources or "missing_expected_page" in reasons:
             status = CompletenessStatus.INCOMPLETE

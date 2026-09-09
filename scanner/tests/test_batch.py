@@ -73,9 +73,7 @@ def _create_batch_context(tmp_path: Path, count: int = 4):
     employee.mkdir(parents=True)
 
     for index in range(1, count + 1):
-        Image.new("RGB", (32, 24), color=(index * 20, 80, 120)).save(
-            employee / f"{index}.png"
-        )
+        Image.new("RGB", (32, 24), color=(index * 20, 80, 120)).save(employee / f"{index}.png")
 
     discovery = discover_employee_folders(input_root)
     store = ManifestStore(state_dir=tmp_path / "state")
@@ -237,9 +235,7 @@ def test_grouped_failure_blocks_all_sibling_results_without_missing_outputs(tmp_
     assert not list(output_root.rglob("*.pdf"))
     assert all(item.target_relative_pdf == "" for item in result.file_results)
     failed_events = [event for event in result.events if isinstance(event, FileFailedEvent)]
-    completed_events = [
-        event for event in result.events if isinstance(event, FileCompletedEvent)
-    ]
+    completed_events = [event for event in result.events if isinstance(event, FileCompletedEvent)]
     assert len(failed_events) == 3
     assert not completed_events
     blocked = [
@@ -261,9 +257,7 @@ def test_grouped_failure_marks_existing_artifact_stale(tmp_path: Path):
     group_plan = build_group_aware_scan_plan(
         discovery, manifest, output_root, period, export_mode=ExportMode.GROUPED
     )
-    manual_orders = {
-        "NV01:2026-09": ["NV01/1.png", "NV01/2.png", "NV01/3.png"]
-    }
+    manual_orders = {"NV01:2026-09": ["NV01/1.png", "NV01/2.png", "NV01/3.png"]}
 
     with patch(
         "attendance_scanner.batch.scan_one",
@@ -429,9 +423,7 @@ def test_cli_scan_batch_emits_events_and_commits_output(tmp_path: Path, monkeypa
 
     assert exit_code == 0
     events = [
-        deserialize_event(line)
-        for line in capsys.readouterr().out.splitlines()
-        if line.strip()
+        deserialize_event(line) for line in capsys.readouterr().out.splitlines() if line.strip()
     ]
     assert [event.type for event in events] == [
         "scan_plan",

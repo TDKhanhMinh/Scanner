@@ -25,7 +25,7 @@ def _make_manifest(
     source: Path,
     *,
     status: FileProcessingStatus = FileProcessingStatus.SUCCESS,
-    pipeline_version: str = "0.1.0",
+    pipeline_version: str = "0.2.0",
     output_relative_path: str | None = None,
 ):
     store = ManifestStore(state_dir=input_root.parent / "state")
@@ -99,9 +99,7 @@ def test_new_and_modified_sources_are_selected(tmp_path: Path):
     new_source.write_bytes(b"new-file")
 
     discovery, plan = _discover_and_plan(input_root, manifest, output_root)
-    classifications = {
-        file.relative_path: file.classification for file in discovery.files
-    }
+    classifications = {file.relative_path: file.classification for file in discovery.files}
 
     assert classifications == {
         "NV01/existing.jpg": FileClassification.MODIFIED,
@@ -155,7 +153,7 @@ def test_mtime_change_with_same_bytes_updates_manifest_without_reprocessing(tmp_
     assert plan.files_to_process == 0
 
 
-def test_pipeline_mismatch_is_reported_but_does_not_reprocess_default_scan(tmp_path: Path):
+def test_pipeline_mismatch_forces_rebuild_of_existing_output(tmp_path: Path):
     input_root = tmp_path / "employees"
     employee = input_root / "NV01"
     output_root = tmp_path / "output"
@@ -174,8 +172,9 @@ def test_pipeline_mismatch_is_reported_but_does_not_reprocess_default_scan(tmp_p
 
     discovery, plan = _discover_and_plan(input_root, manifest, output_root)
 
-    assert discovery.files[0].classification == FileClassification.UNCHANGED
-    assert plan.files_to_process == 0
+    assert discovery.files[0].classification == FileClassification.REBUILD
+    assert plan.files_to_process == 1
+    assert plan.rebuild == 1
     assert plan.outdated_pipeline_count == 1
 
 

@@ -1,6 +1,7 @@
 """Unit tests for document boundary detection and geometric validation."""
 
 import hashlib
+import os
 from pathlib import Path
 from typing import List, Tuple
 
@@ -11,8 +12,11 @@ from PIL import Image
 from pydantic import ValidationError
 
 from attendance_scanner.pipeline.detect import (
+    BoundaryCollisionResult,
     DetectionConfig,
+    DetectionRejectionReason,
     DetectionResult,
+    assess_boundary_collision,
     detect_document_boundary,
     order_corners,
 )
@@ -259,6 +263,26 @@ def test_detection_result_serialization_and_contract():
     assert arr.shape == (4, 2)
     assert arr.dtype == np.float32
 
+    with pytest.raises(ValidationError):
+        DetectionResult(
+            accepted=True,
+            clipped=True,
+            corners=corners,
+            confidence=0.5,
+            area_ratio=0.5,
+            scale_factor=1.0,
+        )
+
+    with pytest.raises(ValidationError):
+        DetectionResult(
+            accepted=False,
+            clipped=False,
+            corners=corners,
+            confidence=0.5,
+            area_ratio=0.5,
+            scale_factor=1.0,
+        )
+
 
 def test_detection_config_validation_invalid_bounds():
     """Verify DetectionConfig rejects invalid parameter bounds and conflicting thresholds."""
@@ -308,3 +332,156 @@ def test_detect_document_boundary_with_degenerate_config_safely_returns_none():
 
     degenerate_morph = DetectionConfig.model_construct(morph_kernel_size=0)
     assert detect_document_boundary(canvas, config=degenerate_morph) is None
+
+
+def test_assess_boundary_collision_pure_helper():
+    """Verify pure helper accurately detects out-of-bounds corners and border collisions."""
+    w, h = 800, 600
+
+    # 1. Fully inside corners
+    inside_corners = np.array(
+        [[100.0, 80.0], [700.0, 80.0], [700.0, 520.0], [100.0, 520.0]], dtype=np.float32
+    )
+    res_inside = assess_boundary_collision(inside_corners, (w, h))
+    assert isinstance(res_inside, BoundaryCollisionResult)
+    assert res_inside.is_clipped is False
+    assert res_inside.out_of_bounds_count == 0
+    assert len(res_inside.reasons) == 0
+
+    # 2. Negative coordinate out-of-bounds
+    neg_corners = np.array(
+        [[-15.0, 80.0], [700.0, 80.0], [700.0, 520.0], [100.0, 520.0]], dtype=np.float32
+    )
+    res_neg = assess_boundary_collision(neg_corners, (w, h))
+    assert res_neg.is_clipped is True
+    assert res_neg.out_of_bounds_count == 1
+    assert "1_corners_out_of_bounds" in res_neg.reasons
+
+    # 3. Coordinate exceeding width/height
+    overflow_corners = np.array(
+        [[100.0, 80.0], [820.0, 80.0], [700.0, 610.0], [100.0, 520.0]], dtype=np.float32
+    )
+    res_overflow = assess_boundary_collision(overflow_corners, (w, h))
+    assert res_overflow.is_clipped is True
+    assert res_overflow.out_of_bounds_count == 2
+    assert "2_corners_out_of_bounds" in res_overflow.reasons
+
+    # 4. Edge running along top border with paper mask extending beyond
+    top_border_corners = np.array(
+        [[50.0, 2.0], [750.0, 2.0], [750.0, 450.0], [50.0, 450.0]], dtype=np.float32
+    )
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[0:50, :] = 255  # paper continues to the very top edge
+    res_top = assess_boundary_collision(top_border_corners, (w, h), paper_mask=mask)
+    assert res_top.is_clipped is True
+    assert "top" in res_top.border_touch_edges
+    assert "paper_mask_exceeds_top_border" in res_top.reasons
+
+
+def test_detect_clipped_document_returns_accepted_false_with_document_clipped():
+    """Verify document clipped by camera border is detected but rejected with DOCUMENT_CLIPPED."""
+    w, h = 800, 600
+    canvas = np.full((h, w, 3), 30, dtype=np.uint8)
+
+    # Document sheet cut off on the top edge (touches y=0 from x=50 to x=750)
+    sheet_pts = np.array(
+        [[50, 0], [750, 0], [750, 480], [50, 480]],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(canvas, [sheet_pts], (245, 245, 245))
+
+    result = detect_document_boundary(canvas)
+
+    assert result is not None
+    assert result.detected is True
+    assert result.accepted is False
+    assert result.clipped is True
+    assert result.rejection_reason == DetectionRejectionReason.DOCUMENT_CLIPPED
+    assert len(result.corners) == 4
+    assert result.diagnostics.get("collision_reasons") is not None
+
+
+def test_detect_inner_table_not_warped_when_paper_clipped():
+    """When the paper sheet is clipped off-camera, inner table is not accepted as unclipped doc."""
+    w, h = 900, 700
+    canvas = np.full((h, w, 3), 40, dtype=np.uint8)
+
+    # Paper sheet clipped at the left edge (touches x=0)
+    paper = np.array([[0, 20], [800, 20], [800, 680], [0, 680]], dtype=np.int32)
+    cv2.fillConvexPoly(canvas, paper, (235, 235, 235))
+
+    # Inner table grid fully inside the frame
+    inner_table = np.array([[120, 100], [750, 100], [750, 600], [120, 600]], dtype=np.int32)
+    cv2.polylines(canvas, [inner_table], True, (20, 20, 20), 4)
+    for y in np.linspace(140, 560, 6, dtype=np.int32):
+        cv2.line(canvas, (120, int(y)), (750, int(y)), (20, 20, 20), 2)
+
+    result = detect_document_boundary(canvas)
+
+    assert result is not None
+    # Because paper touches border, candidate cannot be accepted for perspective warp
+    assert result.accepted is False
+    assert result.clipped is True
+    assert result.rejection_reason == DetectionRejectionReason.DOCUMENT_CLIPPED
+
+
+def test_small_unrelated_border_fragment_does_not_clip_complete_candidate():
+    """A small bright object at the frame edge must not invalidate the main page."""
+    canvas = np.full((700, 900, 3), 50, dtype=np.uint8)
+    paper = np.array([[180, 100], [820, 120], [800, 620], [190, 640]], dtype=np.int32)
+    cv2.fillConvexPoly(canvas, paper, (235, 235, 235))
+    cv2.polylines(canvas, [paper], True, (180, 180, 180), 3)
+    cv2.rectangle(canvas, (0, 0), (130, 25), (235, 235, 235), -1)
+
+    result = detect_document_boundary(canvas)
+
+    assert result is not None
+    assert result.accepted is True
+    assert result.clipped is False
+
+
+def test_inner_table_candidate_is_rejected_when_outer_margin_contains_paper_ink():
+    """A strong inner frame must not be accepted when the surrounding margin is still paper."""
+    canvas = np.full((700, 900, 3), 170, dtype=np.uint8)
+    outer = np.array([[70, 55], [830, 70], [815, 645], [75, 625]], dtype=np.int32)
+    cv2.fillConvexPoly(canvas, outer, (200, 200, 200))
+
+    inner = np.array([[170, 155], [740, 165], [735, 545], [175, 535]], dtype=np.int32)
+    cv2.polylines(canvas, [inner], True, (20, 20, 20), 5)
+    for y in np.linspace(205, 505, 7, dtype=np.int32):
+        cv2.line(canvas, (175, int(y)), (735, int(y)), (20, 20, 20), 2)
+    for x in (230, 410, 590):
+        cv2.rectangle(canvas, (x, 130), (x + 80, 148), (30, 30, 30), -1)
+
+    result = detect_document_boundary(
+        canvas,
+        config=DetectionConfig(paper_min_threshold=240, paper_max_threshold=245),
+    )
+
+    assert result is not None
+    assert result.accepted is False
+    assert result.clipped is False
+    assert result.rejection_reason == DetectionRejectionReason.INNER_TABLE_COLLAPSE
+
+
+def test_real_fixtures_optional_regression():
+    """Optional manual regression test for user real images via SCANNER_REAL_FIXTURE_ROOT."""
+    fixture_root_str = os.environ.get("SCANNER_REAL_FIXTURE_ROOT")
+    if not fixture_root_str or not os.path.isdir(fixture_root_str):
+        pytest.skip(
+            "SCANNER_REAL_FIXTURE_ROOT not configured; skipping manual real image regression."
+        )
+
+    fixture_dir = Path(fixture_root_str)
+    image_files = [
+        p for p in fixture_dir.glob("*") if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+    ]
+    assert len(image_files) > 0, f"No image files found in {fixture_dir}"
+
+    for img_path in image_files:
+        loaded = load_image(img_path)
+        result = detect_document_boundary(loaded)
+        if result is not None and result.clipped:
+            # Clipped candidates must never be marked accepted
+            assert result.accepted is False
+            assert result.rejection_reason == DetectionRejectionReason.DOCUMENT_CLIPPED

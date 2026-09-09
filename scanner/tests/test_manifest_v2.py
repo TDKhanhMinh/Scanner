@@ -93,9 +93,7 @@ def test_new_entry_gets_selected_period_but_modified_entry_keeps_old_period():
     requested = BatchPeriod(year=2026, month=9)
     assign_entry_context(new_entry, employee_relative_dir="NV01", batch_period=requested)
     assert new_entry.period == requested
-    assert new_entry.group_key == DocumentGroupKey(
-        employee_relative_dir="NV01", year=2026, month=9
-    )
+    assert new_entry.group_key == DocumentGroupKey(employee_relative_dir="NV01", year=2026, month=9)
 
     old_period = BatchPeriod(year=2026, month=8)
     old_entry = ManifestEntry(

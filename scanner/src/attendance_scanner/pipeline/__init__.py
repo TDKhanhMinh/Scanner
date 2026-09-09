@@ -1,8 +1,11 @@
 """Scan pipeline modules for image loading, detection, perspective warp, and enhancement."""
 
 from attendance_scanner.pipeline.detect import (
+    BoundaryCollisionResult,
     DetectionConfig,
+    DetectionRejectionReason,
     DetectionResult,
+    assess_boundary_collision,
     detect_document_boundary,
     order_corners,
 )
@@ -37,8 +40,11 @@ __all__ = [
     "load_image",
     "LoadedImage",
     "LoadedImageMetadata",
+    "BoundaryCollisionResult",
     "DetectionConfig",
+    "DetectionRejectionReason",
     "DetectionResult",
+    "assess_boundary_collision",
     "detect_document_boundary",
     "order_corners",
     "DegenerateCornersError",

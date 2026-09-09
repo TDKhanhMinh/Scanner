@@ -4,6 +4,7 @@ import {
   MAX_RECENT_ACTIVITY,
   scanExecutionReducer,
 } from "@/lib/scanExecutionReducer";
+import { formatWarningMessage } from "@/components/scanner/FileResultList";
 import type { ScannerEvent } from "@/types/scanner";
 
 function started(relativePath: string, index: number): ScannerEvent {
@@ -125,5 +126,30 @@ describe("scanExecutionReducer", () => {
 
     expect(state.phase).toBe("error");
     expect(state.errorMessage).toBe("Sidecar unavailable");
+  });
+
+  it("records DOCUMENT_CLIPPED warning correctly in results and warning counter", () => {
+    let state = scanExecutionReducer(initialScanExecutionState, {
+      type: "scan_started",
+      totalToProcess: 1,
+    });
+    state = scanExecutionReducer(state, {
+      type: "scanner_event",
+      event: started("NV01/clipped.jpg", 1),
+    });
+    state = scanExecutionReducer(state, {
+      type: "scanner_event",
+      event: completed("NV01/clipped.jpg", "2026-09-08T00:00:12Z", "DOCUMENT_CLIPPED"),
+    });
+
+    expect(state.processed).toBe(1);
+    expect(state.warning).toBe(1);
+    expect(state.success).toBe(0);
+    expect(state.results[0].status).toBe("warning");
+    expect(state.results[0].message).toBe("DOCUMENT_CLIPPED");
+
+    expect(formatWarningMessage("DOCUMENT_CLIPPED")).toBe(
+      "Ảnh chụp sát biên/thiếu góc — đã giữ nguyên ảnh gốc, chưa cắt gọt"
+    );
   });
 });

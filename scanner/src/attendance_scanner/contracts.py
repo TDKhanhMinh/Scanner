@@ -153,6 +153,7 @@ class ScannerWarningCode(str, Enum):
     DOCUMENT_NOT_DETECTED = "DOCUMENT_NOT_DETECTED"
     IMAGE_DOWNSCALED = "IMAGE_DOWNSCALED"
     WARP_FALLBACK = "WARP_FALLBACK"
+    DOCUMENT_CLIPPED = "DOCUMENT_CLIPPED"
 
 
 class DiscoveredFile(BaseContract):
@@ -319,9 +320,7 @@ class InvalidInputRootError(ScannerError):
 class OutputNotWritableError(ScannerError):
     """Raised when the configured output directory cannot accept scanner output."""
 
-    def __init__(
-        self, path: str, reason: str = "Path is not a writable directory"
-    ) -> None:
+    def __init__(self, path: str, reason: str = "Path is not a writable directory") -> None:
         super().__init__(
             ScannerErrorCode.OUTPUT_NOT_WRITABLE,
             f"Output root is not writable: '{path}' ({reason})",

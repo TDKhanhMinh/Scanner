@@ -83,6 +83,12 @@ if ([string]::IsNullOrWhiteSpace($SmokeTestInputRoot)) {
     $smokeInput = (Resolve-Path $SmokeTestInputRoot).Path
 }
 
+$psCommand = (Get-Command pwsh -ErrorAction SilentlyContinue)
+if (-not $psCommand) {
+    $psCommand = (Get-Command powershell -ErrorAction Stop)
+}
+$psPath = $psCommand.Source
+
 Invoke-Checked $npmCommand @("--prefix", $desktopRoot, "run", "build") "[1/4] Building frontend"
 
 $sidecarScript = Join-Path $PSScriptRoot "build-sidecar.ps1"
@@ -91,14 +97,14 @@ if (-not [string]::IsNullOrWhiteSpace($PythonPath)) {
     $sidecarArguments += @("-PythonPath", $PythonPath)
 }
 $sidecarInvocationArguments = @("-NoProfile", "-File", $sidecarScript) + $sidecarArguments
-Invoke-Checked (Get-Command pwsh -ErrorAction Stop).Source $sidecarInvocationArguments "[2/4] Building Python sidecar"
+Invoke-Checked $psPath $sidecarInvocationArguments "[2/4] Building Python sidecar"
 
 if (-not (Test-Path -LiteralPath $sidecarPath -PathType Leaf)) {
     throw "Expected target-triple sidecar was not produced at '$sidecarPath'."
 }
 if (-not [string]::IsNullOrWhiteSpace($smokeInput)) {
     $smokeScript = Join-Path $PSScriptRoot "test-sidecar.ps1"
-    Invoke-Checked (Get-Command pwsh -ErrorAction Stop).Source @(
+    Invoke-Checked $psPath @(
         "-NoProfile", "-File", $smokeScript, "-InputRoot", $smokeInput,
         "-SidecarPath", $sidecarPath
     ) "[3/4] Running packaged sidecar smoke/relaunch test"
@@ -116,10 +122,20 @@ if ($installers.Count -eq 0) {
     throw "Tauri build completed without producing an MSI or NSIS installer under '$bundleRoot'."
 }
 
+function Get-RelativeRepoPath {
+    param([string]$FullPath)
+
+    $normalizedRepo = $repoRoot.TrimEnd('\', '/') + '\'
+    if ($FullPath.StartsWith($normalizedRepo, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $FullPath.Substring($normalizedRepo.Length).Replace("\", "/")
+    }
+    return $FullPath.Replace("\", "/")
+}
+
 New-Item -ItemType Directory -Force -Path $manifestRoot | Out-Null
 $installerMetadata = @($installers | ForEach-Object {
     $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
-    $relativePath = [System.IO.Path]::GetRelativePath($repoRoot, $_.FullName).Replace("\", "/")
+    $relativePath = Get-RelativeRepoPath $_.FullName
     [ordered]@{
         name = $_.Name
         path = $relativePath
@@ -133,7 +149,7 @@ $manifest = [ordered]@{
     version = $expectedVersion
     targetTriple = $TargetTriple
     sidecar = [ordered]@{
-        path = [System.IO.Path]::GetRelativePath($repoRoot, $sidecarPath).Replace("\", "/")
+        path = Get-RelativeRepoPath $sidecarPath
         sizeBytes = (Get-Item -LiteralPath $sidecarPath).Length
         sha256 = $sidecarHash
     }

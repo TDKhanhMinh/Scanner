@@ -189,9 +189,7 @@ def _group_summary(
         "complete_groups": 0,
         "incomplete_groups": 0,
         "ambiguous_groups": 0,
-        "pages_needing_review": sum(
-            group.review_required for group in group_plan.affected_groups
-        ),
+        "pages_needing_review": sum(group.review_required for group in group_plan.affected_groups),
     }
     for group in group_plan.affected_groups:
         field = f"{group.completeness_status.value.lower()}_groups"

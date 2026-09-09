@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  Eye,
   FileOutput,
   FileText,
   XCircle,
@@ -21,6 +22,21 @@ export interface FileResultItem {
 
 export interface FileResultListProps {
   items: FileResultItem[];
+  onPreview?: (relativePath: string) => void;
+}
+
+const WARNING_MESSAGE_MAP: Record<string, string> = {
+  DOCUMENT_CLIPPED: "Ảnh chụp sát biên/thiếu góc — đã giữ nguyên ảnh gốc, chưa cắt gọt",
+  DOCUMENT_NOT_DETECTED: "Không tìm thấy biên giấy rõ ràng — dùng ảnh gốc",
+  WARP_FALLBACK: "Không thể nắn phẳng 4 góc — dùng ảnh gốc",
+  IMAGE_DOWNSCALED: "Ảnh kích thước lớn — đã hạ tỷ lệ",
+};
+
+export function formatWarningMessage(message?: string): string {
+  if (!message) return "";
+  const codes = message.split(",").map((s) => s.trim());
+  const formatted = codes.map((c) => WARNING_MESSAGE_MAP[c] ?? c);
+  return formatted.join("; ");
 }
 
 function StatusBadge({ status }: Pick<FileResultItem, "status">) {
@@ -48,7 +64,7 @@ function StatusBadge({ status }: Pick<FileResultItem, "status">) {
   );
 }
 
-export function FileResultList({ items }: FileResultListProps) {
+export function FileResultList({ items, onPreview }: FileResultListProps) {
   if (items.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-border/80 bg-card/20 p-8 text-center">
@@ -87,7 +103,20 @@ export function FileResultList({ items }: FileResultListProps) {
                 {item.relativePath}
               </p>
             </div>
-            <StatusBadge status={item.status} />
+            <div className="flex items-center gap-2">
+              {onPreview && (
+                <button
+                  type="button"
+                  onClick={() => onPreview(item.relativePath)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-9 sm:w-9"
+                  title={`Xem trước ${item.sourceFile}`}
+                  aria-label={`Xem trước ${item.sourceFile}`}
+                >
+                  <Eye className="h-4 w-4" />
+                </button>
+              )}
+              <StatusBadge status={item.status} />
+            </div>
           </div>
 
           <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-2 md:gap-4">
@@ -97,9 +126,18 @@ export function FileResultList({ items }: FileResultListProps) {
                 {item.targetPdf || "Chưa tạo output"}
               </span>
             </div>
-            <div className="text-muted-foreground">
+            <div className="min-w-0 text-muted-foreground">
               {item.message ? (
-                <span className="text-amber-400">{item.message}</span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-amber-400 font-medium">
+                    {formatWarningMessage(item.message)}
+                  </span>
+                  {item.message.includes("DOCUMENT_CLIPPED") && (
+                    <span className="text-[11px] text-muted-foreground">
+                      Gợi ý: Chụp lại để lấy trọn 4 mép giấy hoặc nắn góc thủ công
+                    </span>
+                  )}
+                </div>
               ) : item.documentDetected ? (
                 <span className="text-emerald-400">Nắn thẳng 4 góc thành công</span>
               ) : (
