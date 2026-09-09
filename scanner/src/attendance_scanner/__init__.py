@@ -13,6 +13,15 @@ from attendance_scanner.benchmark import (
     BenchmarkSource,
     load_benchmark_manifest,
 )
+from attendance_scanner.benchmark_import import (
+    SMARTDOC_ATTRIBUTION,
+    SMARTDOC_DATASET_NAME,
+    SMARTDOC_LICENSE,
+    SMARTDOC_SOURCE_URL,
+    SmartDocImportConfig,
+    import_smartdoc_subset,
+    summarize_manifest,
+)
 from attendance_scanner.contracts import (
     PROTOCOL_VERSION,
     BatchPeriod,
@@ -194,6 +203,13 @@ __all__ = [
     "BenchmarkSample",
     "BenchmarkSource",
     "load_benchmark_manifest",
+    "SMARTDOC_ATTRIBUTION",
+    "SMARTDOC_DATASET_NAME",
+    "SMARTDOC_LICENSE",
+    "SMARTDOC_SOURCE_URL",
+    "SmartDocImportConfig",
+    "import_smartdoc_subset",
+    "summarize_manifest",
     "default_worker_count",
     "clamp_worker_count",
     "discover_employee_folders",
