@@ -33,6 +33,7 @@ DetectorPoint = Tuple[float, float]
 DetectorCoordinateSpace = Literal["original_pixels", "detection_pixels"]
 DetectorFailureCode = Literal[
     "no_document",
+    "mask_only",
     "document_clipped",
     "invalid_geometry",
     "provider_unavailable",

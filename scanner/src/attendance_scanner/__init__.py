@@ -194,6 +194,17 @@ from attendance_scanner.pipeline import (
     scan_one,
     warp_perspective,
 )
+from attendance_scanner.segmentation import (
+    OnnxSegmentationAdapter,
+    SegmentationAdapterError,
+    SegmentationConfig,
+    SegmentationErrorCode,
+    SegmentationModelCard,
+    SegmentationOutput,
+    SegmentationTransform,
+    decode_segmentation_output,
+    preprocess_segmentation_input,
+)
 from attendance_scanner.state import (
     CURRENT_SCHEMA_VERSION,
     LEGACY_SCHEMA_VERSION,
@@ -386,4 +397,13 @@ __all__ = [
     "benchmark_service",
     "resolve_model_path",
     "runtime_diagnostics",
+    "OnnxSegmentationAdapter",
+    "SegmentationAdapterError",
+    "SegmentationConfig",
+    "SegmentationErrorCode",
+    "SegmentationModelCard",
+    "SegmentationOutput",
+    "SegmentationTransform",
+    "decode_segmentation_output",
+    "preprocess_segmentation_input",
 ]
