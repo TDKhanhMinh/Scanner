@@ -1,5 +1,18 @@
 """Attendance Scanner Engine - Local document scanner for employee attendance sheets."""
 
+from attendance_scanner.annotation import (
+    ANNOTATION_SESSION_VERSION,
+    AnnotationRecord,
+    AnnotationSession,
+    atomic_write_text,
+    discover_annotation_session,
+    finalize_annotation_session,
+    render_annotation_overlay,
+    resolve_annotation_image_path,
+    run_annotation_gui,
+    summarize_annotation_session,
+    update_annotation,
+)
 from attendance_scanner.batch import (
     BatchRunResult,
     clamp_worker_count,
@@ -198,6 +211,17 @@ __all__ = [
     "BatchSummary",
     "BatchRunResult",
     "run_batch",
+    "ANNOTATION_SESSION_VERSION",
+    "AnnotationRecord",
+    "AnnotationSession",
+    "atomic_write_text",
+    "discover_annotation_session",
+    "finalize_annotation_session",
+    "render_annotation_overlay",
+    "resolve_annotation_image_path",
+    "run_annotation_gui",
+    "summarize_annotation_session",
+    "update_annotation",
     "BENCHMARK_SCHEMA_VERSION",
     "BenchmarkManifest",
     "BenchmarkSample",
