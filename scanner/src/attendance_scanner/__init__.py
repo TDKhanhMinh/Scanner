@@ -6,6 +6,13 @@ from attendance_scanner.batch import (
     default_worker_count,
     run_batch,
 )
+from attendance_scanner.benchmark import (
+    BENCHMARK_SCHEMA_VERSION,
+    BenchmarkManifest,
+    BenchmarkSample,
+    BenchmarkSource,
+    load_benchmark_manifest,
+)
 from attendance_scanner.contracts import (
     PROTOCOL_VERSION,
     BatchPeriod,
@@ -182,6 +189,11 @@ __all__ = [
     "BatchSummary",
     "BatchRunResult",
     "run_batch",
+    "BENCHMARK_SCHEMA_VERSION",
+    "BenchmarkManifest",
+    "BenchmarkSample",
+    "BenchmarkSource",
+    "load_benchmark_manifest",
     "default_worker_count",
     "clamp_worker_count",
     "discover_employee_folders",

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "attendance-scanner/benchmark-manifest/v1",
+  "title": "Attendance Scanner V2 Benchmark Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "coordinate_space", "split_policy", "samples"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "coordinate_space": { "const": "exif_normalized_pixels" },
+    "split_policy": { "const": "sequence_group" },
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/sample" }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "array",
+      "prefixItems": [{ "type": "number" }, { "type": "number" }],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "license", "attribution"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "license": { "type": "string", "minLength": 1 },
+        "attribution": { "type": "string", "minLength": 1 },
+        "url": { "type": ["string", "null"] }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_id", "image_path", "dataset", "split", "width", "height",
+        "tl", "tr", "br", "bl", "document_visible", "scenario_tags", "source"
+      ],
+      "properties": {
+        "sample_id": { "type": "string", "minLength": 1 },
+        "image_path": { "type": "string", "minLength": 1 },
+        "dataset": { "type": "string", "minLength": 1 },
+        "split": { "enum": ["train", "tune", "acceptance"] },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "tl": { "$ref": "#/$defs/point" },
+        "tr": { "$ref": "#/$defs/point" },
+        "br": { "$ref": "#/$defs/point" },
+        "bl": { "$ref": "#/$defs/point" },
+        "document_polygon": {
+          "type": ["array", "null"],
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/point" }
+        },
+        "mask_path": { "type": ["string", "null"] },
+        "document_visible": { "type": "boolean" },
+        "visibility_reason": {
+          "enum": ["fully_visible", "border_touching", "out_of_frame", "occluded", null]
+        },
+        "scenario_tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source": { "$ref": "#/$defs/source" },
+        "sequence_id": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
