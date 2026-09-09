@@ -1,5 +1,6 @@
 import { CheckCircle2, Sparkles, FileText, Palette } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { ScanMode } from "@/types/scanner";
 import {
   Card,
   CardHeader,
@@ -8,7 +9,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 
-export type ScanFilterMode = "gray" | "bw" | "color";
+export type ScanFilterMode = ScanMode;
 
 export interface ScanModeSelectorProps {
   mode: ScanFilterMode;
@@ -30,7 +31,7 @@ const MODES: ModeOption[] = [
     id: "gray",
     name: "Grayscale",
     badge: "Mặc định",
-    icon: Sparkles,
+    icon: FileText,
     description: "CLAHE + nhẹ denoise + làm nét. Giữ rõ nét chữ bút nhạt và kẻ bảng.",
     highlight: "Tốt nhất cho hầu hết bảng chấm công",
   },
@@ -47,6 +48,14 @@ const MODES: ModeOption[] = [
     icon: Palette,
     description: "Cân bằng sáng CLAHE trên kênh luminance, giữ nguyên màu chữ ký & con dấu đỏ.",
     highlight: "Bảo tồn màu mực dấu xác nhận",
+  },
+  {
+    id: "smart_document",
+    name: "Smart Document",
+    badge: "Khuyến nghị",
+    icon: Sparkles,
+    description: "Làm trắng nền, giảm bóng và tăng tương phản nhưng vẫn giữ mực đỏ/xanh.",
+    highlight: "Phong cách gần CamScanner, giữ màu chữ viết tay",
   },
 ];
 
@@ -75,7 +84,7 @@ export function ScanModeSelector({
       </CardHeader>
 
       <CardContent>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {MODES.map((item) => {
             const isSelected = mode === item.id;
             const Icon = item.icon;
@@ -85,6 +94,7 @@ export function ScanModeSelector({
                 key={item.id}
                 type="button"
                 disabled={disabled}
+                aria-pressed={isSelected}
                 onClick={() => onSelectMode(item.id)}
                 className={`p-4 rounded-xl border text-left transition-all relative flex flex-col justify-between min-h-[110px] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   isSelected
@@ -127,6 +137,6 @@ export function ScanModeSelector({
 
 // --- Hybrid Responsive Summary ---
 // mobile  (default / sm):  grid-cols-1, các card chế độ xếp dọc, touch target thoải mái
-// tablet  (md / lg):       grid-cols-3 hàng ngang 3 cột, so sánh trực quan các chế độ
-// desktop (xl / 2xl):      hover variant rõ rệt, ring focus sắc nét, chiều cao thẻ đồng đều
+// tablet  (md):            grid-cols-2 để nội dung mô tả vẫn dễ đọc
+// desktop (lg / xl):       grid-cols-4, hover variant rõ rệt, chiều cao thẻ đồng đều
 // Interaction:             touch target >= 44px, nút tương tác phản hồi tức thời

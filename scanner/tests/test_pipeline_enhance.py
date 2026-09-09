@@ -1,4 +1,4 @@
-"""Unit tests for scan enhancement filters (Gray, B&W, and Color Enhanced)."""
+"""Unit tests for scan enhancement filters."""
 
 import hashlib
 from pathlib import Path
@@ -17,13 +17,14 @@ from attendance_scanner.pipeline.enhance import (
     enhance_color,
     enhance_gray,
     enhance_image,
+    enhance_smart_document,
 )
 from attendance_scanner.pipeline.load import load_image
 from attendance_scanner.pipeline.perspective import warp_perspective
 
 
 def test_enhance_output_invariants():
-    """Verify channel counts, dimensions, and data types for all three enhancement modes."""
+    """Verify channel counts, dimensions, and data types for all four enhancement modes."""
     w, h = 320, 240
     # Synthetic document with text and lines
     bgr = np.full((h, w, 3), 230, dtype=np.uint8)
@@ -49,6 +50,12 @@ def test_enhance_output_invariants():
     assert color_out.ndim == 3
     assert color_out.shape == (h, w, 3)
     assert color_out.dtype == np.uint8
+
+    # 4. Smart Document mode: 3-channel color-preserving output
+    smart_out = enhance_smart_document(bgr)
+    assert smart_out.ndim == 3
+    assert smart_out.shape == (h, w, 3)
+    assert smart_out.dtype == np.uint8
 
 
 def test_enhance_synthetic_uneven_lighting_and_stamp_preservation():
@@ -91,12 +98,21 @@ def test_enhance_synthetic_uneven_lighting_and_stamp_preservation():
     assert r_val > b_val + 50
     assert r_val > g_val + 50
 
+    # --- Test Smart Document mode ---
+    smart_res = enhance_image(bgr, mode=ScanMode.SMART_DOCUMENT)
+    assert smart_res.shape == (h, w, 3)
+    smart_stamp = smart_res[180, 320]
+    smart_b, smart_g, smart_r = [int(value) for value in smart_stamp]
+    assert smart_r > 150
+    assert smart_r > smart_b + 40
+    assert smart_r > smart_g + 40
+
 
 def test_enhance_uniform_images_no_crash():
     """Verify uniform black, white, and gray images do not crash with division by zero."""
     for val in [0, 128, 255]:
         uniform_img = np.full((100, 100, 3), val, dtype=np.uint8)
-        # Should execute cleanly without error across all 3 modes
+        # Should execute cleanly without error across all 4 modes
         res_gray = enhance_gray(uniform_img)
         assert res_gray.shape == (100, 100)
 
@@ -106,6 +122,9 @@ def test_enhance_uniform_images_no_crash():
         res_color = enhance_color(uniform_img)
         assert res_color.shape == (100, 100, 3)
 
+        res_smart = enhance_smart_document(uniform_img)
+        assert res_smart.shape == (100, 100, 3)
+
 
 def test_enhance_small_image():
     """Verify small images (e.g. 4x4) are handled safely without kernel boundary errors."""
@@ -113,6 +132,7 @@ def test_enhance_small_image():
     assert enhance_gray(tiny).shape == (4, 4)
     assert enhance_bw(tiny).shape == (4, 4)
     assert enhance_color(tiny).shape == (4, 4, 3)
+    assert enhance_smart_document(tiny).shape == (4, 4, 3)
 
 
 def test_enhancement_config_validation():
@@ -120,6 +140,8 @@ def test_enhancement_config_validation():
     # Even block size 20 should auto-adjust to odd 21
     cfg = EnhancementConfig(bw_adaptive_block_size=20)
     assert cfg.bw_adaptive_block_size == 21
+    smart_cfg = EnhancementConfig(smart_background_kernel_size=50)
+    assert smart_cfg.smart_background_kernel_size == 51
 
     # Invalid CLAHE clip limit (must be > 0)
     with pytest.raises(ValidationError):
@@ -150,6 +172,7 @@ def test_source_image_is_not_mutated():
     _ = enhance_gray(bgr)
     _ = enhance_bw(bgr)
     _ = enhance_color(bgr)
+    _ = enhance_smart_document(bgr)
     _ = enhance_image(bgr, ScanMode.GRAY)
 
     after_hash = hashlib.sha256(bgr.tobytes()).hexdigest()
@@ -164,6 +187,7 @@ def test_enhance_image_mode_dispatch_and_errors():
     assert enhance_image(bgr, ScanMode.GRAY).ndim == 2
     assert enhance_image(bgr, ScanMode.BW).ndim == 2
     assert enhance_image(bgr, ScanMode.COLOR).ndim == 3
+    assert enhance_image(bgr, ScanMode.SMART_DOCUMENT).ndim == 3
 
     # String dispatch
     assert enhance_image(bgr, "gray").ndim == 2
@@ -171,6 +195,7 @@ def test_enhance_image_mode_dispatch_and_errors():
     assert enhance_image(bgr, "bw").ndim == 2
     assert enhance_image(bgr, "color").ndim == 3
     assert enhance_image(bgr, "color_enhanced").ndim == 3
+    assert enhance_image(bgr, "smart").ndim == 3
 
     # Unsupported mode
     with pytest.raises(ValueError) as exc_info:
@@ -203,7 +228,7 @@ def test_end_to_end_pipeline_integration(tmp_path: Path):
     assert warped.width > 400
     assert warped.height > 300
 
-    # 5. Stage 4: Scan enhancement in all 3 modes
+    # 5. Stage 4: Scan enhancement in all 4 modes
     enhanced_gray = enhance_image(warped, ScanMode.GRAY)
     assert enhanced_gray.shape == (warped.height, warped.width)
     assert enhanced_gray.dtype == np.uint8
@@ -215,3 +240,7 @@ def test_end_to_end_pipeline_integration(tmp_path: Path):
     enhanced_color = enhance_image(warped, ScanMode.COLOR)
     assert enhanced_color.shape == (warped.height, warped.width, 3)
     assert enhanced_color.dtype == np.uint8
+
+    enhanced_smart = enhance_image(warped, ScanMode.SMART_DOCUMENT)
+    assert enhanced_smart.shape == (warped.height, warped.width, 3)
+    assert enhanced_smart.dtype == np.uint8

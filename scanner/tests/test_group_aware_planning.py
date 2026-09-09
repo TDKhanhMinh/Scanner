@@ -13,7 +13,11 @@ from attendance_scanner.contracts import (
     PageIdentity,
     PageType,
 )
-from attendance_scanner.discovery import build_group_aware_scan_plan, discover_employee_folders
+from attendance_scanner.discovery import (
+    DEFAULT_PIPELINE_VERSION,
+    build_group_aware_scan_plan,
+    discover_employee_folders,
+)
 from attendance_scanner.state import (
     ManifestArtifact,
     ManifestEntry,
@@ -75,7 +79,7 @@ def _seed_grouped_context(tmp_path: Path):
                 export_mode=ExportMode.GROUPED,
                 output_relative_path=output_relative_path,
                 source_relative_paths=source_paths,
-                artifact_version="0.2.0",
+                artifact_version=DEFAULT_PIPELINE_VERSION,
             )
         )
         for source_path in source_paths:
@@ -107,7 +111,7 @@ def _seed_grouped_context(tmp_path: Path):
                     output_relative_paths=[output_relative_path],
                     status=FileProcessingStatus.SUCCESS,
                     processed_at="2026-09-01T00:00:00Z",
-                    pipeline_version="0.2.0",
+                    pipeline_version=DEFAULT_PIPELINE_VERSION,
                     period=period if employee_name != "A_old" else BatchPeriod(year=2026, month=8),
                     group_key=key,
                     page_identity=page_identity,

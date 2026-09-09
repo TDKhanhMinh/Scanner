@@ -15,6 +15,7 @@ from attendance_scanner.pipeline.enhance import (
     enhance_color,
     enhance_gray,
     enhance_image,
+    enhance_smart_document,
 )
 from attendance_scanner.pipeline.load import (
     LoadedImage,
@@ -57,6 +58,7 @@ __all__ = [
     "enhance_gray",
     "enhance_bw",
     "enhance_color",
+    "enhance_smart_document",
     "ResizeConfig",
     "PipelineConfig",
     "SingleScanDiagnostics",

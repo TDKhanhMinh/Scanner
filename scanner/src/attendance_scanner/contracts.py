@@ -17,6 +17,7 @@ class ScanMode(str, Enum):
     GRAY = "gray"
     BW = "bw"
     COLOR = "color"
+    SMART_DOCUMENT = "smart_document"
 
 
 class ExportMode(str, Enum):

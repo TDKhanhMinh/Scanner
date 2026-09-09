@@ -120,6 +120,28 @@ describe("App scan plan states", () => {
     });
   });
 
+  it("replans with Smart Document when the scan mode changes", async () => {
+    vi.mocked(planScan).mockResolvedValue(validPlan);
+    render(<App />);
+
+    await enterInputPath();
+    fireEvent.click(screen.getByRole("button", { name: /Smart Document/i }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(planScan).toHaveBeenLastCalledWith({
+      inputRoot: "C:/Attendance Input",
+      outputRoot: "C:/Attendance Input_pdf",
+      mode: "smart_document",
+      period: {
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+      },
+      exportMode: "PER_IMAGE",
+    });
+  });
+
   it("shows a plan error and keeps scanning disabled", async () => {
     vi.mocked(planScan).mockRejectedValue(new Error("Không tìm thấy sidecar"));
     render(<App />);

@@ -101,6 +101,59 @@ def test_scan_batch_subprocess_supports_unicode_spaces_and_jsonl_events(tmp_path
     assert (output_root / "Nguyễn Văn A" / "ảnh 01.pdf").is_file()
 
 
+def test_scan_batch_mode_switch_reprocesses_existing_output(tmp_path: Path):
+    input_root = tmp_path / "Attendance Input"
+    employee = input_root / "NV01"
+    output_root = tmp_path / "Attendance Output"
+    employee.mkdir(parents=True)
+    Image.new("RGB", (80, 60), color=(180, 180, 180)).save(employee / "card.png")
+
+    first = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(output_root),
+        "--mode",
+        "gray",
+        "--workers",
+        "1",
+    )
+    assert first.returncode == 0
+    assert json.loads(first.stdout.splitlines()[-1])["totalProcessed"] == 1
+
+    switched = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(output_root),
+        "--mode",
+        "smart_document",
+        "--workers",
+        "1",
+    )
+    assert switched.returncode == 0
+    assert json.loads(switched.stdout.splitlines()[-1])["totalProcessed"] == 1
+
+    repeated = _run_cli(
+        tmp_path,
+        "scan-batch",
+        "--input",
+        str(input_root),
+        "--output",
+        str(output_root),
+        "--mode",
+        "smart_document",
+        "--workers",
+        "1",
+    )
+    assert repeated.returncode == 0
+    assert json.loads(repeated.stdout.splitlines()[-1])["totalProcessed"] == 0
+
+
 def test_plan_subprocess_accepts_period_and_grouped_export_mode(tmp_path: Path):
     input_root = tmp_path / "Attendance Input"
     employee = input_root / "Nguyễn Văn A"

@@ -32,6 +32,7 @@ from attendance_scanner.diagnostics import describe_scanner_error, log_scanner_e
 from attendance_scanner.discovery import (
     DEFAULT_PIPELINE_VERSION,
     GroupAwareScanPlan,
+    pipeline_version_for_mode,
 )
 from attendance_scanner.events import (
     BaseEvent,
@@ -360,6 +361,8 @@ def _normalize_scan_mode(mode: Union[ScanMode, str]) -> ScanMode:
     normalized = mode.strip().lower()
     if normalized in ("color_enhanced", "colored"):
         normalized = ScanMode.COLOR.value
+    elif normalized in ("smart", "smart-document"):
+        normalized = ScanMode.SMART_DOCUMENT.value
     try:
         return ScanMode(normalized)
     except (AttributeError, ValueError) as exc:
@@ -726,6 +729,7 @@ def run_batch(
         raise ValueError(f"Output root is not a directory: {effective_output_root}")
 
     scan_mode = _normalize_scan_mode(mode)
+    effective_pipeline_version = pipeline_version_for_mode(pipeline_version, scan_mode)
     if isinstance(export_mode, ExportMode):
         scan_export_mode = export_mode
     else:
@@ -780,7 +784,7 @@ def run_batch(
                 store,
                 manifest_lock,
                 event_lock,
-                pipeline_version,
+                effective_pipeline_version,
                 events,
                 emit,
                 batch_period,

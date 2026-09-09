@@ -3,7 +3,7 @@
 Covers:
 - Pipeline composition: load -> detect -> optional warp -> enhance -> resize -> result.
 - Detection success path vs detector fallback path (DOCUMENT_NOT_DETECTED warning).
-- ScanMode dispatch: GRAY (1-ch uint8), BW (1-ch binary), COLOR (3-ch BGR).
+- ScanMode dispatch: GRAY, BW, COLOR, and SMART_DOCUMENT output invariants.
 - Size normalization: no upscaling, proportional downscaling with aspect ratio preservation.
 - Warp exception safe fallback (WARP_FALLBACK).
 - Input versatility (Path, str, LoadedImage, NumPy 2D/3D).
@@ -125,7 +125,7 @@ def test_scan_one_detector_fallback_rule(tmp_path: Path):
 
 
 def test_scan_one_mode_dispatch(tmp_path: Path):
-    """Verify enhancement mode dispatch: GRAY, BW, and COLOR outputs."""
+    """Verify enhancement mode dispatch for all supported output modes."""
     img_path = _create_synthetic_document_image(tmp_path / "modes.png", 500, 400)
 
     # 1. Gray mode (default)
@@ -146,6 +146,13 @@ def test_scan_one_mode_dispatch(tmp_path: Path):
     assert res_color.image.ndim == 3
     assert res_color.image.shape[2] == 3
     assert res_color.image.dtype == np.uint8
+
+    # 4. Smart Document mode
+    res_smart = scan_one(img_path, mode=ScanMode.SMART_DOCUMENT)
+    assert res_smart.channels == 3
+    assert res_smart.image.ndim == 3
+    assert res_smart.image.shape[2] == 3
+    assert res_smart.image.dtype == np.uint8
 
     # String mode support
     res_str = scan_one(img_path, mode="color_enhanced")

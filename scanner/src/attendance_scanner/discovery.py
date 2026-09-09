@@ -20,6 +20,7 @@ from attendance_scanner.contracts import (
     PageIdentity,
     PageType,
     ReviewGroup,
+    ScanMode,
     ScanPlan,
     SourcePage,
 )
@@ -31,7 +32,22 @@ from attendance_scanner.state import (
 )
 
 # Increment whenever scan output semantics change so existing manifests are rebuilt.
-DEFAULT_PIPELINE_VERSION = "0.2.0"
+DEFAULT_PIPELINE_VERSION = "0.3.0"
+
+
+def pipeline_version_for_mode(
+    pipeline_version: str,
+    mode: Union[ScanMode, str],
+) -> str:
+    """Return a manifest version that separates output enhancement modes."""
+    mode_value = (mode.value if isinstance(mode, ScanMode) else str(mode).strip()).lower()
+    if mode_value in ("color_enhanced", "colored"):
+        mode_value = ScanMode.COLOR.value
+    elif mode_value in ("smart", "smart-document"):
+        mode_value = ScanMode.SMART_DOCUMENT.value
+    if mode_value == ScanMode.GRAY.value:
+        return pipeline_version
+    return f"{pipeline_version}:{mode_value}"
 
 
 @dataclass(frozen=True)
@@ -428,6 +444,8 @@ def build_group_aware_scan_plan(
     period: BatchPeriod,
     *,
     export_mode: ExportMode = ExportMode.GROUPED,
+    scan_mode: Union[ScanMode, str] = ScanMode.GRAY,
+    pipeline_version: str = DEFAULT_PIPELINE_VERSION,
 ) -> GroupAwareScanPlan:
     """Build file and affected-group plans for PER_IMAGE or GROUPED export.
 
@@ -440,6 +458,7 @@ def build_group_aware_scan_plan(
         discovery=discovery,
         manifest=manifest,
         output_root=output_root,
+        pipeline_version=pipeline_version_for_mode(pipeline_version, scan_mode),
     )
     effective_output_root = output_root or manifest.output_root
     discovered_paths = {file.relative_path.replace("\\", "/") for file in discovery.files}

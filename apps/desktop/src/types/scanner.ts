@@ -5,7 +5,7 @@
 
 export const PROTOCOL_VERSION = 1;
 
-export type ScanMode = "gray" | "bw" | "color";
+export type ScanMode = "gray" | "bw" | "color" | "smart_document";
 
 export interface BatchPeriod {
   year: number;

@@ -26,7 +26,7 @@ attendance data in repository fixtures or bug reports.
 3. Select the input root, for example `D:\Attendance Input`.
 4. Confirm or choose the output folder. The default is a sibling folder named
    `<input-root>_pdf`.
-5. Select Gray, B&W, or Color Enhanced mode and choose a worker count from 1 to 4.
+5. Select Gray, B&W, Color Enhanced, or Smart Document mode and choose a worker count from 1 to 4.
 6. Wait for the scan plan to finish.
 7. Select **Scan New Files**. The progress card shows the current employee/file,
    counters, warnings, failures, and skipped files.
@@ -41,9 +41,11 @@ The app works offline. Images and PDFs stay on the local machine.
 - **B&W**: adaptive binary output for high-contrast black-and-white documents.
 - **Color Enhanced**: preserves color information while applying the scanner's
   color enhancement pipeline.
+- **Smart Document**: whitens paper, reduces shadow gradients, improves contrast,
+  and preserves colored handwriting and stamps.
 
-Changing the mode does not change incremental identity. A source is selected by
-its source metadata and manifest state, not by the selected display mode.
+The selected mode is part of the processing identity. Changing the mode rebuilds
+the affected source output so an older enhancement result is not reused.
 
 ## 4. Plan and output semantics
 

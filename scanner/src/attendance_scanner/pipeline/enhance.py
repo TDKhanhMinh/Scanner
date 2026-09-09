@@ -1,4 +1,4 @@
-"""Scan enhancement filters for document images (Gray, B&W, and Color Enhanced).
+"""Scan enhancement filters for document images (Gray, B&W, Color, and Smart Document).
 
 This module is the fourth stage of the document scanning pipeline. Operating as pure
 in-memory functions on OpenCV images (without filesystem I/O), it applies contrast
@@ -9,6 +9,8 @@ enhancement, noise reduction, and binarization according to the selected ScanMod
    Crisp binary output for clean dark text (warning: faint handwriting may lose fidelity).
 3. Color Enhanced: LAB color-space CLAHE strictly on Luminance (L) + unsharp mask.
    Preserves stamps and colored signatures without color cast distortion.
+4. Smart Document: background illumination correction + paper whitening + LAB contrast.
+   Targets clean CamScanner-style output while preserving colored handwriting and stamps.
 """
 
 from typing import Optional, Tuple, Union
@@ -44,7 +46,21 @@ class EnhancementConfig(BaseContract):
     color_sharpen_amount: float = Field(default=0.2, ge=0.0, le=2.0)
     color_sharpen_sigma: float = Field(default=1.0, gt=0.0, le=5.0)
 
-    @field_validator("gray_clahe_tile_grid", "color_clahe_tile_grid")
+    # Smart Document mode parameters
+    smart_background_kernel_size: int = Field(default=51, ge=9, le=201)
+    smart_clahe_clip_limit: float = Field(default=1.6, gt=0.0, le=20.0)
+    smart_clahe_tile_grid: Tuple[int, int] = (8, 8)
+    smart_paper_l_threshold: int = Field(default=165, ge=0, le=255)
+    smart_neutralize_strength: float = Field(default=0.65, ge=0.0, le=1.0)
+    smart_denoise_d: int = Field(default=5, ge=1, le=15)
+    smart_sharpen_amount: float = Field(default=0.25, ge=0.0, le=2.0)
+    smart_sharpen_sigma: float = Field(default=1.0, gt=0.0, le=5.0)
+
+    @field_validator(
+        "gray_clahe_tile_grid",
+        "color_clahe_tile_grid",
+        "smart_clahe_tile_grid",
+    )
     @classmethod
     def validate_tile_grid(cls, v: Tuple[int, int]) -> Tuple[int, int]:
         """Ensure CLAHE tile grid dimensions are positive integers > 0."""
@@ -59,6 +75,8 @@ class EnhancementConfig(BaseContract):
             self.bw_adaptive_block_size += 1
         if self.bw_bg_kernel_size % 2 == 0:
             self.bw_bg_kernel_size += 1
+        if self.smart_background_kernel_size % 2 == 0:
+            self.smart_background_kernel_size += 1
         return self
 
 
@@ -283,21 +301,121 @@ def enhance_color(
     return enhanced_bgr
 
 
+def enhance_smart_document(
+    image: Union[np.ndarray, WarpedDocument, LoadedImage],
+    config: Optional[EnhancementConfig] = None,
+) -> np.ndarray:
+    """Create a color-preserving, paper-whitened document scan.
+
+    Smart Document mode is intentionally not binary. It corrects slow illumination
+    gradients on the LAB luminance channel, applies restrained local contrast, and
+    neutralizes bright paper pixels while leaving dark colored ink untouched.
+    """
+    if config is None:
+        config = EnhancementConfig()
+
+    bgr = _extract_bgr_array(image)
+    if bgr.ndim == 2:
+        bgr = cv2.cvtColor(bgr, cv2.COLOR_GRAY2BGR)
+
+    height, width = bgr.shape[:2]
+    if height < 2 or width < 2:
+        return bgr.copy()
+
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
+
+    # Estimate the slowly varying paper/background illumination. The kernel is
+    # bounded by the image size so tiny fixtures remain valid OpenCV inputs.
+    kernel_size = min(config.smart_background_kernel_size, max(3, min(height, width) - 1))
+    if kernel_size % 2 == 0:
+        kernel_size -= 1
+    background_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    background = cv2.morphologyEx(l_channel, cv2.MORPH_CLOSE, background_kernel)
+    background = cv2.GaussianBlur(background, (0, 0), sigmaX=max(1.0, kernel_size / 6.0))
+    background = np.maximum(background, 1)
+    normalized_l = cv2.divide(l_channel, background, scale=255)
+
+    # Use robust percentiles rather than min/max so a few dark strokes do not
+    # dictate the entire page contrast.
+    low_percentile, high_percentile = np.percentile(normalized_l, (1.0, 99.0))
+    if high_percentile - low_percentile >= 1.0:
+        stretched_l = np.clip(
+            (normalized_l.astype(np.float32) - float(low_percentile))
+            * (255.0 / float(high_percentile - low_percentile)),
+            0.0,
+            255.0,
+        ).astype(np.uint8)
+    else:
+        stretched_l = normalized_l
+
+    clahe = cv2.createCLAHE(
+        clipLimit=config.smart_clahe_clip_limit,
+        tileGridSize=config.smart_clahe_tile_grid,
+    )
+    enhanced_l = clahe.apply(stretched_l)
+    enhanced_l = cv2.bilateralFilter(
+        enhanced_l,
+        d=config.smart_denoise_d,
+        sigmaColor=20.0,
+        sigmaSpace=20.0,
+    )
+
+    # Neutralize the paper cast only where the original pixel is bright. Dark
+    # handwriting/stamps keep their original chroma, including red and blue ink.
+    paper_weight = (
+        np.clip(
+            (l_channel.astype(np.float32) - float(config.smart_paper_l_threshold))
+            / max(1.0, 255.0 - float(config.smart_paper_l_threshold)),
+            0.0,
+            1.0,
+        )
+        * config.smart_neutralize_strength
+    )
+    neutralized_a = np.clip(
+        a_channel.astype(np.float32) + (128.0 - a_channel.astype(np.float32)) * paper_weight,
+        0.0,
+        255.0,
+    ).astype(np.uint8)
+    neutralized_b = np.clip(
+        b_channel.astype(np.float32) + (128.0 - b_channel.astype(np.float32)) * paper_weight,
+        0.0,
+        255.0,
+    ).astype(np.uint8)
+
+    enhanced_bgr = cv2.cvtColor(
+        cv2.merge([enhanced_l, neutralized_a, neutralized_b]),
+        cv2.COLOR_LAB2BGR,
+    )
+
+    if config.smart_sharpen_amount > 0.0:
+        blurred = cv2.GaussianBlur(enhanced_bgr, (0, 0), sigmaX=config.smart_sharpen_sigma)
+        enhanced_bgr = cv2.addWeighted(
+            enhanced_bgr,
+            1.0 + config.smart_sharpen_amount,
+            blurred,
+            -config.smart_sharpen_amount,
+            0,
+        )
+
+    return np.clip(enhanced_bgr, 0, 255).astype(np.uint8)
+
+
 def enhance_image(
     image: Union[np.ndarray, WarpedDocument, LoadedImage],
     mode: Union[ScanMode, str] = ScanMode.GRAY,
     config: Optional[EnhancementConfig] = None,
 ) -> np.ndarray:
-    """Enhance a document image according to the specified ScanMode (Gray, B&W, or Color).
+    """Enhance a document image according to the specified scan mode.
 
     Args:
         image: Source image array, WarpedDocument, or LoadedImage.
-        mode: Enhancement filter mode (ScanMode.GRAY, ScanMode.BW, or ScanMode.COLOR).
+        mode: Enhancement filter mode, including ScanMode.SMART_DOCUMENT.
         config: Optional configuration parameters. Uses defaults if omitted.
 
     Returns:
         Enhanced NumPy array: 1-channel uint8 (H, W) for Gray and B&W,
-        3-channel uint8 (H, W, 3) for Color.
+        3-channel uint8 (H, W, 3) for Color and Smart Document.
 
     Raises:
         ValueError: If an unsupported mode or invalid image format is passed.
@@ -311,6 +429,13 @@ def enhance_image(
         return enhance_bw(image, config)
     elif mode_str in (ScanMode.COLOR.value, "color_enhanced", "color-enhanced"):
         return enhance_color(image, config)
+    elif mode_str in (
+        ScanMode.SMART_DOCUMENT.value,
+        "smart",
+        "smart_document",
+        "smart-document",
+    ):
+        return enhance_smart_document(image, config)
     else:
         raise ValueError(
             f"Unsupported scan enhancement mode '{mode}'. "

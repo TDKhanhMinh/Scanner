@@ -201,7 +201,7 @@ fn validate_request(
     if let Some(value) = mode {
         if !matches!(
             value.trim().to_ascii_lowercase().as_str(),
-            "gray" | "bw" | "color"
+            "gray" | "bw" | "color" | "smart_document"
         ) {
             return Err(ScannerBridgeError::InvalidRequest {
                 message: format!("Unsupported scan mode: {value}"),

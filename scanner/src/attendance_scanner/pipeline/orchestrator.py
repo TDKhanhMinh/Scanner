@@ -4,7 +4,7 @@ Composes the discrete scanning stages into a unified, pure in-memory pipeline:
 1. Load image (with EXIF rotation and transparency handling)
 2. Detect document boundary (OpenCV edge/contour/quadrilateral detection)
 3. Optional Warp (rectify perspective if quad detected; safe fallback if not)
-4. Enhance (Gray, B&W, or Color Enhanced filters)
+4. Enhance (Gray, B&W, Color Enhanced, or Smart Document filters)
 5. Size Normalization (no upscaling, proportional downscaling if oversized)
 6. Result assembly (SingleScanResult with typed diagnostics and warnings)
 """
@@ -252,7 +252,7 @@ def scan_one(
     2. Detect: finds 4-corner document quad. Returns None if unconfident or degenerate.
     3. Optional Warp: rectifies document perspective. If detector returned None,
        safely falls back to full normalized image with warning DOCUMENT_NOT_DETECTED.
-    4. Enhance: applies Gray, B&W, or Color Enhanced filters.
+    4. Enhance: applies the selected scan mode, including Smart Document.
     5. Resize: downscales oversized images proportionally without upscaling.
 
     Args:

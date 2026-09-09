@@ -53,6 +53,7 @@ from attendance_scanner.discovery import (
     classify_discovered_files,
     discover_employee_folders,
     natural_sort_key,
+    pipeline_version_for_mode,
     resolve_target_pdf,
 )
 from attendance_scanner.events import (
@@ -115,6 +116,7 @@ from attendance_scanner.pipeline import (
     enhance_color,
     enhance_gray,
     enhance_image,
+    enhance_smart_document,
     load_image,
     order_corners,
     scan_one,
@@ -191,6 +193,7 @@ __all__ = [
     "build_group_aware_scan_plan",
     "build_affected_document_groups",
     "natural_sort_key",
+    "pipeline_version_for_mode",
     "resolve_target_pdf",
     "BaseEvent",
     "ScanPlanEvent",
@@ -221,6 +224,7 @@ __all__ = [
     "enhance_gray",
     "enhance_bw",
     "enhance_color",
+    "enhance_smart_document",
     "ResizeConfig",
     "PipelineConfig",
     "SingleScanDiagnostics",

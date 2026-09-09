@@ -13,6 +13,7 @@ from attendance_scanner.contracts import (
     ExportMode,
     OutputNotWritableError,
     ReviewGroup,
+    ScanMode,
     ScanPlan,
 )
 from attendance_scanner.diagnostics import (
@@ -22,9 +23,11 @@ from attendance_scanner.diagnostics import (
     log_scanner_error,
 )
 from attendance_scanner.discovery import (
+    DEFAULT_PIPELINE_VERSION,
     build_group_aware_scan_plan,
     build_incremental_scan_plan,
     discover_employee_folders,
+    pipeline_version_for_mode,
 )
 from attendance_scanner.events import (
     BaseEvent,
@@ -80,6 +83,7 @@ def _prepare_plan(
     input_root: str,
     output_root: Optional[str],
     required_output_mode: Optional[ExportMode] = None,
+    scan_mode: ScanMode | str = ScanMode.GRAY,
 ) -> tuple[DiscoveryResult, Manifest, ManifestStore, str, ScanPlan]:
     """Discover, load state, classify files and persist only metadata-only updates."""
     validated_output_root = _validate_output_root(output_root)
@@ -93,6 +97,7 @@ def _prepare_plan(
         discovery=discovery,
         manifest=manifest,
         output_root=effective_output_root,
+        pipeline_version=pipeline_version_for_mode(DEFAULT_PIPELINE_VERSION, scan_mode),
         required_output_mode=required_output_mode,
     )
     if manifest.updated_at != previous_updated_at:
@@ -168,6 +173,7 @@ def _group_summary(
     output_root: str,
     period: BatchPeriod,
     export_mode: ExportMode,
+    scan_mode: ScanMode | str,
 ) -> tuple[dict[str, int], List[ReviewGroup]]:
     """Summarize affected document groups for a typed scan-plan event."""
     discovery = discover_employee_folders(input_root)
@@ -178,6 +184,7 @@ def _group_summary(
         output_root,
         period,
         export_mode=export_mode,
+        scan_mode=scan_mode,
     )
     counts = {
         "document_groups": group_plan.affected_group_count,
@@ -205,11 +212,12 @@ def _plan_event(
     output_root: str,
     period: Optional[BatchPeriod],
     export_mode: ExportMode,
+    scan_mode: ScanMode | str,
 ) -> ScanPlanEvent:
     """Create a typed plan event with document-aware summary counters."""
     if period is None:
         return ScanPlanEvent.from_plan(plan, period=None, export_mode=export_mode)
-    counts, review_groups = _group_summary(input_root, output_root, period, export_mode)
+    counts, review_groups = _group_summary(input_root, output_root, period, export_mode, scan_mode)
     return ScanPlanEvent.from_plan(
         plan,
         period=period,
@@ -266,7 +274,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     plan_parser.add_argument(
         "--mode",
-        choices=["gray", "bw", "color"],
+        choices=["gray", "bw", "color", "smart_document"],
         default="gray",
         help="Reserved scan mode argument; planning does not process image pixels",
     )
@@ -302,7 +310,7 @@ def create_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument(
         "--mode",
         "-m",
-        choices=["gray", "bw", "color"],
+        choices=["gray", "bw", "color", "smart_document"],
         default="gray",
         help="Enhancement mode (default: gray)",
     )
@@ -344,6 +352,7 @@ def handle_plan(args: argparse.Namespace) -> int:
             args.input,
             args.output,
             required_output_mode=export_mode,
+            scan_mode=args.mode,
         )
         event = _plan_event(
             plan,
@@ -351,6 +360,7 @@ def handle_plan(args: argparse.Namespace) -> int:
             output_root=plan.output_root,
             period=period,
             export_mode=export_mode,
+            scan_mode=args.mode,
         )
         emit_jsonl_event(event)
         return 0
@@ -371,6 +381,7 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             args.input,
             args.output,
             required_output_mode=export_mode,
+            scan_mode=args.mode,
         )
         plan_event = _plan_event(
             plan,
@@ -378,6 +389,7 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             output_root=effective_output_root,
             period=period,
             export_mode=export_mode,
+            scan_mode=args.mode,
         )
         emit_jsonl_event(plan_event)
 
@@ -388,6 +400,7 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
                 effective_output_root,
                 period,
                 export_mode=export_mode,
+                scan_mode=args.mode,
             )
             if export_mode == ExportMode.GROUPED and period is not None
             else None

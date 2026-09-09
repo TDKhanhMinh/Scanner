@@ -111,6 +111,16 @@ fn request_validation_and_args_support_period_and_export_mode() {
     assert!(validate_request(
         "input",
         None,
+        Some("smart_document"),
+        Some(2),
+        Some(2026),
+        Some(9),
+        Some("per-image")
+    )
+    .is_ok());
+    assert!(validate_request(
+        "input",
+        None,
         Some("gray"),
         Some(2),
         Some(2026),

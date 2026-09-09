@@ -273,6 +273,21 @@ export function App() {
     }
   };
 
+  const handleScanModeChange = (mode: ScanFilterMode) => {
+    const nextSettings = { ...settings, mode };
+    setSettings(nextSettings);
+    dispatchExecution({ type: "reset" });
+    setReviewGroups([]);
+    setResolvedReviewGroups({});
+    setManualOrderOverrides({});
+    setSkippedReviewGroups([]);
+    planRequestId.current += 1;
+    setIsPlanReady(false);
+    if (inputPath.trim()) {
+      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
+    }
+  };
+
   const chooseDirectory = async (title: string): Promise<string | null> => {
     try {
       const selected = await open({
@@ -565,7 +580,7 @@ export function App() {
 
                 <ScanModeSelector
                   mode={scanMode}
-                  onSelectMode={(mode) => setSettings((previous) => ({ ...previous, mode }))}
+                  onSelectMode={handleScanModeChange}
                   disabled={isScanning}
                 />
 

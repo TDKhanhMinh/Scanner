@@ -7,12 +7,15 @@ import attendance_scanner.cli as cli
 from attendance_scanner.contracts import (
     FileClassification,
     FileProcessingStatus,
+    ScanMode,
     ScanPlan,
 )
 from attendance_scanner.discovery import (
+    DEFAULT_PIPELINE_VERSION,
     build_incremental_scan_plan,
     classify_discovered_files,
     discover_employee_folders,
+    pipeline_version_for_mode,
 )
 from attendance_scanner.events import ScanPlanEvent, deserialize_event
 from attendance_scanner.fingerprint import compute_fast_fingerprint, compute_sha256
@@ -25,7 +28,7 @@ def _make_manifest(
     source: Path,
     *,
     status: FileProcessingStatus = FileProcessingStatus.SUCCESS,
-    pipeline_version: str = "0.2.0",
+    pipeline_version: str = DEFAULT_PIPELINE_VERSION,
     output_relative_path: str | None = None,
 ):
     store = ManifestStore(state_dir=input_root.parent / "state")
@@ -176,6 +179,15 @@ def test_pipeline_mismatch_forces_rebuild_of_existing_output(tmp_path: Path):
     assert plan.files_to_process == 1
     assert plan.rebuild == 1
     assert plan.outdated_pipeline_count == 1
+
+
+def test_non_default_scan_mode_uses_distinct_pipeline_version():
+    assert pipeline_version_for_mode(DEFAULT_PIPELINE_VERSION, ScanMode.GRAY) == (
+        DEFAULT_PIPELINE_VERSION
+    )
+    assert pipeline_version_for_mode(DEFAULT_PIPELINE_VERSION, ScanMode.SMART_DOCUMENT) == (
+        f"{DEFAULT_PIPELINE_VERSION}:smart_document"
+    )
 
 
 def test_failed_entry_is_retryable_and_uses_rebuild_when_output_is_missing(tmp_path: Path):
