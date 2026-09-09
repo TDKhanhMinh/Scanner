@@ -141,6 +141,18 @@ from attendance_scanner.fingerprint import (
     compute_fast_fingerprint,
     compute_sha256,
 )
+from attendance_scanner.onnx_runtime import (
+    OnnxInferenceResult,
+    OnnxInferenceService,
+    OnnxMicroBenchmark,
+    OnnxModelInfo,
+    OnnxRuntimeError,
+    OnnxRuntimeErrorCode,
+    OnnxSessionConfig,
+    benchmark_service,
+    resolve_model_path,
+    runtime_diagnostics,
+)
 from attendance_scanner.page_classification import (
     PageClassificationConfig,
     PageOrderDecision,
@@ -364,4 +376,14 @@ __all__ = [
     "classify_page",
     "classify_document_page",
     "order_source_pages",
+    "OnnxInferenceResult",
+    "OnnxInferenceService",
+    "OnnxMicroBenchmark",
+    "OnnxModelInfo",
+    "OnnxRuntimeError",
+    "OnnxRuntimeErrorCode",
+    "OnnxSessionConfig",
+    "benchmark_service",
+    "resolve_model_path",
+    "runtime_diagnostics",
 ]

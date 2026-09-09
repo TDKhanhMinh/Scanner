@@ -17,11 +17,17 @@ SOURCE_ROOT = SCANNER_ROOT / "src"
 # collection scoped to runtime assets so development/test modules do not inflate
 # the production sidecar.
 datas = []
-binaries = collect_dynamic_libs("cv2")
+binaries = collect_dynamic_libs("cv2") + collect_dynamic_libs("onnxruntime")
 hiddenimports = collect_submodules("attendance_scanner")
-for package_name in ("cv2", "numpy", "PIL"):
+for package_name in ("cv2", "numpy", "PIL", "onnxruntime"):
     datas.extend(collect_data_files(package_name))
-hiddenimports.extend(["cv2.cv2", "pydantic_core._pydantic_core"])
+hiddenimports.extend(
+    [
+        "cv2.cv2",
+        "onnxruntime.capi._pybind_state",
+        "pydantic_core._pydantic_core",
+    ]
+)
 
 
 analysis = Analysis(
