@@ -3,7 +3,8 @@ import { BatchOptionsCard } from "@/components/scanner/BatchOptionsCard";
 import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
 import { DetectorModeSelector } from "@/components/scanner/DetectorModeSelector";
 import { DetectorOptionsCard } from "@/components/scanner/DetectorOptionsCard";
-import { FileResultList } from "@/components/scanner/FileResultList";
+import { DetectionPreviewPanel } from "@/components/scanner/DetectionPreviewPanel";
+import { FileResultList, type FileResultItem } from "@/components/scanner/FileResultList";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
 import { PageOrderReviewPanel } from "@/components/scanner/PageOrderReviewPanel";
 import { ScanModeSelector, type ScanFilterMode } from "@/components/scanner/ScanModeSelector";
@@ -96,6 +97,7 @@ export function App() {
     Record<string, string[]>
   >({});
   const [skippedReviewGroups, setSkippedReviewGroups] = useState<string[]>([]);
+  const [selectedPreview, setSelectedPreview] = useState<FileResultItem | null>(null);
 
   // Incremental scan plan state loaded from the Tauri scanner bridge.
   const [planStats, setPlanStats] = useState<ScanPlanStats>({
@@ -233,6 +235,7 @@ export function App() {
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
     setSkippedReviewGroups([]);
+    setSelectedPreview(null);
     planRequestId.current += 1;
     setIsPlanReady(false);
     const trimmed = path.trim();
@@ -278,6 +281,7 @@ export function App() {
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
     setSkippedReviewGroups([]);
+    setSelectedPreview(null);
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -293,6 +297,7 @@ export function App() {
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
     setSkippedReviewGroups([]);
+    setSelectedPreview(null);
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -308,6 +313,7 @@ export function App() {
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
     setSkippedReviewGroups([]);
+    setSelectedPreview(null);
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -323,6 +329,7 @@ export function App() {
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
     setSkippedReviewGroups([]);
+    setSelectedPreview(null);
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -428,6 +435,11 @@ export function App() {
     void openPath(sourcePath).catch((error: unknown) => {
       setErrorMessage(scannerErrorMessage(error));
     });
+  };
+
+  const handleSelectResultPreview = (item: FileResultItem) => {
+    setSelectedPreview(item);
+    setActiveTab("results");
   };
 
   const handleStartScan = () => {
@@ -730,7 +742,17 @@ export function App() {
               </span>
             </div>
 
-            <FileResultList items={results} onPreview={handlePreviewSource} />
+            {selectedPreview && (
+              <DetectionPreviewPanel
+                item={selectedPreview}
+                onClose={() => setSelectedPreview(null)}
+              />
+            )}
+            <FileResultList
+              items={results}
+              onPreview={handlePreviewSource}
+              onPreviewItem={handleSelectResultPreview}
+            />
           </TabsContent>
         </Tabs>
       </main>

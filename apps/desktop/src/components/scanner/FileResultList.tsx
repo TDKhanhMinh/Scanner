@@ -7,6 +7,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { DetectionPreview } from "@/types/scanner";
 
 export interface FileResultItem {
   id: string;
@@ -19,12 +20,14 @@ export interface FileResultItem {
   message?: string;
   detectionReason?: string;
   detectionReasonCodes?: string[];
+  detectionPreview?: DetectionPreview;
   timestamp?: string;
 }
 
 export interface FileResultListProps {
   items: FileResultItem[];
   onPreview?: (relativePath: string) => void;
+  onPreviewItem?: (item: FileResultItem) => void;
 }
 
 const WARNING_MESSAGE_MAP: Record<string, string> = {
@@ -88,7 +91,7 @@ function StatusBadge({ status }: Pick<FileResultItem, "status">) {
   );
 }
 
-export function FileResultList({ items, onPreview }: FileResultListProps) {
+export function FileResultList({ items, onPreview, onPreviewItem }: FileResultListProps) {
   if (items.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-border/80 bg-card/20 p-8 text-center">
@@ -128,10 +131,14 @@ export function FileResultList({ items, onPreview }: FileResultListProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {onPreview && (
+              {(onPreview || onPreviewItem) && (
                 <button
                   type="button"
-                  onClick={() => onPreview(item.relativePath)}
+                  onClick={() =>
+                    item.detectionPreview && onPreviewItem
+                      ? onPreviewItem(item)
+                      : onPreview?.(item.relativePath)
+                  }
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-9 sm:w-9"
                   title={`Xem trước ${item.sourceFile}`}
                   aria-label={`Xem trước ${item.sourceFile}`}

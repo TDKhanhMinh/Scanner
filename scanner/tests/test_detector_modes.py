@@ -1,5 +1,6 @@
 """AS-54 detector mode and provider selection tests."""
 
+import base64
 from pathlib import Path
 
 import cv2
@@ -112,3 +113,14 @@ def test_scan_one_uses_configured_detector_without_model_name_in_product_mode(
     assert result.detector_mode == "ai_enhanced"
     assert result.detector_model_version == "configured-v1"
     assert result.detection_quality_summary["decisionPath"] is not None
+    assert result.detection_preview is not None
+    assert result.detection_preview.final_corners is not None
+    assert result.detection_preview.source_width == 200
+    assert result.detection_preview.preview_image_data_url is not None
+    encoded = result.detection_preview.preview_image_data_url.split(",", 1)[1]
+    bounded = cv2.imdecode(
+        np.frombuffer(base64.b64decode(encoded), dtype=np.uint8),
+        cv2.IMREAD_COLOR,
+    )
+    assert bounded is not None
+    assert max(bounded.shape[:2]) <= 1280

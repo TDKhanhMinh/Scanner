@@ -143,6 +143,9 @@ export function scanExecutionReducer(
             status: isWarning ? "warning" : "success",
             documentDetected: event.documentDetected,
             message: event.warning ?? undefined,
+            detectionReason: event.detectionReason ?? undefined,
+            detectionReasonCodes: event.detectionReasonCodes ?? [],
+            detectionPreview: event.detectionPreview ?? undefined,
             timestamp: event.timestamp,
           };
           return {

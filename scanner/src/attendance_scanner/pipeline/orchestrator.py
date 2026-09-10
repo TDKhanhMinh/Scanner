@@ -9,6 +9,7 @@ Composes the discrete scanning stages into a unified, pure in-memory pipeline:
 6. Result assembly (SingleScanResult with typed diagnostics and warnings)
 """
 
+import base64
 import math
 import time
 from dataclasses import dataclass, field
@@ -22,11 +23,14 @@ from pydantic import Field
 from attendance_scanner.contracts import (
     BaseContract,
     DetectionFailureReason,
+    DetectionPreview,
+    DetectionPreviewCandidate,
     FileProcessingStatus,
     FileResult,
     ImageDecodeError,
     ImageProcessError,
     PageIdentity,
+    PreviewPoint,
     ScanMode,
     ScannerWarningCode,
 )
@@ -130,6 +134,7 @@ class SingleScanResult:
     detection_reason: Optional[DetectionFailureReason] = None
     detection_reason_codes: List[DetectionFailureReason] = field(default_factory=list)
     detection_user_message: Optional[str] = None
+    detection_preview: Optional[DetectionPreview] = None
 
     @property
     def shape(self) -> Tuple[int, ...]:
@@ -252,6 +257,100 @@ def _normalize_size(
 
     resized = cv2.resize(image, (new_w, new_h), interpolation=config.interpolation)
     return resized, scale
+
+
+def _preview_points(
+    points: Optional[List[Tuple[float, float]]],
+) -> Optional[List[PreviewPoint]]:
+    if points is None or len(points) != 4:
+        return None
+    return [PreviewPoint(x=float(x), y=float(y)) for x, y in points]
+
+
+def _encode_bounded_preview(image: np.ndarray, max_dimension: int = 1280) -> Optional[str]:
+    """Encode a bounded JPEG preview so the frontend never loads the source image at full size."""
+    height, width = image.shape[:2]
+    scale = min(1.0, max_dimension / float(max(height, width)))
+    preview = image
+    if scale < 1.0:
+        preview = cv2.resize(
+            image,
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    success, encoded = cv2.imencode(
+        ".jpg",
+        preview,
+        [int(cv2.IMWRITE_JPEG_QUALITY), 82],
+    )
+    if not success:
+        return None
+    payload = base64.b64encode(encoded.tobytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{payload}"
+
+
+def _build_detection_preview(
+    *,
+    loaded: LoadedImage,
+    v2_detection: Optional[DocumentDetectionResult],
+    detection: Optional[DetectionResult],
+    document_detected: bool,
+    detector_name: str,
+    detector_model_version: Optional[str],
+    fallback_used: bool,
+    confidence: Optional[float],
+    reason_codes: List[DetectionFailureReason],
+    warning_codes: List[str],
+) -> DetectionPreview:
+    """Build bounded, source-coordinate evidence for the in-app diagnostic overlay."""
+    candidates: List[DetectionPreviewCandidate] = []
+    final_corners: Optional[List[PreviewPoint]] = None
+    mask_available = False
+    if v2_detection is not None:
+        final_corners = (
+            _preview_points(v2_detection.corners.as_list())
+            if document_detected and v2_detection.corners is not None
+            else None
+        )
+        mask_available = v2_detection.evidence.mask_confidence is not None
+        for candidate in v2_detection.candidate_corners:
+            preview_candidate = _preview_points(candidate.points)
+            if preview_candidate is not None:
+                candidates.append(
+                    DetectionPreviewCandidate(
+                        source=candidate.source,
+                        corners=preview_candidate,
+                        confidence=candidate.confidence,
+                    )
+                )
+    elif detection is not None:
+        final_corners = _preview_points(detection.corners if document_detected else None)
+        if detection.corners:
+            rejected_candidate = _preview_points(detection.corners)
+            if rejected_candidate is not None:
+                candidates.append(
+                    DetectionPreviewCandidate(
+                        source="v1_cv",
+                        corners=rejected_candidate,
+                        confidence=detection.confidence,
+                    )
+                )
+
+    return DetectionPreview(
+        source_width=loaded.width,
+        source_height=loaded.height,
+        final_corners=final_corners,
+        candidate_corners=candidates,
+        mask_available=mask_available,
+        preview_image_data_url=_encode_bounded_preview(loaded.image),
+        confidence=confidence,
+        fallback_used=fallback_used,
+        detector_name=detector_name,
+        model_version=detector_model_version,
+        reason_code=(reason_codes[0].value if reason_codes else None),
+        reason_codes=[reason.value for reason in reason_codes],
+        warning_codes=warning_codes,
+    )
 
 
 def scan_one(
@@ -513,6 +612,21 @@ def scan_one(
             "warningCount": len(unique_warnings),
         }
 
+    detection_preview = None
+    if debug_diagnostics or unique_warnings:
+        detection_preview = _build_detection_preview(
+            loaded=loaded,
+            v2_detection=v2_detection,
+            detection=detection,
+            document_detected=document_detected,
+            detector_name=detector_name,
+            detector_model_version=detector_model_version,
+            fallback_used=detector_fallback_used,
+            confidence=detection_confidence,
+            reason_codes=list(detection_summary.reason_codes),
+            warning_codes=unique_warnings,
+        )
+
     return SingleScanResult(
         image=final_image,
         document_detected=document_detected,
@@ -533,4 +647,5 @@ def scan_one(
         detection_reason=detection_summary.primary_reason,
         detection_reason_codes=list(detection_summary.reason_codes),
         detection_user_message=detection_summary.user_message,
+        detection_preview=detection_preview,
     )

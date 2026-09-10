@@ -745,6 +745,7 @@ def _process_one_file(
                 duration_ms=duration_ms,
                 detection_reason=scan_result.detection_reason,
                 detection_reason_codes=list(scan_result.detection_reason_codes),
+                detection_preview=scan_result.detection_preview,
             ),
             scan_result=scan_result,
         )

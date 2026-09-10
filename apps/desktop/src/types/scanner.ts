@@ -206,6 +206,37 @@ export interface BatchSummary {
   durationMs?: number | null;
 }
 
+export interface PreviewPoint {
+  x: number;
+  y: number;
+}
+
+export interface DetectionPreviewCandidate {
+  source: string;
+  corners: PreviewPoint[];
+  confidence?: number | null;
+}
+
+export interface DetectionPreview {
+  sourceWidth: number;
+  sourceHeight: number;
+  coordinateSpace: "original_pixels";
+  finalCorners?: PreviewPoint[] | null;
+  refinedCorners?: PreviewPoint[] | null;
+  candidateCorners?: DetectionPreviewCandidate[];
+  maskAvailable: boolean;
+  maskOverlayUrl?: string | null;
+  previewImageDataUrl?: string | null;
+  confidence?: number | null;
+  confidenceIsCalibrated: boolean;
+  fallbackUsed: boolean;
+  detectorName?: string | null;
+  modelVersion?: string | null;
+  reasonCode?: string | null;
+  reasonCodes: string[];
+  warningCodes: string[];
+}
+
 // ---------------------------------------------------------------------------
 // JSONL Protocol Events
 // ---------------------------------------------------------------------------
@@ -268,6 +299,7 @@ export interface FileCompletedEvent extends BaseEvent {
   durationMs: number;
   detectionReason?: string | null;
   detectionReasonCodes?: string[];
+  detectionPreview?: DetectionPreview | null;
 }
 
 export interface FileFailedEvent extends BaseEvent {

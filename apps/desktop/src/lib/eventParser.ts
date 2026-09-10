@@ -18,6 +18,74 @@ const VALID_EVENT_TYPES = new Set([
   "scan_completed",
 ]);
 
+function isPreviewPoint(value: unknown): value is { x: number; y: number } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const point = value as Record<string, unknown>;
+  return (
+    typeof point.x === "number" &&
+    Number.isFinite(point.x) &&
+    typeof point.y === "number" &&
+    Number.isFinite(point.y)
+  );
+}
+
+function isPreviewQuad(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 4 && value.every(isPreviewPoint);
+}
+
+function isDetectionPreview(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const preview = value as Record<string, unknown>;
+  const candidates = preview.candidateCorners;
+  const validCandidates =
+    candidates === undefined ||
+    (Array.isArray(candidates) &&
+      candidates.every((candidate) => {
+        if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
+          return false;
+        }
+        const record = candidate as Record<string, unknown>;
+        return (
+          typeof record.source === "string" &&
+          isPreviewQuad(record.corners) &&
+          (record.confidence === undefined ||
+            record.confidence === null ||
+            (typeof record.confidence === "number" && Number.isFinite(record.confidence)))
+        );
+      }));
+  return (
+    typeof preview.sourceWidth === "number" &&
+    preview.sourceWidth > 0 &&
+    typeof preview.sourceHeight === "number" &&
+    preview.sourceHeight > 0 &&
+    preview.coordinateSpace === "original_pixels" &&
+    (preview.finalCorners === undefined || preview.finalCorners === null || isPreviewQuad(preview.finalCorners)) &&
+    (preview.refinedCorners === undefined || preview.refinedCorners === null || isPreviewQuad(preview.refinedCorners)) &&
+    validCandidates &&
+    typeof preview.maskAvailable === "boolean" &&
+    (preview.maskOverlayUrl === undefined ||
+      preview.maskOverlayUrl === null ||
+      (typeof preview.maskOverlayUrl === "string" && preview.maskOverlayUrl.startsWith("data:image/"))) &&
+    (preview.previewImageDataUrl === undefined ||
+      preview.previewImageDataUrl === null ||
+      (typeof preview.previewImageDataUrl === "string" &&
+        preview.previewImageDataUrl.length <= 2_000_000 &&
+        preview.previewImageDataUrl.startsWith("data:image/jpeg;base64,"))) &&
+    (preview.confidence === undefined ||
+      preview.confidence === null ||
+      (typeof preview.confidence === "number" && Number.isFinite(preview.confidence))) &&
+    typeof preview.confidenceIsCalibrated === "boolean" &&
+    typeof preview.fallbackUsed === "boolean" &&
+    (preview.detectorName === undefined || preview.detectorName === null || typeof preview.detectorName === "string") &&
+    (preview.modelVersion === undefined || preview.modelVersion === null || typeof preview.modelVersion === "string") &&
+    (preview.reasonCode === undefined || preview.reasonCode === null || typeof preview.reasonCode === "string") &&
+    Array.isArray(preview.reasonCodes) &&
+    preview.reasonCodes.every((reason) => typeof reason === "string") &&
+    Array.isArray(preview.warningCodes) &&
+    preview.warningCodes.every((warning) => typeof warning === "string")
+  );
+}
+
 /**
  * Safely parse a single line of JSON string into a strongly typed ScannerEvent.
  * Returns null if the line is empty, not valid JSON, missing protocolVersion/timestamp,
@@ -271,6 +339,13 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         raw.warning !== null &&
         raw.warning !== undefined &&
         typeof raw.warning !== "string"
+      ) {
+        return null;
+      }
+      if (
+        raw.detectionPreview !== undefined &&
+        raw.detectionPreview !== null &&
+        !isDetectionPreview(raw.detectionPreview)
       ) {
         return null;
       }

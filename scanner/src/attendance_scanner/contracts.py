@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
+from math import isfinite
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -148,6 +149,62 @@ class DetectionMetadata(BaseContract):
     detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = Field(
         default_factory=dict
     )
+
+
+class PreviewPoint(BaseContract):
+    """One source-image point used by the bounded diagnostic preview."""
+
+    x: float
+    y: float
+
+    @model_validator(mode="after")
+    def validate_finite_coordinates(self) -> "PreviewPoint":
+        if not isfinite(self.x) or not isfinite(self.y):
+            raise ValueError("preview coordinates must be finite")
+        return self
+
+
+class DetectionPreviewCandidate(BaseContract):
+    """Safe candidate geometry for a developer preview; raw masks stay internal."""
+
+    source: str = Field(min_length=1)
+    corners: List[PreviewPoint] = Field(min_length=4, max_length=4)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class DetectionPreview(BaseContract):
+    """Bounded visual evidence for one image, expressed in source coordinates."""
+
+    source_width: int = Field(gt=0)
+    source_height: int = Field(gt=0)
+    coordinate_space: Literal["original_pixels"] = "original_pixels"
+    final_corners: Optional[List[PreviewPoint]] = Field(default=None, min_length=4, max_length=4)
+    refined_corners: Optional[List[PreviewPoint]] = Field(default=None, min_length=4, max_length=4)
+    candidate_corners: List[DetectionPreviewCandidate] = Field(default_factory=list)
+    mask_available: bool = False
+    mask_overlay_url: Optional[str] = None
+    preview_image_data_url: Optional[str] = Field(default=None, max_length=2_000_000)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    confidence_is_calibrated: bool = False
+    fallback_used: bool = False
+    detector_name: Optional[str] = None
+    model_version: Optional[str] = None
+    reason_code: Optional[str] = None
+    reason_codes: List[str] = Field(default_factory=list)
+    warning_codes: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def reject_raw_mask_urls(self) -> "DetectionPreview":
+        """Only allow a future materialized image overlay, never raw paths."""
+        if self.mask_overlay_url is not None and not self.mask_overlay_url.startswith(
+            "data:image/"
+        ):
+            raise ValueError("mask_overlay_url must be a materialized data image")
+        if self.preview_image_data_url is not None and not self.preview_image_data_url.startswith(
+            "data:image/jpeg;base64,"
+        ):
+            raise ValueError("preview_image_data_url must be a bounded JPEG data image")
+        return self
 
 
 class ScannerErrorCode(str, Enum):

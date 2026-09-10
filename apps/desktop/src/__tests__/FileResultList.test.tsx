@@ -33,4 +33,42 @@ describe("FileResultList", () => {
     fireEvent.click(screen.getByRole("button", { name: /Xem trước clipped\.jpg/i }));
     expect(onPreview).toHaveBeenCalledWith("NV01/clipped.jpg");
   });
+
+  it("prefers the in-app bounded preview when diagnostics are available", () => {
+    const onPreview = vi.fn();
+    const onPreviewItem = vi.fn();
+
+    render(
+      <FileResultList
+        items={[
+          {
+            id: "debug-1",
+            relativePath: "NV01/debug.jpg",
+            employeeName: "NV01",
+            sourceFile: "debug.jpg",
+            targetPdf: "NV01/debug.pdf",
+            status: "success",
+            documentDetected: true,
+            detectionPreview: {
+              sourceWidth: 200,
+              sourceHeight: 100,
+              coordinateSpace: "original_pixels",
+              maskAvailable: false,
+              confidenceIsCalibrated: false,
+              fallbackUsed: false,
+              reasonCodes: [],
+              warningCodes: [],
+              previewImageDataUrl: "data:image/jpeg;base64,/9j/4AAQ",
+            },
+          },
+        ]}
+        onPreview={onPreview}
+        onPreviewItem={onPreviewItem}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Xem trước debug\.jpg/i }));
+    expect(onPreviewItem).toHaveBeenCalledWith(expect.objectContaining({ relativePath: "NV01/debug.jpg" }));
+    expect(onPreview).not.toHaveBeenCalled();
+  });
 });

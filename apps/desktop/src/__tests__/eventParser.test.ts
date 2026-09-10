@@ -106,6 +106,24 @@ describe("eventParser", () => {
       documentDetected: true,
       warning: null,
       durationMs: 420,
+      detectionPreview: {
+        sourceWidth: 200,
+        sourceHeight: 100,
+        coordinateSpace: "original_pixels",
+        finalCorners: [
+          { x: 5, y: 5 },
+          { x: 195, y: 5 },
+          { x: 195, y: 95 },
+          { x: 5, y: 95 },
+        ],
+        candidateCorners: [],
+        maskAvailable: false,
+        confidence: 0.9,
+        confidenceIsCalibrated: false,
+        fallbackUsed: false,
+        reasonCodes: [],
+        warningCodes: [],
+      },
     });
 
     const event = parseScannerEvent(json);
@@ -114,6 +132,7 @@ describe("eventParser", () => {
       expect(event.type).toBe("file_completed");
       expect(event.documentDetected).toBe(true);
       expect(event.durationMs).toBe(420);
+      expect(event.detectionPreview?.sourceWidth).toBe(200);
     } else {
       throw new Error("Expected FileCompletedEvent");
     }
@@ -161,6 +180,37 @@ describe("eventParser", () => {
     ).toBeNull();
     expect(
       parseScannerEvent(JSON.stringify({ ...base, detectionReasonCodes: ["ok", 42] })),
+    ).toBeNull();
+  });
+
+  it("rejects malformed preview geometry", () => {
+    const base = {
+      protocolVersion: 1,
+      type: "file_completed",
+      timestamp: "2026-09-07T00:00:02Z",
+      relativePath: "NV01/page.jpg",
+      employeeName: "NV01",
+      outputRelativePath: "NV01/page.pdf",
+      documentDetected: true,
+      durationMs: 10,
+    };
+    expect(
+      parseScannerEvent(
+        JSON.stringify({
+          ...base,
+          detectionPreview: {
+            sourceWidth: 200,
+            sourceHeight: 100,
+            coordinateSpace: "original_pixels",
+            finalCorners: [{ x: 0, y: 0 }],
+            maskAvailable: false,
+            confidenceIsCalibrated: false,
+            fallbackUsed: false,
+            reasonCodes: [],
+            warningCodes: [],
+          },
+        }),
+      ),
     ).toBeNull();
   });
 

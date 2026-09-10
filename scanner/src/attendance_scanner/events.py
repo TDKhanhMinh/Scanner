@@ -11,6 +11,7 @@ from attendance_scanner.contracts import (
     BatchPeriod,
     BatchSummary,
     DetectionFailureReason,
+    DetectionPreview,
     ExportMode,
     ReviewGroup,
     ScannerErrorCode,
@@ -253,6 +254,7 @@ class FileCompletedEvent(BaseEvent):
     duration_ms: int = Field(default=0, ge=0)
     detection_reason: Optional[DetectionFailureReason] = None
     detection_reason_codes: List[DetectionFailureReason] = Field(default_factory=list)
+    detection_preview: Optional[DetectionPreview] = None
 
 
 class FileFailedEvent(BaseEvent):
