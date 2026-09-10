@@ -168,6 +168,15 @@ from attendance_scanner.geometry_validator import (
     validate_mask,
     validate_quadrilateral,
 )
+from attendance_scanner.hough_lines import (
+    HOUGH_LINE_VERSION,
+    HoughLineCluster,
+    HoughLineConfig,
+    HoughLineEvidence,
+    HoughLineSegment,
+    detect_hough_lines,
+    extrapolate_line_to_bounds,
+)
 from attendance_scanner.mask_postprocess import (
     MaskComponent,
     MaskPostprocessConfig,
@@ -459,6 +468,13 @@ __all__ = [
     "validate_candidate",
     "validate_mask",
     "validate_quadrilateral",
+    "HOUGH_LINE_VERSION",
+    "HoughLineCluster",
+    "HoughLineConfig",
+    "HoughLineEvidence",
+    "HoughLineSegment",
+    "detect_hough_lines",
+    "extrapolate_line_to_bounds",
     "CV_CANDIDATE_GENERATOR_VERSION",
     "CvCandidate",
     "CvCandidateConfig",
