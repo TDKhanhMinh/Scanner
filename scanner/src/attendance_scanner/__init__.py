@@ -259,6 +259,7 @@ from attendance_scanner.pipeline import (
     LoadedImage,
     LoadedImageMetadata,
     PerspectiveConfig,
+    PerspectiveV2Config,
     PipelineConfig,
     ResizeConfig,
     SingleScanDiagnostics,
@@ -276,6 +277,7 @@ from attendance_scanner.pipeline import (
     order_corners,
     scan_one,
     warp_perspective,
+    warp_perspective_v2,
 )
 from attendance_scanner.quadrilateral_candidates import (
     QUADRILATERAL_CANDIDATE_VERSION,
@@ -469,9 +471,11 @@ __all__ = [
     "order_corners",
     "DegenerateCornersError",
     "PerspectiveConfig",
+    "PerspectiveV2Config",
     "WarpedDocument",
     "compute_destination_dimensions",
     "warp_perspective",
+    "warp_perspective_v2",
     "EnhancementConfig",
     "enhance_image",
     "enhance_gray",

@@ -32,9 +32,11 @@ from attendance_scanner.pipeline.orchestrator import (
 from attendance_scanner.pipeline.perspective import (
     DegenerateCornersError,
     PerspectiveConfig,
+    PerspectiveV2Config,
     WarpedDocument,
     compute_destination_dimensions,
     warp_perspective,
+    warp_perspective_v2,
 )
 
 __all__ = [
@@ -50,9 +52,11 @@ __all__ = [
     "order_corners",
     "DegenerateCornersError",
     "PerspectiveConfig",
+    "PerspectiveV2Config",
     "WarpedDocument",
     "compute_destination_dimensions",
     "warp_perspective",
+    "warp_perspective_v2",
     "EnhancementConfig",
     "enhance_image",
     "enhance_gray",

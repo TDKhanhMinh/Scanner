@@ -8,14 +8,15 @@ degenerate/collinear corner configurations, computes the 3x3 perspective homogra
 and applies `cv2.warpPerspective` to produce a rectified rectangular document.
 """
 
-from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from attendance_scanner.contracts import BaseContract
+from attendance_scanner.detector import CanonicalCorners, DocumentDetectionResult
 from attendance_scanner.pipeline.detect import DetectionResult, order_corners
 from attendance_scanner.pipeline.load import LoadedImage
 
@@ -33,6 +34,25 @@ class PerspectiveConfig(BaseContract):
     target_aspect_ratio: Optional[float] = Field(default=None, gt=0.1, lt=10.0)
 
 
+class PerspectiveV2Config(BaseContract):
+    """Crop-safe V2 warp policy; output ratio is inferred from the selected quad."""
+
+    min_dimension: int = Field(default=10, ge=3, le=100)
+    max_dimension: int = Field(default=10000, ge=100, le=50000)
+    max_pixels: Optional[int] = Field(default=100_000_000, gt=100)
+    border_tolerance_px: float = Field(default=2.0, ge=0.0, le=50.0)
+    safety_margin_px: int = Field(default=0, ge=0, le=32)
+    preferred_orientation: str = "natural"
+    interpolation: int = cv2.INTER_LINEAR
+    border_mode: int = cv2.BORDER_REPLICATE
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> "PerspectiveV2Config":
+        if self.preferred_orientation not in {"natural", "landscape", "portrait"}:
+            raise ValueError("preferred_orientation must be natural, landscape, or portrait")
+        return self
+
+
 @dataclass
 class WarpedDocument:
     """Result of perspective transformation containing rectified image and transformation data."""
@@ -42,6 +62,9 @@ class WarpedDocument:
     height: int  # Rectified height in pixels
     transform_matrix: np.ndarray  # 3x3 perspective transformation matrix (float64)
     source_corners: np.ndarray  # (4, 2) ordered source corners in clockwise [TL, TR, BR, BL]
+    fallback_used: bool = False
+    warning: Optional[str] = None
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def shape(self) -> Tuple[int, ...]:
@@ -242,10 +265,157 @@ def warp_perspective(
     )
 
 
+def _extract_v2_corners(corners: Any) -> np.ndarray:
+    raw: Any
+    if isinstance(corners, DocumentDetectionResult):
+        if not corners.detected or corners.corners is None:
+            raise DegenerateCornersError("DocumentDetectionResult has no final corners")
+        raw = corners.corners.as_list()
+    elif isinstance(corners, CanonicalCorners):
+        raw = corners.as_list()
+    elif isinstance(corners, DetectionResult):
+        raw = corners.corners_array
+    elif isinstance(corners, np.ndarray):
+        raw = corners
+    elif isinstance(corners, (list, tuple)):
+        raw = np.asarray(corners, dtype=np.float32)
+    else:
+        raise DegenerateCornersError(f"Unsupported corners type: {type(corners)}")
+    try:
+        points = np.asarray(raw, dtype=np.float32).reshape(4, 2)
+    except (TypeError, ValueError) as exc:
+        raise DegenerateCornersError("V2 corners must contain exactly four points") from exc
+    if not np.all(np.isfinite(points)):
+        raise DegenerateCornersError("V2 corner coordinates contain NaN or Inf")
+    return order_corners(points)
+
+
+def _warp_perspective_v2_strict(
+    bgr: np.ndarray,
+    ordered_src: np.ndarray,
+    config: PerspectiveV2Config,
+) -> WarpedDocument:
+    source_height, source_width = bgr.shape[:2]
+    if any(
+        point[0] < -config.border_tolerance_px
+        or point[0] > source_width - 1 + config.border_tolerance_px
+        or point[1] < -config.border_tolerance_px
+        or point[1] > source_height - 1 + config.border_tolerance_px
+        for point in ordered_src
+    ):
+        raise DegenerateCornersError("V2 corners exceed source bounds tolerance")
+    area = abs(float(cv2.contourArea(ordered_src)))
+    if area < 1.0:
+        raise DegenerateCornersError(f"V2 corner polygon is degenerate (area={area:.4f})")
+    dst_width, dst_height = compute_destination_dimensions(ordered_src, None)
+    if dst_width < config.min_dimension or dst_height < config.min_dimension:
+        raise DegenerateCornersError("V2 output dimensions are below minimum threshold")
+    margin = config.safety_margin_px
+    dst_width += margin * 2
+    dst_height += margin * 2
+    if max(dst_width, dst_height) > config.max_dimension:
+        raise DegenerateCornersError("V2 output dimensions exceed max_dimension")
+    if config.max_pixels is not None and dst_width * dst_height > config.max_pixels:
+        raise DegenerateCornersError("V2 output dimensions exceed max_pixels")
+    destination = np.array(
+        [
+            [float(margin), float(margin)],
+            [float(dst_width - margin - 1), float(margin)],
+            [float(dst_width - margin - 1), float(dst_height - margin - 1)],
+            [float(margin), float(dst_height - margin - 1)],
+        ],
+        dtype=np.float32,
+    )
+    matrix = cv2.getPerspectiveTransform(ordered_src, destination)
+    if not np.all(np.isfinite(matrix)):
+        raise DegenerateCornersError("V2 transform matrix is invalid")
+    warped = cv2.warpPerspective(
+        bgr,
+        matrix,
+        (dst_width, dst_height),
+        flags=config.interpolation,
+        borderMode=config.border_mode,
+    )
+    pre_rotation_matrix = matrix.copy()
+    rotation = 0
+    if config.preferred_orientation != "natural":
+        if config.preferred_orientation == "landscape" and warped.shape[0] > warped.shape[1]:
+            warped = np.ascontiguousarray(np.rot90(warped, 1))
+            rotation_matrix = np.array(
+                [[0.0, 1.0, 0.0], [-1.0, 0.0, float(dst_width - 1)], [0.0, 0.0, 1.0]],
+                dtype=np.float64,
+            )
+            matrix = rotation_matrix @ matrix
+            rotation = 90
+        elif config.preferred_orientation == "portrait" and warped.shape[1] > warped.shape[0]:
+            warped = np.ascontiguousarray(np.rot90(warped, 3))
+            rotation_matrix = np.array(
+                [[0.0, -1.0, float(dst_height - 1)], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                dtype=np.float64,
+            )
+            matrix = rotation_matrix @ matrix
+            rotation = 270
+    return WarpedDocument(
+        image=warped,
+        width=warped.shape[1],
+        height=warped.shape[0],
+        transform_matrix=matrix,
+        source_corners=ordered_src,
+        diagnostics={
+            "sourceDimensions": [source_width, source_height],
+            "finalDimensions": [warped.shape[1], warped.shape[0]],
+            "matrix": matrix.tolist(),
+            "preRotationMatrix": pre_rotation_matrix.tolist(),
+            "safetyMarginPx": margin,
+            "orientationRotationDegrees": rotation,
+            "aspectRatioInferred": True,
+        },
+    )
+
+
+def warp_perspective_v2(
+    image: Union[np.ndarray, LoadedImage],
+    corners: Any,
+    config: Optional[PerspectiveV2Config] = None,
+) -> WarpedDocument:
+    """Warp final V2 corners with safe validation and full-image fallback."""
+    cfg = config or PerspectiveV2Config()
+    if isinstance(image, LoadedImage):
+        bgr = image.image
+    elif isinstance(image, np.ndarray):
+        bgr = image
+    else:
+        raise ValueError(f"Expected np.ndarray or LoadedImage, got {type(image)}")
+    if bgr.ndim != 3 or bgr.shape[2] != 3 or bgr.dtype != np.uint8:
+        raise ValueError("Expected 3-channel uint8 BGR image")
+    try:
+        ordered_src = _extract_v2_corners(corners)
+        return _warp_perspective_v2_strict(bgr, ordered_src, cfg)
+    except (DegenerateCornersError, ValueError, cv2.error) as exc:
+        fallback = bgr.copy()
+        return WarpedDocument(
+            image=fallback,
+            width=fallback.shape[1],
+            height=fallback.shape[0],
+            transform_matrix=np.eye(3, dtype=np.float64),
+            source_corners=np.empty((0, 2), dtype=np.float32),
+            fallback_used=True,
+            warning="PERSPECTIVE_V2_FALLBACK_FULL_IMAGE",
+            diagnostics={
+                "sourceDimensions": [fallback.shape[1], fallback.shape[0]],
+                "finalDimensions": [fallback.shape[1], fallback.shape[0]],
+                "fallbackReason": str(exc),
+                "aspectRatioInferred": False,
+            },
+        )
+
+
 __all__ = [
     "DegenerateCornersError",
     "PerspectiveConfig",
+    "PerspectiveV2Config",
     "WarpedDocument",
     "compute_destination_dimensions",
     "warp_perspective",
+    "warp_perspective_v2",
 ]
