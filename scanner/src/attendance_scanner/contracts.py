@@ -1,5 +1,7 @@
 """Shared contracts and type definitions for Attendance Scanner."""
 
+import base64
+import binascii
 from datetime import datetime, timezone
 from enum import Enum
 from math import isfinite
@@ -172,6 +174,36 @@ class DetectionPreviewCandidate(BaseContract):
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
+_PREVIEW_DATA_IMAGE_PREFIXES = (
+    "data:image/jpeg;base64,",
+    "data:image/png;base64,",
+    "data:image/webp;base64,",
+)
+_PREVIEW_DATA_IMAGE_MAX_LENGTH = 2_000_000
+_PREVIEW_DATA_IMAGE_MAX_BYTES = 1_500_000
+
+
+def _validate_preview_data_image(value: str, field_name: str) -> None:
+    """Validate a bounded raster data URL without accepting arbitrary payloads."""
+    if len(value) > _PREVIEW_DATA_IMAGE_MAX_LENGTH:
+        raise ValueError(f"{field_name} exceeds the bounded preview size")
+    prefix = next(
+        (candidate for candidate in _PREVIEW_DATA_IMAGE_PREFIXES if value.startswith(candidate)),
+        None,
+    )
+    if prefix is None:
+        raise ValueError(f"{field_name} must be a JPEG, PNG, or WebP data image")
+    encoded = value[len(prefix) :]
+    if not encoded:
+        raise ValueError(f"{field_name} must contain base64 data")
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError(f"{field_name} must contain valid base64 data") from exc
+    if not decoded or len(decoded) > _PREVIEW_DATA_IMAGE_MAX_BYTES:
+        raise ValueError(f"{field_name} exceeds the bounded preview size")
+
+
 class DetectionPreview(BaseContract):
     """Bounded visual evidence for one image, expressed in source coordinates."""
 
@@ -182,7 +214,7 @@ class DetectionPreview(BaseContract):
     refined_corners: Optional[List[PreviewPoint]] = Field(default=None, min_length=4, max_length=4)
     candidate_corners: List[DetectionPreviewCandidate] = Field(default_factory=list)
     mask_available: bool = False
-    mask_overlay_url: Optional[str] = None
+    mask_overlay_url: Optional[str] = Field(default=None, max_length=_PREVIEW_DATA_IMAGE_MAX_LENGTH)
     preview_image_data_url: Optional[str] = Field(default=None, max_length=2_000_000)
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     confidence_is_calibrated: bool = False
@@ -196,14 +228,10 @@ class DetectionPreview(BaseContract):
     @model_validator(mode="after")
     def reject_raw_mask_urls(self) -> "DetectionPreview":
         """Only allow a future materialized image overlay, never raw paths."""
-        if self.mask_overlay_url is not None and not self.mask_overlay_url.startswith(
-            "data:image/"
-        ):
-            raise ValueError("mask_overlay_url must be a materialized data image")
-        if self.preview_image_data_url is not None and not self.preview_image_data_url.startswith(
-            "data:image/jpeg;base64,"
-        ):
-            raise ValueError("preview_image_data_url must be a bounded JPEG data image")
+        if self.mask_overlay_url is not None:
+            _validate_preview_data_image(self.mask_overlay_url, "mask_overlay_url")
+        if self.preview_image_data_url is not None:
+            _validate_preview_data_image(self.preview_image_data_url, "preview_image_data_url")
         return self
 
 

@@ -270,23 +270,30 @@ def _preview_points(
 def _encode_bounded_preview(image: np.ndarray, max_dimension: int = 1280) -> Optional[str]:
     """Encode a bounded JPEG preview so the frontend never loads the source image at full size."""
     height, width = image.shape[:2]
-    scale = min(1.0, max_dimension / float(max(height, width)))
-    preview = image
-    if scale < 1.0:
-        preview = cv2.resize(
-            image,
-            (max(1, round(width * scale)), max(1, round(height * scale))),
-            interpolation=cv2.INTER_AREA,
-        )
-    success, encoded = cv2.imencode(
-        ".jpg",
-        preview,
-        [int(cv2.IMWRITE_JPEG_QUALITY), 82],
-    )
-    if not success:
-        return None
-    payload = base64.b64encode(encoded.tobytes()).decode("ascii")
-    return f"data:image/jpeg;base64,{payload}"
+    target_dimension = max_dimension
+    for _ in range(4):
+        scale = min(1.0, target_dimension / float(max(height, width)))
+        preview = image
+        if scale < 1.0:
+            preview = cv2.resize(
+                image,
+                (max(1, round(width * scale)), max(1, round(height * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        for quality in (82, 72, 60):
+            success, encoded = cv2.imencode(
+                ".jpg",
+                preview,
+                [int(cv2.IMWRITE_JPEG_QUALITY), quality],
+            )
+            if not success:
+                continue
+            payload = base64.b64encode(encoded.tobytes()).decode("ascii")
+            data_url = f"data:image/jpeg;base64,{payload}"
+            if len(payload) <= 1_900_000:
+                return data_url
+        target_dimension = max(256, round(target_dimension * 0.75))
+    return None
 
 
 def _build_detection_preview(

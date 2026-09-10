@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from attendance_scanner.cli import create_parser
-from attendance_scanner.contracts import ScanBatchRequest
+from attendance_scanner.contracts import DetectionPreview, PreviewPoint, ScanBatchRequest
 from attendance_scanner.detector import (
     CanonicalCorners,
     DetectionTiming,
@@ -61,6 +61,27 @@ def test_product_mode_defaults_and_provider_neutral_mapping() -> None:
     assert detector_name_for_mode("classic") == "v1_cv"
     with pytest.raises(ValueError, match="Unsupported detector mode"):
         normalize_detector_mode("not-a-mode")
+
+
+def test_preview_contract_rejects_non_finite_points_and_unbounded_mask_data() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        PreviewPoint(x=float("nan"), y=1.0)
+
+    base = {
+        "source_width": 200,
+        "source_height": 100,
+        "mask_available": True,
+        "confidence_is_calibrated": False,
+        "fallback_used": False,
+        "reason_codes": [],
+        "warning_codes": [],
+    }
+    with pytest.raises(ValueError, match="JPEG, PNG, or WebP"):
+        DetectionPreview(**base, mask_overlay_url="data:image/svg+xml;base64,AA==")
+    with pytest.raises(ValueError, match="valid base64"):
+        DetectionPreview(**base, mask_overlay_url="data:image/png;base64,not-valid!")
+    with pytest.raises(ValueError, match="at most 2000000|bounded preview size"):
+        DetectionPreview(**base, mask_overlay_url="data:image/png;base64," + ("A" * 2_000_000))
 
 
 def test_cli_exposes_product_and_development_modes() -> None:

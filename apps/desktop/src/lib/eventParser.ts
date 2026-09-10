@@ -33,6 +33,18 @@ function isPreviewQuad(value: unknown): boolean {
   return Array.isArray(value) && value.length === 4 && value.every(isPreviewPoint);
 }
 
+function isBoundedRasterDataUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 2_000_000) return false;
+  const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match) return false;
+  try {
+    const decoded = atob(match[2]);
+    return decoded.length > 0 && decoded.length <= 1_500_000;
+  } catch {
+    return false;
+  }
+}
+
 function isDetectionPreview(value: unknown): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const preview = value as Record<string, unknown>;
@@ -65,12 +77,10 @@ function isDetectionPreview(value: unknown): boolean {
     typeof preview.maskAvailable === "boolean" &&
     (preview.maskOverlayUrl === undefined ||
       preview.maskOverlayUrl === null ||
-      (typeof preview.maskOverlayUrl === "string" && preview.maskOverlayUrl.startsWith("data:image/"))) &&
+      isBoundedRasterDataUrl(preview.maskOverlayUrl)) &&
     (preview.previewImageDataUrl === undefined ||
       preview.previewImageDataUrl === null ||
-      (typeof preview.previewImageDataUrl === "string" &&
-        preview.previewImageDataUrl.length <= 2_000_000 &&
-        preview.previewImageDataUrl.startsWith("data:image/jpeg;base64,"))) &&
+      isBoundedRasterDataUrl(preview.previewImageDataUrl)) &&
     (preview.confidence === undefined ||
       preview.confidence === null ||
       (typeof preview.confidence === "number" && Number.isFinite(preview.confidence))) &&

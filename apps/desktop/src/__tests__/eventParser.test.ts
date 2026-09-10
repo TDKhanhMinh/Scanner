@@ -214,6 +214,51 @@ describe("eventParser", () => {
     ).toBeNull();
   });
 
+  it("rejects non-raster, malformed, or oversized preview data URLs", () => {
+    const base = {
+      protocolVersion: 1,
+      type: "file_completed",
+      timestamp: "2026-09-07T00:00:02Z",
+      relativePath: "NV01/page.jpg",
+      employeeName: "NV01",
+      outputRelativePath: "NV01/page.pdf",
+      documentDetected: true,
+      durationMs: 10,
+      detectionPreview: {
+        sourceWidth: 200,
+        sourceHeight: 100,
+        coordinateSpace: "original_pixels",
+        maskAvailable: true,
+        confidenceIsCalibrated: false,
+        fallbackUsed: false,
+        reasonCodes: [],
+        warningCodes: [],
+      },
+    };
+    expect(
+      parseScannerEvent(
+        JSON.stringify({
+          ...base,
+          detectionPreview: {
+            ...base.detectionPreview,
+            maskOverlayUrl: "data:image/svg+xml;base64,AA==",
+          },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parseScannerEvent(
+        JSON.stringify({
+          ...base,
+          detectionPreview: {
+            ...base.detectionPreview,
+            maskOverlayUrl: "data:image/png;base64,not-valid!",
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("parses valid scan_completed event", () => {
     const json = JSON.stringify({
       protocolVersion: PROTOCOL_VERSION,
