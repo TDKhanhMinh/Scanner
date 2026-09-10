@@ -116,6 +116,7 @@ Tài liệu vận hành và handoff kỹ thuật:
 - docs/DEVELOPER_HANDOFF.md
 - docs/V2_DETECTOR_MODES.md
 - docs/V2_DETECTION_PREVIEW.md
+- docs/V2_ENHANCEMENT_TUNING.md
 
 ## 5. Quy tắc Cam kết (Definition of Done)
 - 100% xử lý hoàn toàn local-first, không OCR/AI/cloud ở MVP.
