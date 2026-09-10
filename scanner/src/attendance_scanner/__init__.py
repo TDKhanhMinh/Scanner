@@ -26,6 +26,13 @@ from attendance_scanner.benchmark import (
     BenchmarkSource,
     load_benchmark_manifest,
 )
+from attendance_scanner.benchmark_decision import (
+    REQUIRED_DETECTORS,
+    BenchmarkDecisionReport,
+    DetectorComparison,
+    render_decision_markdown,
+    run_full_v2_decision,
+)
 from attendance_scanner.benchmark_import import (
     SMARTDOC_ATTRIBUTION,
     SMARTDOC_DATASET_NAME,
@@ -473,6 +480,11 @@ __all__ = [
     "run_benchmark",
     "runtime_environment",
     "write_report_files",
+    "BenchmarkDecisionReport",
+    "DetectorComparison",
+    "REQUIRED_DETECTORS",
+    "render_decision_markdown",
+    "run_full_v2_decision",
     "default_worker_count",
     "clamp_worker_count",
     "discover_employee_folders",

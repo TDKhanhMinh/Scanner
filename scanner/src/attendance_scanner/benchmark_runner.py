@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequen
 import cv2
 import numpy as np
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from attendance_scanner.annotation import atomic_write_text
 from attendance_scanner.benchmark import (
@@ -83,8 +83,16 @@ class PredictionBundle(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     detector: Optional[str] = None
     model_version: str = "external"
+    model_checksum: Optional[str] = None
     pipeline_version: Optional[str] = None
     predictions: List[DetectionPrediction] = Field(min_length=1)
+
+    @field_validator("model_checksum")
+    @classmethod
+    def validate_model_checksum(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+            raise ValueError("model_checksum must be a 64-character hexadecimal SHA-256")
+        return value
 
     @model_validator(mode="after")
     def validate_prediction_identity(self) -> "PredictionBundle":
@@ -216,6 +224,11 @@ def _combined_manifest_hash(datasets: Sequence[BenchmarkDataset]) -> str:
         sorted(dataset.manifest.dump_canonical_json() for dataset in datasets)
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def combined_manifest_sha256(datasets: Sequence[BenchmarkDataset]) -> str:
+    """Return the canonical dataset hash used by decision reports."""
+    return _combined_manifest_hash(datasets)
 
 
 def _git_commit(repo_root: Optional[Union[str, Path]]) -> str:
@@ -568,6 +581,7 @@ def _score_sample(
         "mask_failure": None,
         "timings_ms": {},
         "memory_peak_bytes": None,
+        "scenario_tags": list(sample.scenario_tags),
     }
     if prediction is None:
         result["failure_reason"] = "missing_prediction"
@@ -731,6 +745,13 @@ def _metrics(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     failures = Counter(
         sample["failure_reason"] for sample in samples if sample["failure_reason"] is not None
     )
+    silent_wrong_crop_count = sum(
+        sample["detected"]
+        and sample["valid_geometry"]
+        and sample["polygon_iou"] is not None
+        and float(sample["polygon_iou"]) < 0.5
+        for sample in samples
+    )
     pixel_percentiles = _percentile_summary(corner_px, suffix="_px")
     normalized_percentiles = _percentile_summary(corner_normalized, suffix="_normalized")
     raw_pixel_percentiles = _percentile_summary(raw_corner_px, suffix="_px")
@@ -769,6 +790,7 @@ def _metrics(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
             sum(bool(value) for value in ambiguities) / len(ambiguities) if ambiguities else None
         ),
         "failure_taxonomy": dict(sorted(failures.items())),
+        "silent_wrong_crop_count": silent_wrong_crop_count,
         "timings_ms": _timing_summary(samples),
         "memory": _memory_summary(samples),
     }
@@ -1043,6 +1065,7 @@ __all__ = [
     "PredictionBundle",
     "PredictionProvider",
     "corner_distance",
+    "combined_manifest_sha256",
     "evaluate_thresholds",
     "load_benchmark_datasets",
     "load_prediction_bundle",
