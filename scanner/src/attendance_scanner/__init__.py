@@ -97,6 +97,14 @@ from attendance_scanner.contracts import (
     SourcePage,
     StateError,
 )
+from attendance_scanner.corner_search import (
+    CORNER_SEARCH_VERSION,
+    CornerRoiResult,
+    CornerSearchConfig,
+    CornerSearchResult,
+    EdgeSample,
+    search_corner_rois,
+)
 from attendance_scanner.cv_candidates import (
     CV_CANDIDATE_GENERATOR_VERSION,
     CvCandidate,
@@ -324,6 +332,12 @@ __all__ = [
     "rank_candidate_pool",
     "score_candidate",
     "sweep_candidate_scores",
+    "CORNER_SEARCH_VERSION",
+    "CornerRoiResult",
+    "CornerSearchConfig",
+    "CornerSearchResult",
+    "EdgeSample",
+    "search_corner_rois",
     "ScannerErrorInfo",
     "configure_logging",
     "describe_scanner_error",
