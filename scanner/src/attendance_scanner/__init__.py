@@ -236,6 +236,14 @@ from attendance_scanner.pipeline import (
     scan_one,
     warp_perspective,
 )
+from attendance_scanner.quadrilateral_candidates import (
+    QUADRILATERAL_CANDIDATE_VERSION,
+    QuadrilateralCandidate,
+    QuadrilateralCandidateConfig,
+    QuadrilateralCandidateSet,
+    RejectedQuadrilateralCandidate,
+    build_quadrilateral_candidates,
+)
 from attendance_scanner.segmentation import (
     OnnxSegmentationAdapter,
     SegmentationAdapterError,
@@ -446,6 +454,12 @@ __all__ = [
     "benchmark_service",
     "resolve_model_path",
     "runtime_diagnostics",
+    "QUADRILATERAL_CANDIDATE_VERSION",
+    "QuadrilateralCandidate",
+    "QuadrilateralCandidateConfig",
+    "QuadrilateralCandidateSet",
+    "RejectedQuadrilateralCandidate",
+    "build_quadrilateral_candidates",
     "OnnxSegmentationAdapter",
     "SegmentationAdapterError",
     "SegmentationConfig",
