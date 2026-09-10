@@ -7,6 +7,25 @@ export const PROTOCOL_VERSION = 1;
 
 export type ScanMode = "gray" | "bw" | "color" | "smart_document";
 
+export type ProductDetectorMode = "ai_enhanced" | "classic";
+export type DevelopmentDetectorMode =
+  | "v1_cv"
+  | "segmentation_only"
+  | "cv_v2"
+  | "hybrid"
+  | "docaligner_reference";
+export type DetectorMode = ProductDetectorMode | DevelopmentDetectorMode;
+export const DEFAULT_DETECTOR_MODE: ProductDetectorMode = "ai_enhanced";
+export const VALID_DETECTOR_MODES: readonly DetectorMode[] = [
+  "ai_enhanced",
+  "classic",
+  "v1_cv",
+  "segmentation_only",
+  "cv_v2",
+  "hybrid",
+  "docaligner_reference",
+];
+
 export interface BatchPeriod {
   year: number;
   month: number;
@@ -66,7 +85,8 @@ export type FileClassification =
   | "unchanged"
   | "rebuild"
   | "collision"
-  | "unsupported";
+  | "unsupported"
+  | "needs_reprocess";
 
 export type FileProcessingStatus =
   | "pending"
@@ -139,6 +159,10 @@ export interface ScanPlan {
   collisions: string[];
   outdatedPipelineCount: number;
   unsupportedCount: number;
+  needsReprocess?: number;
+  reprocessReasons?: Record<string, number>;
+  detectorMode?: DetectorMode | null;
+  debugDiagnostics?: boolean | null;
   // Backward-compatible aliases
   totalEmployees?: number;
   newCount?: number;
@@ -150,6 +174,9 @@ export interface ScanBatchRequest {
   inputRoot: string;
   outputRoot?: string | null;
   mode: ScanMode;
+  detectorMode?: DetectorMode;
+  debugDiagnostics?: boolean;
+  reprocess?: boolean;
   workers: number;
   period?: BatchPeriod | null;
   exportMode?: ExportMode;
@@ -203,6 +230,10 @@ export interface ScanPlanEvent extends BaseEvent {
   collisions: string[];
   outdatedPipelineCount: number;
   unsupportedCount: number;
+  needsReprocess?: number;
+  reprocessReasons?: Record<string, number>;
+  detectorMode?: DetectorMode | null;
+  debugDiagnostics?: boolean | null;
   period?: BatchPeriod | null;
   exportMode?: ExportMode;
   documentGroups?: number;
@@ -235,6 +266,8 @@ export interface FileCompletedEvent extends BaseEvent {
   documentDetected: boolean;
   warning?: string | null;
   durationMs: number;
+  detectionReason?: string | null;
+  detectionReasonCodes?: string[];
 }
 
 export interface FileFailedEvent extends BaseEvent {
@@ -243,6 +276,8 @@ export interface FileFailedEvent extends BaseEvent {
   employeeName: string;
   errorCode: ScannerErrorCode;
   message: string;
+  detectionReason?: string | null;
+  detectionReasonCodes?: string[];
 }
 
 export interface ScanCompletedEvent extends BaseEvent {

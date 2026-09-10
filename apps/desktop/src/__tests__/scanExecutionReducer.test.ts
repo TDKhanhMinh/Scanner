@@ -4,7 +4,10 @@ import {
   MAX_RECENT_ACTIVITY,
   scanExecutionReducer,
 } from "@/lib/scanExecutionReducer";
-import { formatWarningMessage } from "@/components/scanner/FileResultList";
+import {
+  formatDetectionReasonMessage,
+  formatWarningMessage,
+} from "@/components/scanner/FileResultList";
 import type { ScannerEvent } from "@/types/scanner";
 
 function started(relativePath: string, index: number): ScannerEvent {
@@ -70,6 +73,7 @@ describe("scanExecutionReducer", () => {
     expect(afterDuplicate.failed).toBe(0);
     expect(afterDuplicate.results).toHaveLength(2);
     expect(afterDuplicate.results[0].relativePath).toBe("NV01/1.jpg");
+    expect(afterDuplicate.fallbackCount).toBe(1);
   });
 
   it("uses scan_completed as the authoritative terminal summary", () => {
@@ -150,6 +154,32 @@ describe("scanExecutionReducer", () => {
 
     expect(formatWarningMessage("DOCUMENT_CLIPPED")).toBe(
       "Ảnh chụp sát biên/thiếu góc — đã giữ nguyên ảnh gốc, chưa cắt gọt"
+    );
+  });
+
+  it("keeps failure detection reasons available to the result UI", () => {
+    const state = scanExecutionReducer(initialScanExecutionState, {
+      type: "scanner_event",
+      event: {
+        protocolVersion: 1,
+        type: "file_failed",
+        timestamp: "2026-09-08T00:00:12Z",
+        relativePath: "NV01/bad.jpg",
+        employeeName: "NV01",
+        errorCode: "IMAGE_DECODE_FAILED",
+        message: "Không thể đọc ảnh.",
+        detectionReason: "CV_NO_CANDIDATE",
+        detectionReasonCodes: ["CV_NO_CANDIDATE", "FALLBACK_FULL_IMAGE"],
+      },
+    });
+
+    expect(state.results[0].detectionReason).toBe("CV_NO_CANDIDATE");
+    expect(state.results[0].detectionReasonCodes).toEqual([
+      "CV_NO_CANDIDATE",
+      "FALLBACK_FULL_IMAGE",
+    ]);
+    expect(formatDetectionReasonMessage("CV_NO_CANDIDATE", ["FALLBACK_FULL_IMAGE"])).toBe(
+      "OpenCV không tìm thấy ứng viên phù hợp; Đã giữ nguyên ảnh gốc để tránh cắt nhầm",
     );
   });
 });

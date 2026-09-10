@@ -1,6 +1,8 @@
 import { AppHeader } from "@/components/scanner/AppHeader";
 import { BatchOptionsCard } from "@/components/scanner/BatchOptionsCard";
 import { BatchProgressCard } from "@/components/scanner/BatchProgressCard";
+import { DetectorModeSelector } from "@/components/scanner/DetectorModeSelector";
+import { DetectorOptionsCard } from "@/components/scanner/DetectorOptionsCard";
 import { FileResultList } from "@/components/scanner/FileResultList";
 import { FolderSelectorCard } from "@/components/scanner/FolderSelectorCard";
 import { PageOrderReviewPanel } from "@/components/scanner/PageOrderReviewPanel";
@@ -20,8 +22,10 @@ import {
   scannerErrorMessage,
   startScan,
 } from "@/lib/scannerBridge";
+import { loadDetectorPreferences, saveDetectorPreferences } from "@/lib/detectorSettings";
 import type {
   BatchPeriod,
+  ProductDetectorMode,
   ExportMode,
   ReviewGroup,
   ScanPlanEvent,
@@ -49,6 +53,7 @@ function toPlanStats(plan: ScanPlanEvent): ScanPlanStats {
     incompleteGroups: plan.incompleteGroups ?? 0,
     ambiguousGroups: plan.ambiguousGroups ?? 0,
     pagesNeedingReview: plan.pagesNeedingReview ?? 0,
+    needsReprocess: plan.needsReprocess ?? 0,
   };
 }
 
@@ -59,6 +64,9 @@ function defaultBatchPeriod(): BatchPeriod {
 
 interface ScannerSettings {
   mode: ScanFilterMode;
+  detectorMode: ProductDetectorMode;
+  debugDiagnostics: boolean;
+  reprocess: boolean;
   workers: number | null;
   period: BatchPeriod;
   exportMode: ExportMode;
@@ -67,11 +75,17 @@ interface ScannerSettings {
 export function App() {
   const [inputPath, setInputPath] = useState<string>("");
   const [outputPath, setOutputPath] = useState<string>("");
-  const [settings, setSettings] = useState<ScannerSettings>({
-    mode: "gray",
-    workers: null,
-    period: defaultBatchPeriod(),
-    exportMode: "PER_IMAGE",
+  const [settings, setSettings] = useState<ScannerSettings>(() => {
+    const preferences = loadDetectorPreferences();
+    return {
+      mode: "gray",
+      detectorMode: preferences.detectorMode,
+      debugDiagnostics: preferences.debugDiagnostics,
+      reprocess: false,
+      workers: null,
+      period: defaultBatchPeriod(),
+      exportMode: "PER_IMAGE",
+    };
   });
   const [activeTab, setActiveTab] = useState<string>("config");
   const [reviewGroups, setReviewGroups] = useState<ReviewGroup[]>([]);
@@ -98,6 +112,7 @@ export function App() {
     incompleteGroups: 0,
     ambiguousGroups: 0,
     pagesNeedingReview: 0,
+    needsReprocess: 0,
   });
 
   // Batch progress state
@@ -118,6 +133,13 @@ export function App() {
   const successCount = execution.success;
   const warningCount = execution.warning;
   const failedCount = execution.failed;
+
+  useEffect(() => {
+    saveDetectorPreferences({
+      detectorMode: settings.detectorMode,
+      debugDiagnostics: settings.debugDiagnostics,
+    });
+  }, [settings.detectorMode, settings.debugDiagnostics]);
 
   useEffect(() => {
     return () => {
@@ -143,6 +165,9 @@ export function App() {
       inputRoot: path,
       outputRoot: nextOutputPath,
       mode: requestSettings.mode,
+      detectorMode: requestSettings.detectorMode,
+      debugDiagnostics: requestSettings.debugDiagnostics,
+      reprocess: requestSettings.reprocess,
       period: requestSettings.period,
       exportMode: requestSettings.exportMode,
     })
@@ -168,6 +193,7 @@ export function App() {
             unchangedFiles: 0,
             rebuildFiles: 0,
             unsupportedFiles: 0,
+            needsReprocess: 0,
           });
           setErrorMessage(scannerErrorMessage(error));
           setReviewGroups([]);
@@ -233,6 +259,7 @@ export function App() {
         unchangedFiles: 0,
         rebuildFiles: 0,
         unsupportedFiles: 0,
+        needsReprocess: 0,
         documentGroups: 0,
         expectedArtifacts: 0,
         completeGroups: 0,
@@ -281,6 +308,32 @@ export function App() {
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
     setSkippedReviewGroups([]);
+    planRequestId.current += 1;
+    setIsPlanReady(false);
+    if (inputPath.trim()) {
+      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
+    }
+  };
+
+  const handleDetectorModeChange = (detectorMode: ProductDetectorMode) => {
+    const nextSettings = { ...settings, detectorMode };
+    setSettings(nextSettings);
+    dispatchExecution({ type: "reset" });
+    setReviewGroups([]);
+    setResolvedReviewGroups({});
+    setManualOrderOverrides({});
+    setSkippedReviewGroups([]);
+    planRequestId.current += 1;
+    setIsPlanReady(false);
+    if (inputPath.trim()) {
+      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
+    }
+  };
+
+  const handleReprocessChange = (reprocess: boolean) => {
+    const nextSettings = { ...settings, reprocess };
+    setSettings(nextSettings);
+    dispatchExecution({ type: "reset" });
     planRequestId.current += 1;
     setIsPlanReady(false);
     if (inputPath.trim()) {
@@ -405,6 +458,9 @@ export function App() {
           inputRoot: inputPath,
           outputRoot: outputPath || `${inputPath}_pdf`,
           mode: scanMode,
+          detectorMode: settings.detectorMode,
+          debugDiagnostics: settings.debugDiagnostics,
+          reprocess: settings.reprocess,
           workers: settings.workers,
           period: settings.period,
           exportMode: settings.exportMode,
@@ -489,6 +545,11 @@ export function App() {
                   {execution.skipped > 0 && (
                     <span className="text-muted-foreground">
                       {" • "}{execution.skipped} bỏ qua
+                    </span>
+                  )}
+                  {execution.fallbackCount > 0 && (
+                    <span className="text-orange-600 dark:text-orange-400 font-medium">
+                      {" • "}{execution.fallbackCount} fallback
                     </span>
                   )}
                   . Tất cả file PDF đã được ghi vào thư mục xuất.
@@ -581,6 +642,23 @@ export function App() {
                 <ScanModeSelector
                   mode={scanMode}
                   onSelectMode={handleScanModeChange}
+                  disabled={isScanning}
+                />
+
+                <DetectorModeSelector
+                  mode={settings.detectorMode}
+                  onSelectMode={handleDetectorModeChange}
+                  disabled={isScanning}
+                />
+
+                <DetectorOptionsCard
+                  debugDiagnostics={settings.debugDiagnostics}
+                  reprocess={settings.reprocess}
+                  needsReprocess={planStats.needsReprocess ?? 0}
+                  onDebugDiagnosticsChange={(debugDiagnostics) =>
+                    setSettings((previous) => ({ ...previous, debugDiagnostics }))
+                  }
+                  onReprocessChange={handleReprocessChange}
                   disabled={isScanning}
                 />
 

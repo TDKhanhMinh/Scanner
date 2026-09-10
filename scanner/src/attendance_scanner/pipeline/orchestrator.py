@@ -30,6 +30,8 @@ from attendance_scanner.contracts import (
     ScanMode,
     ScannerWarningCode,
 )
+from attendance_scanner.detector import DocumentDetectionResult, DocumentDetector
+from attendance_scanner.detector_modes import internal_detector_mode, normalize_detector_mode
 from attendance_scanner.diagnostics import summarize_detection_failure
 from attendance_scanner.page_classification import classify_page
 from attendance_scanner.pipeline.detect import (
@@ -257,6 +259,9 @@ def scan_one(
     mode: Union[ScanMode, str] = ScanMode.GRAY,
     *,
     config: Optional[PipelineConfig] = None,
+    detector: Optional[DocumentDetector] = None,
+    detector_mode: Optional[str] = None,
+    debug_diagnostics: bool = False,
 ) -> SingleScanResult:
     """Execute the single-image scan pipeline in memory.
 
@@ -296,17 +301,53 @@ def scan_one(
     loaded, orig_w, orig_h = _prepare_loaded_image(source)
     stage_durations["load_ms"] = (time.perf_counter() - t_load_start) * 1000.0
 
-    # Stage 2: Detect document boundary
-    t_detect_start = time.perf_counter()
-    detection: Optional[DetectionResult] = detect_document_boundary(
-        loaded,
-        config=pipeline_cfg.detection,
+    normalized_detector_mode = (
+        normalize_detector_mode(detector_mode) if detector_mode is not None else None
     )
+
+    # Stage 2: Detect document boundary. The legacy path remains the default for
+    # direct library callers; product/benchmark modes opt into the provider-neutral
+    # V2 detector contract without exposing model names to the caller.
+    t_detect_start = time.perf_counter()
+    v2_detection: Optional[DocumentDetectionResult] = None
+    detection: Optional[DetectionResult] = None
+    if detector is not None or normalized_detector_mode not in {None, "classic", "v1_cv"}:
+        if detector is None:
+            from attendance_scanner.hybrid import create_detector
+
+            assert normalized_detector_mode is not None
+            detector = create_detector(internal_detector_mode(normalized_detector_mode))
+        v2_detection = detector.detect(loaded)
+    else:
+        detection = detect_document_boundary(
+            loaded,
+            config=pipeline_cfg.detection,
+        )
     stage_durations["detect_ms"] = (time.perf_counter() - t_detect_start) * 1000.0
 
-    document_detected = bool(detection is not None and detection.accepted and not detection.clipped)
-    detection_confidence: Optional[float] = detection.confidence if detection else None
-    detection_area_ratio: Optional[float] = detection.area_ratio if detection else None
+    detector_mode_value: Optional[str]
+    if v2_detection is not None:
+        v2_corners = v2_detection.canonical_points()
+        document_detected = bool(
+            v2_detection.detected and v2_corners is not None and not v2_detection.geometry.clipped
+        )
+        detection_confidence = v2_detection.confidence
+        detection_area_ratio = v2_detection.geometry.area_ratio
+        accepted_corners: Optional[Union[List[Tuple[float, float]], np.ndarray]] = (
+            v2_corners if document_detected else None
+        )
+        detection_clipped = v2_detection.geometry.clipped
+        warning_codes.extend(v2_detection.warnings)
+    else:
+        document_detected = bool(
+            detection is not None and detection.accepted and not detection.clipped
+        )
+        detection_confidence = detection.confidence if detection else None
+        detection_area_ratio = detection.area_ratio if detection else None
+        accepted_corners = (
+            detection.corners if document_detected and detection is not None else None
+        )
+        detection_clipped = bool(detection is not None and detection.clipped)
 
     # Stage 3: Optional Perspective Warp
     t_warp_start = time.perf_counter()
@@ -314,14 +355,14 @@ def scan_one(
     orientation_rotation_degrees = 0
     page_identity = PageIdentity()
 
-    if detection is not None and detection.accepted and not detection.clipped:
+    if accepted_corners is not None:
         try:
             classification_perspective = pipeline_cfg.perspective.model_copy(
                 update={"target_aspect_ratio": None}
             )
             classification_warp = warp_perspective(
                 loaded,
-                detection,
+                accepted_corners,
                 config=classification_perspective,
             )
             classification_candidates = [(0, classify_page(classification_warp.image))]
@@ -342,7 +383,7 @@ def scan_one(
             page_identity.diagnostics["classificationTurns"] = selected_turns
             warped_or_full = warp_perspective(
                 loaded,
-                detection,
+                accepted_corners,
                 config=pipeline_cfg.perspective,
             )
         except (DegenerateCornersError, cv2.error, ValueError):
@@ -357,9 +398,9 @@ def scan_one(
     else:
         # Fallback rule: detector rejected or failed -> use full unwarped image with warning
         warped_or_full = loaded
-        if detection is not None and (
-            detection.clipped
-            or detection.rejection_reason == DetectionRejectionReason.DOCUMENT_CLIPPED
+        if detection_clipped or (
+            detection is not None
+            and detection.rejection_reason == DetectionRejectionReason.DOCUMENT_CLIPPED
         ):
             warning_codes.append(ScannerWarningCode.DOCUMENT_CLIPPED.value)
         else:
@@ -441,6 +482,37 @@ def scan_one(
         total_duration_ms=total_duration_ms,
     )
 
+    if v2_detection is not None:
+        detector_name = v2_detection.detector_version
+        detector_mode_value = normalized_detector_mode
+        detector_model_version = v2_detection.model_version
+        detector_fallback_used = v2_detection.fallback_used or not document_detected
+        detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = {
+            "confidence": detection_confidence,
+            "areaRatio": detection_area_ratio,
+            "candidateCount": len(v2_detection.candidate_corners),
+            "warningCount": len(unique_warnings),
+            "fallbackUsed": detector_fallback_used,
+        }
+        if debug_diagnostics and v2_detection.decision_trace is not None:
+            detection_quality_summary.update(
+                {
+                    "decisionPath": v2_detection.decision_trace.path,
+                    "segmentationState": v2_detection.decision_trace.segmentation_state,
+                    "rankingStatus": v2_detection.decision_trace.ranking_status,
+                }
+            )
+    else:
+        detector_name = "v1_cv"
+        detector_mode_value = normalized_detector_mode or scan_mode.value
+        detector_model_version = "opencv-classical"
+        detector_fallback_used = not document_detected
+        detection_quality_summary = {
+            "confidence": detection_confidence,
+            "areaRatio": detection_area_ratio,
+            "warningCount": len(unique_warnings),
+        }
+
     return SingleScanResult(
         image=final_image,
         document_detected=document_detected,
@@ -452,16 +524,12 @@ def scan_one(
         warning_codes=unique_warnings,
         diagnostics=diagnostics,
         page_identity=page_identity,
-        detector_name="v1_cv",
-        detector_mode=scan_mode.value,
-        detector_model_version="opencv-classical",
+        detector_name=detector_name,
+        detector_mode=detector_mode_value,
+        detector_model_version=detector_model_version,
         detector_model_checksum=None,
-        detection_fallback_used=not document_detected,
-        detection_quality_summary={
-            "confidence": detection_confidence,
-            "areaRatio": detection_area_ratio,
-            "warningCount": len(unique_warnings),
-        },
+        detection_fallback_used=detector_fallback_used,
+        detection_quality_summary=detection_quality_summary,
         detection_reason=detection_summary.primary_reason,
         detection_reason_codes=list(detection_summary.reason_codes),
         detection_user_message=detection_summary.user_message,

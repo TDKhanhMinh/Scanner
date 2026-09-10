@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
+from attendance_scanner.detector_modes import DEFAULT_DETECTOR_MODE, normalize_detector_mode
+
 # Canonical protocol version for all JSONL events
 PROTOCOL_VERSION = 1
 
@@ -229,6 +231,8 @@ class ScanPlan(BaseContract):
     unsupported_count: int = 0
     needs_reprocess: int = 0
     reprocess_reasons: Dict[str, int] = Field(default_factory=dict)
+    detector_mode: Optional[str] = None
+    debug_diagnostics: Optional[bool] = None
     collisions: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -307,11 +311,19 @@ class ScanBatchRequest(BaseContract):
     input_root: str
     output_root: Optional[str] = None
     mode: ScanMode = ScanMode.GRAY
+    detector_mode: str = DEFAULT_DETECTOR_MODE
+    debug_diagnostics: bool = False
+    reprocess: bool = False
     workers: int = Field(default=3, ge=1, le=4)
     period: Optional[BatchPeriod] = None
     export_mode: ExportMode = ExportMode.PER_IMAGE
     manual_order: Dict[str, List[str]] = Field(default_factory=dict)
     skip_groups: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_detector_settings(self) -> "ScanBatchRequest":
+        normalize_detector_mode(self.detector_mode)
+        return self
 
 
 class FileResult(BaseContract):

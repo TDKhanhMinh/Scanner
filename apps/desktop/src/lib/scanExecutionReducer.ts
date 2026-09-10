@@ -15,6 +15,7 @@ export interface ScanExecutionState {
   warning: number;
   failed: number;
   skipped: number;
+  fallbackCount: number;
   results: FileResultItem[];
   errorMessage: string;
   seenEventKeys: Set<string>;
@@ -36,6 +37,7 @@ export const initialScanExecutionState: ScanExecutionState = {
   warning: 0,
   failed: 0,
   skipped: 0,
+  fallbackCount: 0,
   results: [],
   errorMessage: "",
   seenEventKeys: new Set<string>(),
@@ -96,6 +98,7 @@ export function scanExecutionReducer(
         warning: 0,
         failed: 0,
         skipped: 0,
+        fallbackCount: 0,
         results: [],
         errorMessage: "",
         seenEventKeys: new Set<string>(),
@@ -147,6 +150,7 @@ export function scanExecutionReducer(
             processed: nextState.processed + 1,
             success: nextState.success + (isWarning ? 0 : 1),
             warning: nextState.warning + (isWarning ? 1 : 0),
+            fallbackCount: nextState.fallbackCount + (event.documentDetected ? 0 : 1),
             results: appendRecentResult(nextState.results, result),
           };
         }
@@ -160,6 +164,8 @@ export function scanExecutionReducer(
             status: "failed",
             documentDetected: false,
             message: `${event.errorCode}: ${event.message}`,
+            detectionReason: event.detectionReason ?? undefined,
+            detectionReasonCodes: event.detectionReasonCodes ?? [],
             timestamp: event.timestamp,
           };
           return {

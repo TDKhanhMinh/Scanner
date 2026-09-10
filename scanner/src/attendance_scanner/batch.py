@@ -29,6 +29,12 @@ from attendance_scanner.contracts import (
     ScanMode,
     ScannerErrorCode,
 )
+from attendance_scanner.detector import DocumentDetector
+from attendance_scanner.detector_modes import (
+    detector_name_for_mode,
+    internal_detector_mode,
+    normalize_detector_mode,
+)
 from attendance_scanner.diagnostics import describe_scanner_error, log_scanner_error
 from attendance_scanner.discovery import (
     DEFAULT_PIPELINE_VERSION,
@@ -608,6 +614,9 @@ def _process_one_file(
     emit: Optional[EventEmitter],
     batch_period: Optional[BatchPeriod],
     export_mode: ExportMode,
+    detector: Optional[DocumentDetector],
+    detector_mode: Optional[str],
+    debug_diagnostics: bool,
 ) -> _FileOutcome:
     """Process one file; all exceptions become a file-level failure outcome."""
     started_at = time.perf_counter()
@@ -634,11 +643,17 @@ def _process_one_file(
         if source_hash is None:
             source_hash = compute_sha256(source_path)
 
-        scan_result: SingleScanResult = scan_one(
-            source_path,
-            mode=mode,
-            config=pipeline_config,
-        )
+        if detector is None and detector_mode is None and not debug_diagnostics:
+            scan_result = scan_one(source_path, mode=mode, config=pipeline_config)
+        else:
+            scan_result = scan_one(
+                source_path,
+                mode=mode,
+                config=pipeline_config,
+                detector=detector,
+                detector_mode=detector_mode,
+                debug_diagnostics=debug_diagnostics,
+            )
         if export_mode == ExportMode.PER_IMAGE:
             target_path = _resolve_output_path(output_root, file.target_relative_pdf)
             export_single_page_pdf(scan_result, target_path, config=pdf_config)
@@ -691,7 +706,7 @@ def _process_one_file(
             page_identity=page_identity,
             artifact_dependencies=artifact_dependencies,
             detector_name=scan_result.detector_name,
-            detector_mode=scan_result.detector_mode or mode.value,
+            detector_mode=scan_result.detector_mode or detector_mode or mode.value,
             detector_model_version=scan_result.detector_model_version,
             detector_model_checksum=scan_result.detector_model_checksum,
             detection_status=("detected" if scan_result.document_detected else "fallback"),
@@ -752,7 +767,12 @@ def _process_one_file(
             pipeline_version=pipeline_version,
             batch_period=batch_period,
             employee_relative_dir=file.employee_name,
-            detector_mode=mode.value,
+            detector_name=(
+                "v1_cv"
+                if detector_mode is None or detector_mode in {"classic", "v1_cv"}
+                else detector_name_for_mode(normalize_detector_mode(detector_mode))
+            ),
+            detector_mode=detector_mode or mode.value,
         )
         _best_effort_persist_failure(manifest, manifest_store, failure_entry, manifest_lock)
 
@@ -807,6 +827,9 @@ def run_batch(
     export_mode: Union[ExportMode, str] = ExportMode.PER_IMAGE,
     group_plan: Optional[GroupAwareScanPlan] = None,
     skip_groups: Optional[Set[str]] = None,
+    detector_mode: Optional[str] = None,
+    debug_diagnostics: bool = False,
+    detector: Optional[DocumentDetector] = None,
 ) -> BatchRunResult:
     """Run the classified process set with resumable per-file isolation.
 
@@ -828,6 +851,16 @@ def run_batch(
         raise ValueError(f"Output root is not a directory: {effective_output_root}")
 
     scan_mode = _normalize_scan_mode(mode)
+    normalized_detector_mode = normalize_detector_mode(detector_mode)
+    effective_detector = detector
+    if (
+        effective_detector is None
+        and detector_mode is not None
+        and normalized_detector_mode not in {"classic", "v1_cv"}
+    ):
+        from attendance_scanner.hybrid import create_detector
+
+        effective_detector = create_detector(internal_detector_mode(normalized_detector_mode))
     effective_pipeline_version = pipeline_version_for_mode(pipeline_version, scan_mode)
     if isinstance(export_mode, ExportMode):
         scan_export_mode = export_mode
@@ -888,6 +921,9 @@ def run_batch(
                 emit,
                 batch_period,
                 scan_export_mode,
+                effective_detector,
+                detector_mode,
+                debug_diagnostics,
             )
             futures[future] = index
 

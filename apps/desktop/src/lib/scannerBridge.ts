@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseScannerEvent } from "@/lib/eventParser";
 import type {
   BatchPeriod,
+  DetectorMode,
   ExportMode,
   ScanMode,
   ScanPlanEvent,
@@ -33,6 +34,9 @@ export interface ScannerRequest {
   inputRoot: string;
   outputRoot?: string | null;
   mode?: ScanMode | null;
+  detectorMode?: DetectorMode | null;
+  debugDiagnostics?: boolean | null;
+  reprocess?: boolean | null;
   workers?: number | null;
   period?: BatchPeriod | null;
   exportMode?: ExportMode | null;
@@ -45,6 +49,9 @@ export async function planScan(request: ScannerRequest): Promise<ScanPlanEvent> 
     inputRoot: request.inputRoot,
     outputRoot: request.outputRoot ?? null,
     mode: request.mode ?? null,
+    detectorMode: request.detectorMode ?? null,
+    debugDiagnostics: request.debugDiagnostics ?? false,
+    reprocess: request.reprocess ?? false,
     year: request.period?.year ?? null,
     month: request.period?.month ?? null,
     exportMode: request.exportMode ?? null,
@@ -56,6 +63,9 @@ export async function startScan(request: ScannerRequest): Promise<ScanRunOutcome
     inputRoot: request.inputRoot,
     outputRoot: request.outputRoot ?? null,
     mode: request.mode ?? null,
+    detectorMode: request.detectorMode ?? null,
+    debugDiagnostics: request.debugDiagnostics ?? false,
+    reprocess: request.reprocess ?? false,
     workers: request.workers ?? null,
     year: request.period?.year ?? null,
     month: request.period?.month ?? null,

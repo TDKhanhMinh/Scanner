@@ -16,6 +16,12 @@ from attendance_scanner.contracts import (
     ScanMode,
     ScanPlan,
 )
+from attendance_scanner.detector_modes import (
+    ALL_DETECTOR_MODES,
+    DEFAULT_DETECTOR_MODE,
+    detector_name_for_mode,
+    normalize_detector_mode,
+)
 from attendance_scanner.diagnostics import (
     ScannerOperation,
     configure_logging,
@@ -85,6 +91,7 @@ def _prepare_plan(
     output_root: Optional[str],
     required_output_mode: Optional[ExportMode] = None,
     scan_mode: ScanMode | str = ScanMode.GRAY,
+    detector_mode: str = DEFAULT_DETECTOR_MODE,
     reprocess: bool = False,
 ) -> tuple[DiscoveryResult, Manifest, ManifestStore, str, ScanPlan]:
     """Discover, load state, classify files and persist only metadata-only updates."""
@@ -95,7 +102,12 @@ def _prepare_plan(
     effective_output_root = validated_output_root or manifest.output_root
     _validate_output_root(effective_output_root)
     previous_updated_at = manifest.updated_at
-    reprocess_policy = _build_reprocess_policy(scan_mode, opt_in=reprocess)
+    normalized_detector_mode = normalize_detector_mode(detector_mode)
+    reprocess_policy = _build_reprocess_policy(
+        scan_mode,
+        detector_mode=normalized_detector_mode,
+        opt_in=reprocess,
+    )
     plan = build_incremental_scan_plan(
         discovery=discovery,
         manifest=manifest,
@@ -112,17 +124,21 @@ def _prepare_plan(
 def _build_reprocess_policy(
     scan_mode: ScanMode | str,
     *,
+    detector_mode: str = DEFAULT_DETECTOR_MODE,
     opt_in: bool,
 ) -> ReprocessPolicy:
-    """Build the current V1 metadata target with explicit opt-in semantics."""
+    """Build the current detector/enhancement target with explicit opt-in semantics."""
     normalized_mode = (
         scan_mode if isinstance(scan_mode, ScanMode) else ScanMode(str(scan_mode).lower())
     )
+    normalized_detector_mode = normalize_detector_mode(detector_mode)
+    detector_name = detector_name_for_mode(normalized_detector_mode)
+    model_version = "opencv-classical" if detector_name == "v1_cv" else None
     return ReprocessPolicy(
         pipeline_version=pipeline_version_for_mode(DEFAULT_PIPELINE_VERSION, normalized_mode),
-        detector_name="v1_cv",
-        detector_mode=normalized_mode.value,
-        detector_model_version="opencv-classical",
+        detector_name=detector_name,
+        detector_mode=normalized_detector_mode,
+        detector_model_version=model_version,
         opt_in=opt_in or normalized_mode != ScanMode.GRAY,
     )
 
@@ -238,10 +254,18 @@ def _plan_event(
     export_mode: ExportMode,
     scan_mode: ScanMode | str,
     reprocess_policy: Optional[ReprocessPolicy] = None,
+    detector_mode: Optional[str] = None,
+    debug_diagnostics: bool = False,
 ) -> ScanPlanEvent:
     """Create a typed plan event with document-aware summary counters."""
     if period is None:
-        return ScanPlanEvent.from_plan(plan, period=None, export_mode=export_mode)
+        return ScanPlanEvent.from_plan(
+            plan,
+            period=None,
+            export_mode=export_mode,
+            detector_mode=detector_mode,
+            debug_diagnostics=True if debug_diagnostics else None,
+        )
     counts, review_groups = _group_summary(
         input_root,
         output_root,
@@ -261,6 +285,8 @@ def _plan_event(
         ambiguous_groups=counts["ambiguous_groups"],
         pages_needing_review=counts["pages_needing_review"],
         review_groups=review_groups,
+        detector_mode=detector_mode,
+        debug_diagnostics=True if debug_diagnostics else None,
     )
 
 
@@ -310,6 +336,17 @@ def create_parser() -> argparse.ArgumentParser:
         default="gray",
         help="Reserved scan mode argument; planning does not process image pixels",
     )
+    plan_parser.add_argument(
+        "--detector-mode",
+        choices=list(ALL_DETECTOR_MODES),
+        default=DEFAULT_DETECTOR_MODE,
+        help="Document detector mode (default: ai_enhanced; dev modes are for benchmark use)",
+    )
+    plan_parser.add_argument(
+        "--debug-diagnostics",
+        action="store_true",
+        help="Include additional safe detector diagnostics in the scan plan",
+    )
     plan_parser.add_argument("--year", type=int, help="Batch year (1-9999)")
     plan_parser.add_argument("--month", type=int, help="Batch month (1-12)")
     plan_parser.add_argument(
@@ -352,6 +389,17 @@ def create_parser() -> argparse.ArgumentParser:
         help="Enhancement mode (default: gray)",
     )
     scan_parser.add_argument(
+        "--detector-mode",
+        choices=list(ALL_DETECTOR_MODES),
+        default=DEFAULT_DETECTOR_MODE,
+        help="Document detector mode (default: ai_enhanced; dev modes are for benchmark use)",
+    )
+    scan_parser.add_argument(
+        "--debug-diagnostics",
+        action="store_true",
+        help="Include additional safe detector diagnostics in the scan output",
+    )
+    scan_parser.add_argument(
         "--workers",
         "-w",
         type=int,
@@ -390,12 +438,17 @@ def handle_plan(args: argparse.Namespace) -> int:
     try:
         period = _parse_batch_period(args)
         export_mode = _parse_export_mode(args.export_mode)
-        reprocess_policy = _build_reprocess_policy(args.mode, opt_in=args.reprocess)
+        reprocess_policy = _build_reprocess_policy(
+            args.mode,
+            detector_mode=args.detector_mode,
+            opt_in=args.reprocess,
+        )
         _, _, _, _, plan = _prepare_plan(
             args.input,
             args.output,
             required_output_mode=export_mode,
             scan_mode=args.mode,
+            detector_mode=args.detector_mode,
             reprocess=args.reprocess,
         )
         event = _plan_event(
@@ -406,6 +459,8 @@ def handle_plan(args: argparse.Namespace) -> int:
             export_mode=export_mode,
             scan_mode=args.mode,
             reprocess_policy=reprocess_policy,
+            detector_mode=args.detector_mode,
+            debug_diagnostics=args.debug_diagnostics,
         )
         emit_jsonl_event(event)
         return 0
@@ -422,12 +477,17 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
         skip_groups = _parse_skip_groups(args.skip_group_json)
         if export_mode == ExportMode.GROUPED and period is None:
             raise CliArgumentError("Grouped export requires --year and --month")
-        reprocess_policy = _build_reprocess_policy(args.mode, opt_in=args.reprocess)
+        reprocess_policy = _build_reprocess_policy(
+            args.mode,
+            detector_mode=args.detector_mode,
+            opt_in=args.reprocess,
+        )
         discovery, manifest, store, effective_output_root, plan = _prepare_plan(
             args.input,
             args.output,
             required_output_mode=export_mode,
             scan_mode=args.mode,
+            detector_mode=args.detector_mode,
             reprocess=args.reprocess,
         )
         plan_event = _plan_event(
@@ -438,6 +498,8 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             export_mode=export_mode,
             scan_mode=args.mode,
             reprocess_policy=reprocess_policy,
+            detector_mode=args.detector_mode,
+            debug_diagnostics=args.debug_diagnostics,
         )
         emit_jsonl_event(plan_event)
 
@@ -468,6 +530,8 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             export_mode=export_mode,
             group_plan=group_plan,
             skip_groups=skip_groups,
+            detector_mode=args.detector_mode,
+            debug_diagnostics=args.debug_diagnostics,
         )
         sys.stdout.flush()
         return result.exit_code

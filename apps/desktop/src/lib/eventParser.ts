@@ -7,6 +7,7 @@ import {
   PROTOCOL_VERSION,
   ScannerEvent,
   VALID_SCANNER_ERROR_CODES,
+  VALID_DETECTOR_MODES,
 } from "@/types/scanner";
 
 const VALID_EVENT_TYPES = new Set([
@@ -160,6 +161,30 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         typeof raw.unsupportedCount === "number" && raw.unsupportedCount >= 0
           ? raw.unsupportedCount
           : 0;
+      for (const field of ["needsReprocess"] as const) {
+        if (
+          raw[field] !== undefined &&
+          (typeof raw[field] !== "number" || raw[field] < 0)
+        ) {
+          return null;
+        }
+      }
+      raw.needsReprocess = raw.needsReprocess ?? 0;
+      if (
+        raw.detectorMode !== undefined &&
+        raw.detectorMode !== null &&
+        (typeof raw.detectorMode !== "string" ||
+          !VALID_DETECTOR_MODES.includes(raw.detectorMode as (typeof VALID_DETECTOR_MODES)[number]))
+      ) {
+        return null;
+      }
+      if (
+        raw.debugDiagnostics !== undefined &&
+        raw.debugDiagnostics !== null &&
+        typeof raw.debugDiagnostics !== "boolean"
+      ) {
+        return null;
+      }
       raw.collisions = Array.isArray(raw.collisions) ? raw.collisions : [];
       const rawPeriod = raw.period;
       if (rawPeriod !== undefined && rawPeriod !== null) {
@@ -262,6 +287,20 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         !VALID_SCANNER_ERROR_CODES.has(raw.errorCode) || // P2: Strict enum validation
         typeof raw.message !== "string" ||
         raw.message.trim().length === 0
+      ) {
+        return null;
+      }
+      if (
+        raw.detectionReason !== undefined &&
+        raw.detectionReason !== null &&
+        typeof raw.detectionReason !== "string"
+      ) {
+        return null;
+      }
+      if (
+        raw.detectionReasonCodes !== undefined &&
+        (!Array.isArray(raw.detectionReasonCodes) ||
+          !raw.detectionReasonCodes.every((reason) => typeof reason === "string"))
       ) {
         return null;
       }

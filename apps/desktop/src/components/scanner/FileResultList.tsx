@@ -17,6 +17,8 @@ export interface FileResultItem {
   status: "success" | "warning" | "failed";
   documentDetected: boolean;
   message?: string;
+  detectionReason?: string;
+  detectionReasonCodes?: string[];
   timestamp?: string;
 }
 
@@ -32,11 +34,33 @@ const WARNING_MESSAGE_MAP: Record<string, string> = {
   IMAGE_DOWNSCALED: "Ảnh kích thước lớn — đã hạ tỷ lệ",
 };
 
+const DETECTION_REASON_MESSAGE_MAP: Record<string, string> = {
+  SEGMENTATION_LOW_CONFIDENCE: "AI không đủ tự tin về vùng tờ giấy",
+  MASK_INVALID: "Mask nhận diện không hợp lệ",
+  MASK_AMBIGUOUS_COMPONENTS: "Ảnh có nhiều vùng giấy gây mơ hồ",
+  QUAD_FIT_FAILED: "Không khớp được tứ giác 4 góc",
+  CV_NO_CANDIDATE: "OpenCV không tìm thấy ứng viên phù hợp",
+  HYBRID_AMBIGUOUS: "Các tín hiệu nhận diện đang mâu thuẫn",
+  REFINEMENT_REJECTED: "Tinh chỉnh góc bị từ chối do chất lượng thấp",
+  PERSPECTIVE_INVALID: "Phối cảnh 4 góc không hợp lệ",
+  FALLBACK_FULL_IMAGE: "Đã giữ nguyên ảnh gốc để tránh cắt nhầm",
+};
+
 export function formatWarningMessage(message?: string): string {
   if (!message) return "";
   const codes = message.split(",").map((s) => s.trim());
   const formatted = codes.map((c) => WARNING_MESSAGE_MAP[c] ?? c);
   return formatted.join("; ");
+}
+
+export function formatDetectionReasonMessage(
+  reason?: string,
+  reasonCodes: string[] = [],
+): string {
+  const codes = [reason, ...reasonCodes].filter(
+    (code, index, values): code is string => Boolean(code) && values.indexOf(code) === index,
+  );
+  return codes.map((code) => DETECTION_REASON_MESSAGE_MAP[code] ?? code).join("; ");
 }
 
 function StatusBadge({ status }: Pick<FileResultItem, "status">) {
@@ -132,6 +156,11 @@ export function FileResultList({ items, onPreview }: FileResultListProps) {
                   <span className="text-amber-400 font-medium">
                     {formatWarningMessage(item.message)}
                   </span>
+                  {item.detectionReason || (item.detectionReasonCodes?.length ?? 0) > 0 ? (
+                    <span className="text-[11px] text-muted-foreground">
+                      {formatDetectionReasonMessage(item.detectionReason, item.detectionReasonCodes)}
+                    </span>
+                  ) : null}
                   {item.message.includes("DOCUMENT_CLIPPED") && (
                     <span className="text-[11px] text-muted-foreground">
                       Gợi ý: Chụp lại để lấy trọn 4 mép giấy hoặc nắn góc thủ công

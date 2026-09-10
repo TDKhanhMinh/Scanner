@@ -136,6 +136,15 @@ from attendance_scanner.detector import (
     adapt_v1_detector,
     canonical_points_for_perspective,
 )
+from attendance_scanner.detector_modes import (
+    ALL_DETECTOR_MODES,
+    DEFAULT_DETECTOR_MODE,
+    DEVELOPMENT_DETECTOR_MODES,
+    PRODUCT_DETECTOR_MODES,
+    detector_name_for_mode,
+    internal_detector_mode,
+    normalize_detector_mode,
+)
 from attendance_scanner.diagnostics import (
     ScannerErrorInfo,
     configure_logging,
@@ -572,6 +581,13 @@ __all__ = [
     "HybridDocumentDetector",
     "SegmentationProvider",
     "create_detector",
+    "ALL_DETECTOR_MODES",
+    "DEFAULT_DETECTOR_MODE",
+    "DEVELOPMENT_DETECTOR_MODES",
+    "PRODUCT_DETECTOR_MODES",
+    "detector_name_for_mode",
+    "internal_detector_mode",
+    "normalize_detector_mode",
     "FittedDocumentLine",
     "FittedLineSet",
     "LINE_FITTING_VERSION",

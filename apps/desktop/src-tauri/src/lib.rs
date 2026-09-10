@@ -1,7 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_shell::{
@@ -82,6 +82,14 @@ pub struct ScanPlanPayload {
     pub outdated_pipeline_count: u64,
     #[serde(default)]
     pub unsupported_count: u64,
+    #[serde(default)]
+    pub needs_reprocess: u64,
+    #[serde(default)]
+    pub reprocess_reasons: HashMap<String, u64>,
+    #[serde(default)]
+    pub detector_mode: Option<String>,
+    #[serde(default)]
+    pub debug_diagnostics: Option<bool>,
     pub collisions: Vec<String>,
     #[serde(default)]
     pub year: Option<u32>,
@@ -179,6 +187,7 @@ struct CapturedDiagnostic {
     message: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_request(
     input_root: &str,
     output_root: Option<&str>,
@@ -187,6 +196,9 @@ fn validate_request(
     year: Option<u32>,
     month: Option<u32>,
     export_mode: Option<&str>,
+    detector_mode: Option<&str>,
+    _debug_diagnostics: Option<bool>,
+    _reprocess: Option<bool>,
 ) -> Result<(), ScannerBridgeError> {
     if input_root.trim().is_empty() {
         return Err(ScannerBridgeError::InvalidRequest {
@@ -205,6 +217,22 @@ fn validate_request(
         ) {
             return Err(ScannerBridgeError::InvalidRequest {
                 message: format!("Unsupported scan mode: {value}"),
+            });
+        }
+    }
+    if let Some(value) = detector_mode {
+        if !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "ai_enhanced"
+                | "classic"
+                | "v1_cv"
+                | "segmentation_only"
+                | "cv_v2"
+                | "hybrid"
+                | "docaligner_reference"
+        ) {
+            return Err(ScannerBridgeError::InvalidRequest {
+                message: format!("Unsupported detector mode: {value}"),
             });
         }
     }
@@ -318,6 +346,9 @@ fn build_sidecar_args(
     export_mode: Option<&str>,
     manual_order_json: Option<&str>,
     skip_group_json: Option<&str>,
+    detector_mode: Option<&str>,
+    debug_diagnostics: Option<bool>,
+    reprocess: Option<bool>,
 ) -> Vec<String> {
     let mut args = vec![
         command.to_string(),
@@ -350,6 +381,15 @@ fn build_sidecar_args(
     }
     if let Some(skip_group_json) = skip_group_json {
         args.extend(["--skip-group-json".to_string(), skip_group_json.to_string()]);
+    }
+    if let Some(detector_mode) = detector_mode {
+        args.extend(["--detector-mode".to_string(), detector_mode.to_string()]);
+    }
+    if debug_diagnostics == Some(true) {
+        args.push("--debug-diagnostics".to_string());
+    }
+    if reprocess == Some(true) {
+        args.push("--reprocess".to_string());
     }
     args
 }
@@ -623,6 +663,9 @@ async fn plan_scan(
     year: Option<u32>,
     month: Option<u32>,
     export_mode: Option<String>,
+    detector_mode: Option<String>,
+    debug_diagnostics: Option<bool>,
+    reprocess: Option<bool>,
 ) -> Result<ScanPlanPayload, ScannerBridgeError> {
     validate_request(
         input_root.as_str(),
@@ -632,6 +675,9 @@ async fn plan_scan(
         year,
         month,
         export_mode.as_deref(),
+        detector_mode.as_deref(),
+        debug_diagnostics,
+        reprocess,
     )?;
     let args = build_sidecar_args(
         "plan",
@@ -644,6 +690,9 @@ async fn plan_scan(
         export_mode.as_deref(),
         None,
         None,
+        detector_mode.as_deref(),
+        debug_diagnostics,
+        reprocess,
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;
@@ -675,6 +724,9 @@ async fn start_scan(
     export_mode: Option<String>,
     manual_order: Option<Value>,
     skip_groups: Option<Vec<String>>,
+    detector_mode: Option<String>,
+    debug_diagnostics: Option<bool>,
+    reprocess: Option<bool>,
 ) -> Result<ScanRunOutcome, ScannerBridgeError> {
     validate_request(
         input_root.as_str(),
@@ -684,6 +736,9 @@ async fn start_scan(
         year,
         month,
         export_mode.as_deref(),
+        detector_mode.as_deref(),
+        debug_diagnostics,
+        reprocess,
     )?;
     validate_manual_order(manual_order.as_ref())?;
     validate_skip_groups(skip_groups.as_ref())?;
@@ -708,6 +763,9 @@ async fn start_scan(
         export_mode.as_deref(),
         manual_order_json.as_deref(),
         skip_group_json.as_deref(),
+        detector_mode.as_deref(),
+        debug_diagnostics,
+        reprocess,
     );
     let scanner_state = state.inner().clone();
     scanner_state.begin()?;

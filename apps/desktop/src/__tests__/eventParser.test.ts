@@ -128,6 +128,8 @@ describe("eventParser", () => {
       employeeName: "TranVanB",
       errorCode: "IMAGE_DECODE_FAILED",
       message: "Failed to decode image: corrupted header",
+      detectionReason: "CV_NO_CANDIDATE",
+      detectionReasonCodes: ["CV_NO_CANDIDATE", "FALLBACK_FULL_IMAGE"],
     });
 
     const event = parseScannerEvent(json);
@@ -136,9 +138,30 @@ describe("eventParser", () => {
       expect(event.type).toBe("file_failed");
       expect(event.errorCode).toBe("IMAGE_DECODE_FAILED");
       expect(event.message).toContain("corrupted");
+      expect(event.detectionReason).toBe("CV_NO_CANDIDATE");
+      expect(event.detectionReasonCodes).toEqual(["CV_NO_CANDIDATE", "FALLBACK_FULL_IMAGE"]);
     } else {
       throw new Error("Expected FileFailedEvent");
     }
+  });
+
+  it("rejects malformed failure detection diagnostics", () => {
+    const base = {
+      protocolVersion: 1,
+      type: "file_failed",
+      timestamp: "2026-09-07T00:00:03Z",
+      relativePath: "NV01/page.png",
+      employeeName: "NV01",
+      errorCode: "IMAGE_DECODE_FAILED",
+      message: "Không thể đọc ảnh.",
+    };
+
+    expect(
+      parseScannerEvent(JSON.stringify({ ...base, detectionReason: 42 })),
+    ).toBeNull();
+    expect(
+      parseScannerEvent(JSON.stringify({ ...base, detectionReasonCodes: ["ok", 42] })),
+    ).toBeNull();
   });
 
   it("parses valid scan_completed event", () => {

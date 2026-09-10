@@ -112,6 +112,9 @@ describe("App scan plan states", () => {
       inputRoot: "C:/Attendance Input",
       outputRoot: "C:/Attendance Input_pdf",
       mode: "gray",
+      detectorMode: "ai_enhanced",
+      debugDiagnostics: false,
+      reprocess: false,
       period: {
         year: new Date().getFullYear(),
         month: new Date().getMonth() + 1,
@@ -134,6 +137,9 @@ describe("App scan plan states", () => {
       inputRoot: "C:/Attendance Input",
       outputRoot: "C:/Attendance Input_pdf",
       mode: "smart_document",
+      detectorMode: "ai_enhanced",
+      debugDiagnostics: false,
+      reprocess: false,
       period: {
         year: new Date().getFullYear(),
         month: new Date().getMonth() + 1,
@@ -197,6 +203,9 @@ describe("App scan plan states", () => {
       inputRoot: "C:/Attendance Input",
       outputRoot: "C:/Attendance Input_pdf",
       mode: "gray",
+      detectorMode: "ai_enhanced",
+      debugDiagnostics: false,
+      reprocess: false,
       period: { year: 2025, month: 8 },
       exportMode: "GROUPED",
     });

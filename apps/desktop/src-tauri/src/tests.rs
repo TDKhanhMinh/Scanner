@@ -15,6 +15,9 @@ fn sidecar_args_keep_user_paths_as_individual_arguments() {
         None,
         None,
         None,
+        None,
+        None,
+        None,
     );
 
     assert_eq!(
@@ -91,9 +94,45 @@ fn scanner_state_rejects_concurrent_batches_and_releases_after_finish() {
 
 #[test]
 fn request_validation_rejects_worker_counts_outside_contract() {
-    assert!(validate_request("input", None, Some("gray"), Some(0), None, None, None).is_err());
-    assert!(validate_request("input", None, Some("gray"), Some(5), None, None, None).is_err());
-    assert!(validate_request("input", None, Some("gray"), Some(4), None, None, None).is_ok());
+    assert!(validate_request(
+        "input",
+        None,
+        Some("gray"),
+        Some(0),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None
+    )
+    .is_err());
+    assert!(validate_request(
+        "input",
+        None,
+        Some("gray"),
+        Some(5),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None
+    )
+    .is_err());
+    assert!(validate_request(
+        "input",
+        None,
+        Some("gray"),
+        Some(4),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None
+    )
+    .is_ok());
 }
 
 #[test]
@@ -105,7 +144,10 @@ fn request_validation_and_args_support_period_and_export_mode() {
         Some(2),
         Some(2026),
         Some(9),
-        Some("grouped")
+        Some("grouped"),
+        Some("ai_enhanced"),
+        Some(false),
+        Some(false),
     )
     .is_ok());
     assert!(validate_request(
@@ -115,7 +157,10 @@ fn request_validation_and_args_support_period_and_export_mode() {
         Some(2),
         Some(2026),
         Some(9),
-        Some("per-image")
+        Some("per-image"),
+        Some("classic"),
+        Some(false),
+        Some(false),
     )
     .is_ok());
     assert!(validate_request(
@@ -125,7 +170,10 @@ fn request_validation_and_args_support_period_and_export_mode() {
         Some(2),
         Some(2026),
         Some(9),
-        Some("GROUPED")
+        Some("GROUPED"),
+        None,
+        None,
+        None,
     )
     .is_ok());
     assert!(validate_request(
@@ -135,7 +183,10 @@ fn request_validation_and_args_support_period_and_export_mode() {
         Some(2),
         Some(2026),
         Some(9),
-        Some("PER_IMAGE")
+        Some("PER_IMAGE"),
+        None,
+        None,
+        None,
     )
     .is_ok());
     assert!(validate_request(
@@ -145,7 +196,10 @@ fn request_validation_and_args_support_period_and_export_mode() {
         Some(2),
         Some(2026),
         None,
-        Some("grouped")
+        Some("grouped"),
+        None,
+        None,
+        None,
     )
     .is_err());
     assert!(validate_request(
@@ -155,7 +209,10 @@ fn request_validation_and_args_support_period_and_export_mode() {
         Some(2),
         Some(2026),
         Some(13),
-        Some("grouped")
+        Some("grouped"),
+        None,
+        None,
+        None,
     )
     .is_err());
 
@@ -170,6 +227,9 @@ fn request_validation_and_args_support_period_and_export_mode() {
         Some("PER_IMAGE"),
         None,
         None,
+        Some("ai_enhanced"),
+        Some(true),
+        Some(true),
     );
     assert_eq!(
         args,
@@ -187,6 +247,10 @@ fn request_validation_and_args_support_period_and_export_mode() {
             "9",
             "--export-mode",
             "per-image",
+            "--detector-mode",
+            "ai_enhanced",
+            "--debug-diagnostics",
+            "--reprocess",
         ]
     );
 }
@@ -214,9 +278,50 @@ fn manual_order_is_validated_and_forwarded_as_one_json_argument() {
         Some("grouped"),
         Some(&encoded),
         None,
+        Some("classic"),
+        Some(true),
+        Some(true),
     );
-    assert_eq!(args[args.len() - 2], "--manual-order-json");
-    assert_eq!(args.last(), Some(&encoded));
+    let manual_index = args
+        .iter()
+        .position(|value| value == "--manual-order-json")
+        .expect("manual order flag should be forwarded");
+    assert_eq!(args.get(manual_index + 1), Some(&encoded));
+    assert!(args
+        .windows(2)
+        .any(|window| window == ["--detector-mode", "classic"]));
+    assert!(args.contains(&"--debug-diagnostics".to_string()));
+    assert!(args.contains(&"--reprocess".to_string()));
+}
+
+#[test]
+fn request_validation_rejects_unknown_detector_mode_before_launch() {
+    assert!(validate_request(
+        "input",
+        None,
+        Some("gray"),
+        None,
+        None,
+        None,
+        None,
+        Some("unknown"),
+        None,
+        None,
+    )
+    .is_err());
+    assert!(validate_request(
+        "input",
+        None,
+        Some("gray"),
+        None,
+        None,
+        None,
+        None,
+        Some("ai_enhanced"),
+        Some(true),
+        Some(false),
+    )
+    .is_ok());
 }
 
 #[test]

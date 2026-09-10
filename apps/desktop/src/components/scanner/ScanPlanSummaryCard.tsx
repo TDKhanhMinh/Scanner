@@ -35,6 +35,7 @@ export interface ScanPlanStats {
   incompleteGroups?: number;
   ambiguousGroups?: number;
   pagesNeedingReview?: number;
+  needsReprocess?: number;
 }
 
 export interface ScanPlanSummaryCardProps {
@@ -63,6 +64,7 @@ export function ScanPlanSummaryCard({
   const filesToProcess = stats.newFiles + stats.modifiedFiles + rebuildFiles;
   const documentGroups = stats.documentGroups ?? 0;
   const expectedArtifacts = stats.expectedArtifacts ?? 0;
+  const needsReprocess = stats.needsReprocess ?? 0;
 
   return (
     <Card className="border-border/80 flex flex-col justify-between h-full">
@@ -157,6 +159,15 @@ export function ScanPlanSummaryCard({
             </span>
           </div>
 
+          <div className="flex items-center justify-between border-t border-border/40 py-2 text-xs">
+            <span className="flex items-center gap-1.5 font-medium text-orange-400">
+              <RefreshCw className="h-3.5 w-3.5" /> Cần reprocess:
+            </span>
+            <Badge variant={needsReprocess > 0 ? "warning" : "secondary"} className="font-mono text-xs">
+              {needsReprocess}
+            </Badge>
+          </div>
+
           {(exportMode === "GROUPED" || documentGroups > 0) && (
             <>
               <div className="flex items-center justify-between border-b border-border/40 py-2 text-xs">
@@ -219,6 +230,12 @@ export function ScanPlanSummaryCard({
                 </p>
               )}
             </div>
+          )}
+
+          {needsReprocess > 0 && (
+            <p className="rounded-xl border border-orange-500/25 bg-orange-500/10 p-3 text-xs font-medium text-orange-900 dark:text-orange-300">
+              Có {needsReprocess} file khác phiên bản detector hiện tại. Bật “Cho phép reprocess” trong tùy chọn nâng cao nếu muốn chạy lại.
+            </p>
           )}
 
           {!isPlanning && canScan && stats.totalImages === 0 && (

@@ -67,6 +67,8 @@ class ScanPlanEvent(BaseEvent):
     unsupported_count: int = Field(default=0, ge=0)
     needs_reprocess: int = Field(default=0, ge=0)
     reprocess_reasons: Dict[str, int] = Field(default_factory=dict)
+    detector_mode: Optional[str] = None
+    debug_diagnostics: Optional[bool] = None
     collisions: List[str] = Field(default_factory=list)
     period: Optional[BatchPeriod] = None
     export_mode: ExportMode = ExportMode.PER_IMAGE
@@ -163,6 +165,8 @@ class ScanPlanEvent(BaseEvent):
         ambiguous_groups: int = 0,
         pages_needing_review: int = 0,
         review_groups: Optional[List[ReviewGroup]] = None,
+        detector_mode: Optional[str] = None,
+        debug_diagnostics: Optional[bool] = None,
     ) -> "ScanPlanEvent":
         """Construct ScanPlanEvent from ScanPlan contract model."""
         if timestamp is not None:
@@ -180,6 +184,10 @@ class ScanPlanEvent(BaseEvent):
                 unsupported_count=plan.unsupported_count,
                 needs_reprocess=plan.needs_reprocess,
                 reprocess_reasons=dict(plan.reprocess_reasons),
+                detector_mode=detector_mode or plan.detector_mode,
+                debug_diagnostics=(
+                    debug_diagnostics if debug_diagnostics is not None else plan.debug_diagnostics
+                ),
                 collisions=list(plan.collisions),
                 period=period,
                 export_mode=export_mode,
@@ -206,6 +214,10 @@ class ScanPlanEvent(BaseEvent):
             unsupported_count=plan.unsupported_count,
             needs_reprocess=plan.needs_reprocess,
             reprocess_reasons=dict(plan.reprocess_reasons),
+            detector_mode=detector_mode or plan.detector_mode,
+            debug_diagnostics=(
+                debug_diagnostics if debug_diagnostics is not None else plan.debug_diagnostics
+            ),
             collisions=list(plan.collisions),
             period=period,
             export_mode=export_mode,
@@ -252,6 +264,7 @@ class FileFailedEvent(BaseEvent):
     error_code: ScannerErrorCode
     message: str = Field(min_length=1)
     detection_reason: Optional[DetectionFailureReason] = None
+    detection_reason_codes: List[DetectionFailureReason] = Field(default_factory=list)
 
 
 class ScanCompletedEvent(BaseEvent):
