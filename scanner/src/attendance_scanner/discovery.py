@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
 
+from pydantic import Field, model_validator
+
 from attendance_scanner.contracts import (
+    BaseContract,
     BatchPeriod,
     CompletenessStatus,
     DiscoveredFile,
@@ -77,6 +80,67 @@ class GroupAwareScanPlan:
     @property
     def affected_group_count(self) -> int:
         return len(self.affected_groups)
+
+
+class ReprocessPolicy(BaseContract):
+    """Explicit detector-version policy for non-destructive incremental planning."""
+
+    pipeline_version: str = Field(min_length=1)
+    detector_name: Optional[str] = None
+    detector_mode: Optional[str] = None
+    detector_model_version: Optional[str] = None
+    detector_model_checksum: Optional[str] = None
+    opt_in: bool = False
+
+    @model_validator(mode="after")
+    def require_model_pair(self) -> "ReprocessPolicy":
+        if self.detector_model_checksum and not self.detector_model_version:
+            raise ValueError("detector_model_checksum requires detector_model_version")
+        return self
+
+
+def _version_change_reasons(entry: ManifestEntry, policy: ReprocessPolicy) -> List[str]:
+    reasons: List[str] = []
+    if entry.pipeline_version != policy.pipeline_version:
+        reasons.append("PIPELINE_VERSION_CHANGED")
+    if (
+        policy.detector_name is not None
+        and entry.detector_name is not None
+        and entry.detector_name != policy.detector_name
+    ):
+        reasons.append("DETECTOR_NAME_CHANGED")
+    if (
+        policy.detector_mode is not None
+        and entry.detector_mode is not None
+        and entry.detector_mode != policy.detector_mode
+    ):
+        reasons.append("DETECTOR_MODE_CHANGED")
+    if policy.detector_model_version is not None:
+        if (
+            entry.detector_model_version is not None
+            and entry.detector_model_version != policy.detector_model_version
+        ):
+            reasons.append("MODEL_VERSION_CHANGED")
+    if (
+        policy.detector_model_checksum is not None
+        and entry.detector_model_checksum is not None
+        and (entry.detector_model_checksum != policy.detector_model_checksum)
+    ):
+        reasons.append("MODEL_CHECKSUM_CHANGED")
+    return reasons
+
+
+def _classify_version_change(
+    file: DiscoveredFile,
+    policy: Optional[ReprocessPolicy],
+    reasons: List[str],
+) -> FileClassification:
+    if not reasons or policy is None:
+        return FileClassification.UNCHANGED
+    if policy.opt_in:
+        return FileClassification.REBUILD
+    file.reprocess_reason = ",".join(reasons)
+    return FileClassification.NEEDS_REPROCESS
 
 
 def _entry_group_key(
@@ -301,12 +365,16 @@ def _classify_file(
     manifest: Manifest,
     pipeline_version: str,
     required_output_mode: Optional[ExportMode] = None,
+    reprocess_policy: Optional[ReprocessPolicy] = None,
 ) -> FileClassification:
     """Classify one discovered file according to the AS-11 state rules."""
     if entry is None:
         return FileClassification.NEW
 
-    if entry.pipeline_version != pipeline_version:
+    version_reasons = (
+        _version_change_reasons(entry, reprocess_policy) if reprocess_policy is not None else []
+    )
+    if reprocess_policy is None and entry.pipeline_version != pipeline_version:
         return FileClassification.REBUILD
 
     if required_output_mode == ExportMode.PER_IMAGE:
@@ -342,7 +410,7 @@ def _classify_file(
         return FileClassification.MODIFIED
 
     if entry.size == file.size and entry.mtime_ns == file.mtime_ns:
-        return FileClassification.UNCHANGED
+        return _classify_version_change(file, reprocess_policy, version_reasons)
 
     # Metadata changed: hash the source before deciding whether it needs work.
     current_hash = compute_sha256(file.absolute_path)
@@ -354,7 +422,7 @@ def _classify_file(
         entry.mtime_ns = file.mtime_ns
         entry.sha256 = current_hash
         manifest.set_entry(entry)
-        return FileClassification.UNCHANGED
+        return _classify_version_change(file, reprocess_policy, version_reasons)
 
     return FileClassification.MODIFIED
 
@@ -365,6 +433,7 @@ def classify_discovered_files(
     output_root: Optional[Union[str, Path]] = None,
     pipeline_version: str = DEFAULT_PIPELINE_VERSION,
     required_output_mode: Optional[ExportMode] = None,
+    reprocess_policy: Optional[ReprocessPolicy] = None,
 ) -> DiscoveryResult:
     """Apply manifest-backed incremental classifications to a discovery result.
 
@@ -379,10 +448,15 @@ def classify_discovered_files(
     """
     effective_output_root = output_root or manifest.output_root
     outdated_count = 0
+    discovery.needs_reprocess_count = 0
+    discovery.reprocess_reasons = {}
+    effective_pipeline_version = (
+        reprocess_policy.pipeline_version if reprocess_policy is not None else pipeline_version
+    )
 
     for file in discovery.files:
         entry = manifest.get_entry(file.relative_path)
-        if entry is not None and entry.pipeline_version != pipeline_version:
+        if entry is not None and entry.pipeline_version != effective_pipeline_version:
             outdated_count += 1
 
         file.classification = _classify_file(
@@ -390,9 +464,14 @@ def classify_discovered_files(
             entry=entry,
             output_root=effective_output_root,
             manifest=manifest,
-            pipeline_version=pipeline_version,
+            pipeline_version=effective_pipeline_version,
             required_output_mode=required_output_mode,
+            reprocess_policy=reprocess_policy,
         )
+        if file.classification == FileClassification.NEEDS_REPROCESS:
+            discovery.needs_reprocess_count += 1
+            for reason in (file.reprocess_reason or "NEEDS_REPROCESS").split(","):
+                discovery.reprocess_reasons[reason] = discovery.reprocess_reasons.get(reason, 0) + 1
 
     discovery.outdated_pipeline_count = outdated_count
     return discovery
@@ -404,6 +483,7 @@ def build_incremental_scan_plan(
     output_root: Optional[Union[str, Path]] = None,
     pipeline_version: str = DEFAULT_PIPELINE_VERSION,
     required_output_mode: Optional[ExportMode] = None,
+    reprocess_policy: Optional[ReprocessPolicy] = None,
 ) -> ScanPlan:
     """Classify a discovery inventory and return its aggregate scan plan.
 
@@ -416,6 +496,7 @@ def build_incremental_scan_plan(
         output_root=output_root,
         pipeline_version=pipeline_version,
         required_output_mode=required_output_mode,
+        reprocess_policy=reprocess_policy,
     )
     effective_output_root = output_root or manifest.output_root
     return discovery.to_scan_plan(output_root=str(effective_output_root))
@@ -446,6 +527,7 @@ def build_group_aware_scan_plan(
     export_mode: ExportMode = ExportMode.GROUPED,
     scan_mode: Union[ScanMode, str] = ScanMode.GRAY,
     pipeline_version: str = DEFAULT_PIPELINE_VERSION,
+    reprocess_policy: Optional[ReprocessPolicy] = None,
 ) -> GroupAwareScanPlan:
     """Build file and affected-group plans for PER_IMAGE or GROUPED export.
 
@@ -459,6 +541,7 @@ def build_group_aware_scan_plan(
         manifest=manifest,
         output_root=output_root,
         pipeline_version=pipeline_version_for_mode(pipeline_version, scan_mode),
+        reprocess_policy=reprocess_policy,
     )
     effective_output_root = output_root or manifest.output_root
     discovered_paths = {file.relative_path.replace("\\", "/") for file in discovery.files}

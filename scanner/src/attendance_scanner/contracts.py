@@ -120,6 +120,7 @@ class FileClassification(str, Enum):
     REBUILD = "rebuild"
     COLLISION = "collision"
     UNSUPPORTED = "unsupported"
+    NEEDS_REPROCESS = "needs_reprocess"
 
 
 class FileProcessingStatus(str, Enum):
@@ -183,6 +184,7 @@ class DiscoveredFile(BaseContract):
     sha256: Optional[str] = None
     classification: FileClassification = FileClassification.NEW
     target_relative_pdf: str
+    reprocess_reason: Optional[str] = None
 
 
 class ScanPlan(BaseContract):
@@ -199,6 +201,8 @@ class ScanPlan(BaseContract):
     files_to_process: int = 0
     outdated_pipeline_count: int = 0
     unsupported_count: int = 0
+    needs_reprocess: int = 0
+    reprocess_reasons: Dict[str, int] = Field(default_factory=dict)
     collisions: List[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -413,6 +417,8 @@ class DiscoveryResult(BaseContract):
     unsupported_count: int = 0
     collisions: List[str] = Field(default_factory=list)
     outdated_pipeline_count: int = 0
+    needs_reprocess_count: int = 0
+    reprocess_reasons: Dict[str, int] = Field(default_factory=dict)
 
     @property
     def files_to_process(self) -> List[DiscoveredFile]:
@@ -448,5 +454,7 @@ class DiscoveryResult(BaseContract):
             files_to_process=files_to_process,
             outdated_pipeline_count=self.outdated_pipeline_count,
             unsupported_count=self.unsupported_count,
+            needs_reprocess=self.needs_reprocess_count,
+            reprocess_reasons=dict(self.reprocess_reasons),
             collisions=list(self.collisions),
         )

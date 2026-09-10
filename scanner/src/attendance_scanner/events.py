@@ -1,7 +1,7 @@
 """JSON Lines (JSONL) event protocol definitions for Attendance Scanner."""
 
 from datetime import datetime, timezone
-from typing import Annotated, Any, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationInfo, model_validator
 from pydantic.alias_generators import to_camel
@@ -64,6 +64,8 @@ class ScanPlanEvent(BaseEvent):
     files_to_process: int = Field(default=0, ge=0)
     outdated_pipeline_count: int = Field(default=0, ge=0)
     unsupported_count: int = Field(default=0, ge=0)
+    needs_reprocess: int = Field(default=0, ge=0)
+    reprocess_reasons: Dict[str, int] = Field(default_factory=dict)
     collisions: List[str] = Field(default_factory=list)
     period: Optional[BatchPeriod] = None
     export_mode: ExportMode = ExportMode.PER_IMAGE
@@ -175,6 +177,8 @@ class ScanPlanEvent(BaseEvent):
                 files_to_process=plan.files_to_process,
                 outdated_pipeline_count=plan.outdated_pipeline_count,
                 unsupported_count=plan.unsupported_count,
+                needs_reprocess=plan.needs_reprocess,
+                reprocess_reasons=dict(plan.reprocess_reasons),
                 collisions=list(plan.collisions),
                 period=period,
                 export_mode=export_mode,
@@ -199,6 +203,8 @@ class ScanPlanEvent(BaseEvent):
             files_to_process=plan.files_to_process,
             outdated_pipeline_count=plan.outdated_pipeline_count,
             unsupported_count=plan.unsupported_count,
+            needs_reprocess=plan.needs_reprocess,
+            reprocess_reasons=dict(plan.reprocess_reasons),
             collisions=list(plan.collisions),
             period=period,
             export_mode=export_mode,

@@ -24,6 +24,7 @@ from attendance_scanner.diagnostics import (
 )
 from attendance_scanner.discovery import (
     DEFAULT_PIPELINE_VERSION,
+    ReprocessPolicy,
     build_group_aware_scan_plan,
     build_incremental_scan_plan,
     discover_employee_folders,
@@ -84,6 +85,7 @@ def _prepare_plan(
     output_root: Optional[str],
     required_output_mode: Optional[ExportMode] = None,
     scan_mode: ScanMode | str = ScanMode.GRAY,
+    reprocess: bool = False,
 ) -> tuple[DiscoveryResult, Manifest, ManifestStore, str, ScanPlan]:
     """Discover, load state, classify files and persist only metadata-only updates."""
     validated_output_root = _validate_output_root(output_root)
@@ -93,16 +95,36 @@ def _prepare_plan(
     effective_output_root = validated_output_root or manifest.output_root
     _validate_output_root(effective_output_root)
     previous_updated_at = manifest.updated_at
+    reprocess_policy = _build_reprocess_policy(scan_mode, opt_in=reprocess)
     plan = build_incremental_scan_plan(
         discovery=discovery,
         manifest=manifest,
         output_root=effective_output_root,
         pipeline_version=pipeline_version_for_mode(DEFAULT_PIPELINE_VERSION, scan_mode),
         required_output_mode=required_output_mode,
+        reprocess_policy=reprocess_policy,
     )
     if manifest.updated_at != previous_updated_at:
         store.save_manifest(manifest)
     return discovery, manifest, store, effective_output_root, plan
+
+
+def _build_reprocess_policy(
+    scan_mode: ScanMode | str,
+    *,
+    opt_in: bool,
+) -> ReprocessPolicy:
+    """Build the current V1 metadata target with explicit opt-in semantics."""
+    normalized_mode = (
+        scan_mode if isinstance(scan_mode, ScanMode) else ScanMode(str(scan_mode).lower())
+    )
+    return ReprocessPolicy(
+        pipeline_version=pipeline_version_for_mode(DEFAULT_PIPELINE_VERSION, normalized_mode),
+        detector_name="v1_cv",
+        detector_mode=normalized_mode.value,
+        detector_model_version="opencv-classical",
+        opt_in=opt_in or normalized_mode != ScanMode.GRAY,
+    )
 
 
 def _parse_batch_period(args: argparse.Namespace) -> Optional[BatchPeriod]:
@@ -174,6 +196,7 @@ def _group_summary(
     period: BatchPeriod,
     export_mode: ExportMode,
     scan_mode: ScanMode | str,
+    reprocess_policy: Optional[ReprocessPolicy] = None,
 ) -> tuple[dict[str, int], List[ReviewGroup]]:
     """Summarize affected document groups for a typed scan-plan event."""
     discovery = discover_employee_folders(input_root)
@@ -185,6 +208,7 @@ def _group_summary(
         period,
         export_mode=export_mode,
         scan_mode=scan_mode,
+        reprocess_policy=reprocess_policy,
     )
     counts = {
         "document_groups": group_plan.affected_group_count,
@@ -213,11 +237,19 @@ def _plan_event(
     period: Optional[BatchPeriod],
     export_mode: ExportMode,
     scan_mode: ScanMode | str,
+    reprocess_policy: Optional[ReprocessPolicy] = None,
 ) -> ScanPlanEvent:
     """Create a typed plan event with document-aware summary counters."""
     if period is None:
         return ScanPlanEvent.from_plan(plan, period=None, export_mode=export_mode)
-    counts, review_groups = _group_summary(input_root, output_root, period, export_mode, scan_mode)
+    counts, review_groups = _group_summary(
+        input_root,
+        output_root,
+        period,
+        export_mode,
+        scan_mode,
+        reprocess_policy,
+    )
     return ScanPlanEvent.from_plan(
         plan,
         period=period,
@@ -286,6 +318,11 @@ def create_parser() -> argparse.ArgumentParser:
         default="per-image",
         help="PDF export strategy (default: per-image)",
     )
+    plan_parser.add_argument(
+        "--reprocess",
+        action="store_true",
+        help="explicitly opt in to rebuilding version-mismatched outputs",
+    )
 
     # scan-batch subcommand
     scan_parser = subparsers.add_parser(
@@ -339,6 +376,11 @@ def create_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON array of employee:YYYY-MM groups to skip",
     )
+    scan_parser.add_argument(
+        "--reprocess",
+        action="store_true",
+        help="explicitly opt in to rebuilding version-mismatched outputs",
+    )
 
     return parser
 
@@ -348,11 +390,13 @@ def handle_plan(args: argparse.Namespace) -> int:
     try:
         period = _parse_batch_period(args)
         export_mode = _parse_export_mode(args.export_mode)
+        reprocess_policy = _build_reprocess_policy(args.mode, opt_in=args.reprocess)
         _, _, _, _, plan = _prepare_plan(
             args.input,
             args.output,
             required_output_mode=export_mode,
             scan_mode=args.mode,
+            reprocess=args.reprocess,
         )
         event = _plan_event(
             plan,
@@ -361,6 +405,7 @@ def handle_plan(args: argparse.Namespace) -> int:
             period=period,
             export_mode=export_mode,
             scan_mode=args.mode,
+            reprocess_policy=reprocess_policy,
         )
         emit_jsonl_event(event)
         return 0
@@ -377,11 +422,13 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
         skip_groups = _parse_skip_groups(args.skip_group_json)
         if export_mode == ExportMode.GROUPED and period is None:
             raise CliArgumentError("Grouped export requires --year and --month")
+        reprocess_policy = _build_reprocess_policy(args.mode, opt_in=args.reprocess)
         discovery, manifest, store, effective_output_root, plan = _prepare_plan(
             args.input,
             args.output,
             required_output_mode=export_mode,
             scan_mode=args.mode,
+            reprocess=args.reprocess,
         )
         plan_event = _plan_event(
             plan,
@@ -390,6 +437,7 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
             period=period,
             export_mode=export_mode,
             scan_mode=args.mode,
+            reprocess_policy=reprocess_policy,
         )
         emit_jsonl_event(plan_event)
 
@@ -401,6 +449,7 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
                 period,
                 export_mode=export_mode,
                 scan_mode=args.mode,
+                reprocess_policy=reprocess_policy,
             )
             if export_mode == ExportMode.GROUPED and period is not None
             else None
