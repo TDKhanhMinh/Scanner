@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -131,6 +131,20 @@ class FileProcessingStatus(str, Enum):
     WARNING = "warning"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+class DetectionMetadata(BaseContract):
+    """Minimal persisted detector provenance and quality summary."""
+
+    detector_name: Optional[str] = None
+    detector_mode: Optional[str] = None
+    detector_model_version: Optional[str] = None
+    detector_model_checksum: Optional[str] = None
+    detection_status: Optional[Literal["detected", "fallback", "failed", "not_run"]] = None
+    detection_fallback_used: bool = False
+    detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = Field(
+        default_factory=dict
+    )
 
 
 class ScannerErrorCode(str, Enum):

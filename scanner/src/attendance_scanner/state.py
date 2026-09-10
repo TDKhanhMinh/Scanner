@@ -82,6 +82,13 @@ class ManifestEntry(BaseContract):
     status: FileProcessingStatus = FileProcessingStatus.SUCCESS
     processed_at: str
     pipeline_version: str = "0.1.0"
+    detector_name: Optional[str] = None
+    detector_mode: Optional[str] = None
+    detector_model_version: Optional[str] = None
+    detector_model_checksum: Optional[str] = None
+    detection_status: Optional[str] = None
+    detection_fallback_used: Optional[bool] = None
+    detection_quality_summary: Dict[str, Any] = Field(default_factory=dict)
     period: Optional[BatchPeriod] = None
     group_key: Optional[DocumentGroupKey] = None
     page_identity: PageIdentity = Field(default_factory=PageIdentity)
@@ -108,6 +115,14 @@ class ManifestArtifact(BaseContract):
     output_relative_path: str
     source_relative_paths: List[str] = Field(default_factory=list)
     artifact_version: Optional[str] = None
+    pipeline_version: Optional[str] = None
+    detector_name: Optional[str] = None
+    detector_mode: Optional[str] = None
+    detector_model_version: Optional[str] = None
+    detector_model_checksum: Optional[str] = None
+    detection_status: Optional[str] = None
+    detection_fallback_used: Optional[bool] = None
+    detection_quality_summary: Dict[str, Any] = Field(default_factory=dict)
     artifact_hash: Optional[str] = None
     stale: bool = False
 

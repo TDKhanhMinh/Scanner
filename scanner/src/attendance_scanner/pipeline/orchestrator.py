@@ -115,6 +115,14 @@ class SingleScanResult:
     warning_codes: List[str] = field(default_factory=list)
     diagnostics: SingleScanDiagnostics = field(default_factory=SingleScanDiagnostics)
     page_identity: PageIdentity = field(default_factory=PageIdentity)
+    detector_name: str = "v1_cv"
+    detector_mode: Optional[str] = None
+    detector_model_version: Optional[str] = "opencv-classical"
+    detector_model_checksum: Optional[str] = None
+    detection_fallback_used: bool = False
+    detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = field(
+        default_factory=dict
+    )
 
     @property
     def shape(self) -> Tuple[int, ...]:
@@ -434,4 +442,14 @@ def scan_one(
         warning_codes=unique_warnings,
         diagnostics=diagnostics,
         page_identity=page_identity,
+        detector_name="v1_cv",
+        detector_mode=scan_mode.value,
+        detector_model_version="opencv-classical",
+        detector_model_checksum=None,
+        detection_fallback_used=not document_detected,
+        detection_quality_summary={
+            "confidence": detection_confidence,
+            "areaRatio": detection_area_ratio,
+            "warningCount": len(unique_warnings),
+        },
     )

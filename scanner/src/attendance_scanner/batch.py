@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 from attendance_scanner.contracts import (
     BatchPeriod,
@@ -72,6 +72,50 @@ EventEmitter = Callable[[BaseEvent], None]
 def _group_id(key: DocumentGroupKey) -> str:
     """Return the stable UI/CLI identifier for an employee-period group."""
     return f"{key.employee_relative_dir}:{key.year:04d}-{key.month:02d}"
+
+
+def _aggregate_detection_metadata(entries: List[ManifestEntry]) -> Dict[str, Any]:
+    """Aggregate per-page detector provenance without misrepresenting mixed groups."""
+
+    def distinct_or_none(values: List[Optional[str]]) -> Optional[str]:
+        distinct = {value for value in values if value is not None}
+        return next(iter(distinct)) if len(distinct) == 1 else None
+
+    statuses = {entry.detection_status for entry in entries if entry.detection_status is not None}
+    if "failed" in statuses:
+        status: Optional[str] = "failed"
+    elif "fallback" in statuses:
+        status = "fallback"
+    elif statuses == {"detected"}:
+        status = "detected"
+    else:
+        status = next(iter(statuses)) if len(statuses) == 1 else None
+    fallback_values = [
+        entry.detection_fallback_used
+        for entry in entries
+        if entry.detection_fallback_used is not None
+    ]
+    return {
+        "pipeline_version": distinct_or_none([entry.pipeline_version for entry in entries]),
+        "detector_name": distinct_or_none([entry.detector_name for entry in entries]),
+        "detector_mode": distinct_or_none([entry.detector_mode for entry in entries]),
+        "detector_model_version": distinct_or_none(
+            [entry.detector_model_version for entry in entries]
+        ),
+        "detector_model_checksum": distinct_or_none(
+            [entry.detector_model_checksum for entry in entries]
+        ),
+        "detection_status": status,
+        "detection_fallback_used": (any(fallback_values) if fallback_values else None),
+        "detection_quality_summary": {
+            "pageCount": len(entries),
+            "fallbackPageCount": sum(value is True for value in fallback_values),
+            "failedPageCount": sum(entry.detection_status == "failed" for entry in entries),
+            "detectorVariantCount": len(
+                {(entry.detector_name, entry.detector_model_version) for entry in entries}
+            ),
+        },
+    }
 
 
 def _persist_manual_orders(
@@ -317,12 +361,21 @@ def _export_grouped_results(
         persisted_group.review_required = False
         persisted_group.artifact_stale = False
         manifest.set_group(persisted_group)
+        detection_metadata = _aggregate_detection_metadata(source_entries)
         manifest.set_artifact(
             ManifestArtifact(
                 export_mode=ExportMode.GROUPED,
                 output_relative_path=artifact_relative_path_text,
                 source_relative_paths=list(artifact.source_relative_paths),
                 artifact_version=DEFAULT_PIPELINE_VERSION,
+                pipeline_version=detection_metadata["pipeline_version"],
+                detector_name=detection_metadata["detector_name"],
+                detector_mode=detection_metadata["detector_mode"],
+                detector_model_version=detection_metadata["detector_model_version"],
+                detector_model_checksum=detection_metadata["detector_model_checksum"],
+                detection_status=detection_metadata["detection_status"],
+                detection_fallback_used=detection_metadata["detection_fallback_used"],
+                detection_quality_summary=detection_metadata["detection_quality_summary"],
                 stale=False,
             )
         )
@@ -440,6 +493,10 @@ def _make_failure_entry(
     pipeline_version: str,
     batch_period: Optional[BatchPeriod] = None,
     employee_relative_dir: Optional[str] = None,
+    detector_name: Optional[str] = "v1_cv",
+    detector_mode: Optional[str] = None,
+    detector_model_version: Optional[str] = "opencv-classical",
+    detector_model_checksum: Optional[str] = None,
 ) -> ManifestEntry:
     """Build retryable failure metadata while preserving prior artifacts."""
     previous = manifest.get_entry(file_relative_path)
@@ -453,7 +510,7 @@ def _make_failure_entry(
         if not output_relative_paths and output_relative_path is None:
             output_relative_paths = [target_relative_pdf]
             output_relative_path = target_relative_pdf
-        stored_pipeline_version = previous.pipeline_version
+        stored_pipeline_version = pipeline_version
 
     failure_entry = ManifestEntry(
         relative_path=file_relative_path,
@@ -471,6 +528,13 @@ def _make_failure_entry(
         artifact_dependencies=(
             list(previous.artifact_dependencies) if previous is not None else output_relative_paths
         ),
+        detector_name=detector_name,
+        detector_mode=detector_mode,
+        detector_model_version=detector_model_version,
+        detector_model_checksum=detector_model_checksum,
+        detection_status="failed",
+        detection_fallback_used=None,
+        detection_quality_summary={"error": "file_processing_failed"},
     )
     if batch_period is not None and employee_relative_dir is not None:
         assign_entry_context(
@@ -604,6 +668,13 @@ def _process_one_file(
             group_key=previous.group_key if previous is not None else None,
             page_identity=page_identity,
             artifact_dependencies=artifact_dependencies,
+            detector_name=scan_result.detector_name,
+            detector_mode=scan_result.detector_mode or mode.value,
+            detector_model_version=scan_result.detector_model_version,
+            detector_model_checksum=scan_result.detector_model_checksum,
+            detection_status=("detected" if scan_result.document_detected else "fallback"),
+            detection_fallback_used=scan_result.detection_fallback_used,
+            detection_quality_summary=dict(scan_result.detection_quality_summary),
         )
         if batch_period is not None:
             assign_entry_context(
@@ -654,6 +725,7 @@ def _process_one_file(
             pipeline_version=pipeline_version,
             batch_period=batch_period,
             employee_relative_dir=file.employee_name,
+            detector_mode=mode.value,
         )
         _best_effort_persist_failure(manifest, manifest_store, failure_entry, manifest_lock)
 
