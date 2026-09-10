@@ -65,6 +65,8 @@ The JSON report contains one per-sample record and aggregates:
 - detection success/failure and failure taxonomy;
 - convex polygon IoU;
 - per-corner Euclidean error in pixels and normalized by image diagonal;
+- optional raw-vs-final corner error (`raw_corners` versus refined `corners`) to
+  quantify whether refinement improved the detector result;
 - mean, P50, P95, and P99 corner error;
 - invalid-geometry/false-detection count and rate;
 - optional mask IoU, predicted mask coverage, connected-component count, and

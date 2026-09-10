@@ -97,6 +97,13 @@ from attendance_scanner.contracts import (
     SourcePage,
     StateError,
 )
+from attendance_scanner.corner_refinement import (
+    CORNER_REFINEMENT_VERSION,
+    CornerRefinementConfig,
+    CornerRefinementResult,
+    RefinementReasonCode,
+    refine_document_corners,
+)
 from attendance_scanner.corner_search import (
     CORNER_SEARCH_VERSION,
     CornerRoiResult,
@@ -345,6 +352,11 @@ __all__ = [
     "CornerSearchResult",
     "EdgeSample",
     "search_corner_rois",
+    "CORNER_REFINEMENT_VERSION",
+    "CornerRefinementConfig",
+    "CornerRefinementResult",
+    "RefinementReasonCode",
+    "refine_document_corners",
     "ScannerErrorInfo",
     "configure_logging",
     "describe_scanner_error",

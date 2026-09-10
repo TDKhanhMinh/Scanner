@@ -123,6 +123,7 @@ def test_external_predictions_report_missing_and_invalid_geometry(tmp_path: Path
                 sample_id=sample_id,
                 detected=True,
                 corners=[[10, 10], [91, 10], [90, 90], [10, 90]],
+                raw_corners=[[20, 20], [100, 20], [100, 100], [20, 100]],
                 timings_ms={"total_detection_ms": 5.0},
             )
         ],
@@ -135,6 +136,7 @@ def test_external_predictions_report_missing_and_invalid_geometry(tmp_path: Path
     assert report.metrics["failure_taxonomy"] == {"missing_prediction": 1}
     assert report.metrics["timings_ms"]["total_detection_ms"]["count"] == 1
     assert report.samples[0]["polygon_iou"] is not None
+    assert report.metrics["mean_raw_corner_error_px"] > report.metrics["mean_corner_error_px"]
 
     invalid_bundle = PredictionBundle(
         detector="hybrid",

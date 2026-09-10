@@ -59,6 +59,7 @@ class DetectionPrediction(BaseModel):
 
     sample_id: str = Field(min_length=1)
     detected: bool = True
+    raw_corners: Any = None
     corners: Any = None
     polygon: Any = None
     mask_path: Optional[str] = None
@@ -558,6 +559,7 @@ def _score_sample(
         "valid_geometry": False,
         "polygon_iou": None,
         "corner_error": None,
+        "raw_corner_error": None,
         "failure_reason": None,
         "mask_iou": None,
         "mask_coverage": None,
@@ -574,6 +576,12 @@ def _score_sample(
     result["timings_ms"] = _normalized_timings(prediction.timings_ms)
     result["memory_peak_bytes"] = prediction.memory_peak_bytes
     _score_prediction_mask(result, entry, prediction)
+    result["raw_corner_error"] = corner_distance(
+        prediction.raw_corners,
+        sample.corners,
+        sample.width,
+        sample.height,
+    )
     if not prediction.detected:
         result["failure_reason"] = _failure_name(prediction.failure_reason or "not_detected")
         return result
@@ -699,6 +707,18 @@ def _metrics(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         if sample["corner_error"] is not None
         for value in sample["corner_error"]["per_corner_normalized"].values()
     ]
+    raw_corner_px = [
+        value
+        for sample in samples
+        if sample["raw_corner_error"] is not None
+        for value in sample["raw_corner_error"]["per_corner_px"].values()
+    ]
+    raw_corner_normalized = [
+        value
+        for sample in samples
+        if sample["raw_corner_error"] is not None
+        for value in sample["raw_corner_error"]["per_corner_normalized"].values()
+    ]
     mask_ious = [sample["mask_iou"] for sample in samples if sample["mask_iou"] is not None]
     mask_coverages = [
         sample["mask_coverage"] for sample in samples if sample["mask_coverage"] is not None
@@ -713,6 +733,8 @@ def _metrics(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     )
     pixel_percentiles = _percentile_summary(corner_px, suffix="_px")
     normalized_percentiles = _percentile_summary(corner_normalized, suffix="_normalized")
+    raw_pixel_percentiles = _percentile_summary(raw_corner_px, suffix="_px")
+    raw_normalized_percentiles = _percentile_summary(raw_corner_normalized, suffix="_normalized")
     return {
         "sample_count": total,
         "detected_count": detected_count,
@@ -732,6 +754,11 @@ def _metrics(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "p50_normalized_corner_error": normalized_percentiles["p50_normalized"],
         "p95_normalized_corner_error": normalized_percentiles["p95_normalized"],
         "p99_normalized_corner_error": normalized_percentiles["p99_normalized"],
+        "raw_corner_error_count": len(raw_corner_px),
+        "mean_raw_corner_error_px": raw_pixel_percentiles["mean_px"],
+        "p95_raw_corner_error_px": raw_pixel_percentiles["p95_px"],
+        "mean_raw_normalized_corner_error": raw_normalized_percentiles["mean_normalized"],
+        "p95_raw_normalized_corner_error": raw_normalized_percentiles["p95_normalized"],
         "mask_iou_count": len(mask_ious),
         "mean_mask_iou": _mean(mask_ious),
         "mask_coverage_count": len(mask_coverages),
@@ -890,6 +917,10 @@ def render_markdown(report: BenchmarkReport) -> str:
         "p99_corner_error_px",
         "mean_normalized_corner_error",
         "p95_normalized_corner_error",
+        "mean_raw_corner_error_px",
+        "p95_raw_corner_error_px",
+        "mean_raw_normalized_corner_error",
+        "p95_raw_normalized_corner_error",
         "false_detection_rate",
         "mean_mask_iou",
         "mean_mask_coverage",
@@ -949,6 +980,8 @@ def render_csv(report: BenchmarkReport) -> str:
         "polygon_iou",
         "mean_corner_error_px",
         "mean_corner_error_normalized",
+        "mean_raw_corner_error_px",
+        "mean_raw_corner_error_normalized",
         "mask_iou",
         "mask_coverage",
         "mask_component_count",
@@ -968,6 +1001,10 @@ def render_csv(report: BenchmarkReport) -> str:
                 "polygon_iou": sample["polygon_iou"],
                 "mean_corner_error_px": corner.get("mean_px"),
                 "mean_corner_error_normalized": corner.get("mean_normalized"),
+                "mean_raw_corner_error_px": ((sample["raw_corner_error"] or {}).get("mean_px")),
+                "mean_raw_corner_error_normalized": (
+                    (sample["raw_corner_error"] or {}).get("mean_normalized")
+                ),
                 "mask_iou": sample["mask_iou"],
                 "mask_coverage": sample["mask_coverage"],
                 "mask_component_count": sample["mask_component_count"],
