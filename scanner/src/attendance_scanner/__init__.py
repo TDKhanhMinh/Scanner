@@ -204,6 +204,13 @@ from attendance_scanner.hybrid import (
     SegmentationProvider,
     create_detector,
 )
+from attendance_scanner.line_fitting import (
+    LINE_FITTING_VERSION,
+    FittedDocumentLine,
+    FittedLineSet,
+    LineFittingConfig,
+    fit_document_edge_lines,
+)
 from attendance_scanner.mask_postprocess import (
     MaskComponent,
     MaskPostprocessConfig,
@@ -537,6 +544,11 @@ __all__ = [
     "HybridDocumentDetector",
     "SegmentationProvider",
     "create_detector",
+    "FittedDocumentLine",
+    "FittedLineSet",
+    "LINE_FITTING_VERSION",
+    "LineFittingConfig",
+    "fit_document_edge_lines",
     "CV_CANDIDATE_GENERATOR_VERSION",
     "CvCandidate",
     "CvCandidateConfig",
