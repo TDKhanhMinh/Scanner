@@ -267,6 +267,16 @@ from attendance_scanner.pdf_export import (
     export_pdf_pages,
     export_single_page_pdf,
 )
+from attendance_scanner.performance_benchmark import (
+    PERFORMANCE_REPORT_VERSION,
+    LatencySummary,
+    OnnxPerformanceReport,
+    PipelinePerformanceReport,
+    compare_performance_reports,
+    load_pipeline_report,
+    measure_onnx_performance,
+    measure_pipeline_performance,
+)
 from attendance_scanner.pipeline import (
     BoundaryCollisionResult,
     DegenerateCornersError,
@@ -548,6 +558,14 @@ __all__ = [
     "benchmark_service",
     "resolve_model_path",
     "runtime_diagnostics",
+    "LatencySummary",
+    "OnnxPerformanceReport",
+    "PERFORMANCE_REPORT_VERSION",
+    "PipelinePerformanceReport",
+    "compare_performance_reports",
+    "load_pipeline_report",
+    "measure_onnx_performance",
+    "measure_pipeline_performance",
     "QUADRILATERAL_CANDIDATE_VERSION",
     "QuadrilateralCandidate",
     "QuadrilateralCandidateConfig",

@@ -93,6 +93,7 @@ class OnnxModelInfo(BaseModel):
 
     model_path: str
     model_sha256: str
+    model_size_bytes: int = Field(default=0, ge=0)
     input_name: str
     input_shape: List[Any]
     input_type: str
@@ -122,6 +123,7 @@ class OnnxMicroBenchmark:
     repeated_inference_ms: Dict[str, float]
     iterations: int
     session_create_count: int
+    steady_state_durations_ms: Tuple[float, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -130,6 +132,7 @@ class OnnxMicroBenchmark:
             "repeatedInferenceMs": self.repeated_inference_ms,
             "iterations": self.iterations,
             "sessionCreateCount": self.session_create_count,
+            "steadyStateDurationsMs": list(self.steady_state_durations_ms),
         }
 
 
@@ -368,6 +371,7 @@ class OnnxInferenceService:
         return OnnxModelInfo(
             model_path=str(path),
             model_sha256=model_hash,
+            model_size_bytes=path.stat().st_size,
             input_name=input_name,
             input_shape=_shape_list(input_meta.shape),
             input_type=str(input_meta.type),
@@ -490,6 +494,7 @@ def benchmark_service(
         },
         iterations=iterations,
         session_create_count=service.session_create_count,
+        steady_state_durations_ms=tuple(float(value) for value in durations),
     )
 
 
