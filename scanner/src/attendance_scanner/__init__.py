@@ -142,6 +142,17 @@ from attendance_scanner.fingerprint import (
     compute_fast_fingerprint,
     compute_sha256,
 )
+from attendance_scanner.geometry_validator import (
+    GEOMETRY_VALIDATOR_VERSION,
+    CandidateValidationResult,
+    GeometryReasonCode,
+    GeometryValidationConfig,
+    MaskValidationEvidence,
+    QuadValidationEvidence,
+    validate_candidate,
+    validate_mask,
+    validate_quadrilateral,
+)
 from attendance_scanner.mask_postprocess import (
     MaskComponent,
     MaskPostprocessConfig,
@@ -418,4 +429,13 @@ __all__ = [
     "MaskPostprocessConfig",
     "MaskPostprocessResult",
     "postprocess_document_mask",
+    "CandidateValidationResult",
+    "GEOMETRY_VALIDATOR_VERSION",
+    "GeometryReasonCode",
+    "GeometryValidationConfig",
+    "MaskValidationEvidence",
+    "QuadValidationEvidence",
+    "validate_candidate",
+    "validate_mask",
+    "validate_quadrilateral",
 ]
