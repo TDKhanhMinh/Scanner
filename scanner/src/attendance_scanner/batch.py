@@ -16,6 +16,7 @@ from attendance_scanner.contracts import (
     BatchPeriod,
     BatchSummary,
     CompletenessStatus,
+    DetectionFailureReason,
     DiscoveredFile,
     DiscoveryResult,
     DocumentGroupKey,
@@ -95,6 +96,16 @@ def _aggregate_detection_metadata(entries: List[ManifestEntry]) -> Dict[str, Any
         for entry in entries
         if entry.detection_fallback_used is not None
     ]
+    reason_codes = sorted(
+        {
+            reason.value if isinstance(reason, DetectionFailureReason) else str(reason)
+            for entry in entries
+            for reason in entry.detection_reason_codes
+        }
+    )
+    user_messages = {
+        entry.detection_user_message for entry in entries if entry.detection_user_message
+    }
     return {
         "pipeline_version": distinct_or_none([entry.pipeline_version for entry in entries]),
         "detector_name": distinct_or_none([entry.detector_name for entry in entries]),
@@ -115,6 +126,11 @@ def _aggregate_detection_metadata(entries: List[ManifestEntry]) -> Dict[str, Any
                 {(entry.detector_name, entry.detector_model_version) for entry in entries}
             ),
         },
+        "detection_reason": (
+            DetectionFailureReason(reason_codes[0]) if len(reason_codes) == 1 else None
+        ),
+        "detection_reason_codes": [DetectionFailureReason(code) for code in reason_codes],
+        "detection_user_message": next(iter(user_messages)) if len(user_messages) == 1 else None,
     }
 
 
@@ -376,6 +392,9 @@ def _export_grouped_results(
                 detection_status=detection_metadata["detection_status"],
                 detection_fallback_used=detection_metadata["detection_fallback_used"],
                 detection_quality_summary=detection_metadata["detection_quality_summary"],
+                detection_reason=detection_metadata["detection_reason"],
+                detection_reason_codes=detection_metadata["detection_reason_codes"],
+                detection_user_message=detection_metadata["detection_user_message"],
                 stale=False,
             )
         )
@@ -535,6 +554,9 @@ def _make_failure_entry(
         detection_status="failed",
         detection_fallback_used=None,
         detection_quality_summary={"error": "file_processing_failed"},
+        detection_reason=None,
+        detection_reason_codes=[],
+        detection_user_message=None,
     )
     if batch_period is not None and employee_relative_dir is not None:
         assign_entry_context(
@@ -675,6 +697,9 @@ def _process_one_file(
             detection_status=("detected" if scan_result.document_detected else "fallback"),
             detection_fallback_used=scan_result.detection_fallback_used,
             detection_quality_summary=dict(scan_result.detection_quality_summary),
+            detection_reason=scan_result.detection_reason,
+            detection_reason_codes=list(scan_result.detection_reason_codes),
+            detection_user_message=scan_result.detection_user_message,
         )
         if batch_period is not None:
             assign_entry_context(
@@ -703,6 +728,8 @@ def _process_one_file(
                 document_detected=scan_result.document_detected,
                 warning=scan_result.warning,
                 duration_ms=duration_ms,
+                detection_reason=scan_result.detection_reason,
+                detection_reason_codes=list(scan_result.detection_reason_codes),
             ),
             scan_result=scan_result,
         )

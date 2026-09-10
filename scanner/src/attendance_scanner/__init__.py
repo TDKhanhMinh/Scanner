@@ -68,10 +68,13 @@ from attendance_scanner.candidate_scoring import (
     sweep_candidate_scores,
 )
 from attendance_scanner.contracts import (
+    DETECTION_FAILURE_TAXONOMY_VERSION,
     PROTOCOL_VERSION,
     BatchPeriod,
     BatchSummary,
     CompletenessStatus,
+    DetectionFailureReason,
+    DetectionFailureSummary,
     DetectionMetadata,
     DiscoveredFile,
     DiscoveryResult,
@@ -139,6 +142,7 @@ from attendance_scanner.diagnostics import (
     describe_scanner_error,
     log_scanner_error,
     scanner_error_user_message,
+    summarize_detection_failure,
 )
 from attendance_scanner.discovery import (
     DEFAULT_PIPELINE_VERSION,
@@ -323,6 +327,9 @@ __all__ = [
     "ExportMode",
     "PageType",
     "CompletenessStatus",
+    "DETECTION_FAILURE_TAXONOMY_VERSION",
+    "DetectionFailureReason",
+    "DetectionFailureSummary",
     "BatchPeriod",
     "PageIdentity",
     "DocumentGroupKey",
@@ -366,6 +373,7 @@ __all__ = [
     "describe_scanner_error",
     "log_scanner_error",
     "scanner_error_user_message",
+    "summarize_detection_failure",
     "CandidateCorners",
     "CanonicalCorners",
     "DetectionTiming",

@@ -172,6 +172,32 @@ class ScannerWarningCode(str, Enum):
     DOCUMENT_CLIPPED = "DOCUMENT_CLIPPED"
 
 
+class DetectionFailureReason(str, Enum):
+    """Versioned machine-readable detection failure taxonomy."""
+
+    SEGMENTATION_LOW_CONFIDENCE = "SEGMENTATION_LOW_CONFIDENCE"
+    MASK_INVALID = "MASK_INVALID"
+    MASK_AMBIGUOUS_COMPONENTS = "MASK_AMBIGUOUS_COMPONENTS"
+    QUAD_FIT_FAILED = "QUAD_FIT_FAILED"
+    CV_NO_CANDIDATE = "CV_NO_CANDIDATE"
+    HYBRID_AMBIGUOUS = "HYBRID_AMBIGUOUS"
+    REFINEMENT_REJECTED = "REFINEMENT_REJECTED"
+    PERSPECTIVE_INVALID = "PERSPECTIVE_INVALID"
+    FALLBACK_FULL_IMAGE = "FALLBACK_FULL_IMAGE"
+
+
+DETECTION_FAILURE_TAXONOMY_VERSION: Literal["1.0"] = "1.0"
+
+
+class DetectionFailureSummary(BaseContract):
+    """Typed compact failure summary; verbose diagnostics stay in logs/debug files."""
+
+    taxonomy_version: Literal["1.0"] = DETECTION_FAILURE_TAXONOMY_VERSION
+    primary_reason: Optional[DetectionFailureReason] = None
+    reason_codes: List[DetectionFailureReason] = Field(default_factory=list)
+    user_message: Optional[str] = None
+
+
 class DiscoveredFile(BaseContract):
     """Metadata of a discovered image file."""
 

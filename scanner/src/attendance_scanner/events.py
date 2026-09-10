@@ -10,6 +10,7 @@ from attendance_scanner.contracts import (
     PROTOCOL_VERSION,
     BatchPeriod,
     BatchSummary,
+    DetectionFailureReason,
     ExportMode,
     ReviewGroup,
     ScannerErrorCode,
@@ -238,6 +239,8 @@ class FileCompletedEvent(BaseEvent):
     document_detected: bool = False
     warning: Optional[str] = None
     duration_ms: int = Field(default=0, ge=0)
+    detection_reason: Optional[DetectionFailureReason] = None
+    detection_reason_codes: List[DetectionFailureReason] = Field(default_factory=list)
 
 
 class FileFailedEvent(BaseEvent):
@@ -248,6 +251,7 @@ class FileFailedEvent(BaseEvent):
     employee_name: str = Field(min_length=1)
     error_code: ScannerErrorCode
     message: str = Field(min_length=1)
+    detection_reason: Optional[DetectionFailureReason] = None
 
 
 class ScanCompletedEvent(BaseEvent):

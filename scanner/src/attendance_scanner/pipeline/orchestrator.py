@@ -21,6 +21,7 @@ from pydantic import Field
 
 from attendance_scanner.contracts import (
     BaseContract,
+    DetectionFailureReason,
     FileProcessingStatus,
     FileResult,
     ImageDecodeError,
@@ -29,6 +30,7 @@ from attendance_scanner.contracts import (
     ScanMode,
     ScannerWarningCode,
 )
+from attendance_scanner.diagnostics import summarize_detection_failure
 from attendance_scanner.page_classification import classify_page
 from attendance_scanner.pipeline.detect import (
     DetectionConfig,
@@ -123,6 +125,9 @@ class SingleScanResult:
     detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = field(
         default_factory=dict
     )
+    detection_reason: Optional[DetectionFailureReason] = None
+    detection_reason_codes: List[DetectionFailureReason] = field(default_factory=list)
+    detection_user_message: Optional[str] = None
 
     @property
     def shape(self) -> Tuple[int, ...]:
@@ -415,6 +420,11 @@ def scan_one(
 
     # Deduplicate warnings preserving order
     unique_warnings = list(dict.fromkeys(warning_codes))
+    detection_summary = summarize_detection_failure(
+        document_detected=document_detected,
+        warning_codes=unique_warnings,
+        fallback_used=not document_detected,
+    )
 
     diagnostics = SingleScanDiagnostics(
         document_detected=document_detected,
@@ -452,4 +462,7 @@ def scan_one(
             "areaRatio": detection_area_ratio,
             "warningCount": len(unique_warnings),
         },
+        detection_reason=detection_summary.primary_reason,
+        detection_reason_codes=list(detection_summary.reason_codes),
+        detection_user_message=detection_summary.user_message,
     )

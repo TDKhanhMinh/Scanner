@@ -45,6 +45,9 @@ def test_per_image_scan_persists_detector_metadata_without_changing_identity(tmp
     assert entry.detector_model_version == "opencv-classical"
     assert entry.detection_status in {"detected", "fallback"}
     assert entry.detection_fallback_used is True
+    assert entry.detection_reason == "CV_NO_CANDIDATE"
+    assert entry.detection_reason_codes == ["CV_NO_CANDIDATE", "FALLBACK_FULL_IMAGE"]
+    assert entry.detection_user_message
     assert entry.relative_path == "NV01/sheet.png"
     assert entry.artifact_dependencies == ["NV01/sheet.pdf"]
 

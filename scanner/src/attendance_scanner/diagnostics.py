@@ -8,9 +8,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Dict, List, Literal, Optional, Sequence
 
-from attendance_scanner.contracts import ScannerError, ScannerErrorCode
+from attendance_scanner.contracts import (
+    DetectionFailureReason,
+    DetectionFailureSummary,
+    ScannerError,
+    ScannerErrorCode,
+)
 
 LOGGER_NAME = "attendance_scanner"
 ScannerOperation = Literal["request", "plan", "file", "output", "state", "unknown"]
@@ -47,6 +52,32 @@ _USER_MESSAGES: Dict[ScannerErrorCode, str] = {
     ),
 }
 
+_DETECTION_USER_MESSAGES: Dict[DetectionFailureReason, str] = {
+    DetectionFailureReason.SEGMENTATION_LOW_CONFIDENCE: (
+        "AI chưa đủ tin cậy để xác định biên tài liệu; hệ thống sẽ dùng đường dự phòng."
+    ),
+    DetectionFailureReason.MASK_INVALID: (
+        "Mask tài liệu không hợp lệ; hệ thống sẽ dùng đường dự phòng."
+    ),
+    DetectionFailureReason.MASK_AMBIGUOUS_COMPONENTS: (
+        "Ảnh có nhiều vùng giấy cạnh tranh; cần kiểm tra lại trước khi cắt tài liệu."
+    ),
+    DetectionFailureReason.QUAD_FIT_FAILED: "Không thể khớp đủ bốn cạnh tài liệu một cách an toàn.",
+    DetectionFailureReason.CV_NO_CANDIDATE: "Không phát hiện được biên tài liệu rõ ràng.",
+    DetectionFailureReason.HYBRID_AMBIGUOUS: (
+        "AI và OpenCV đưa ra kết quả gần nhau; hệ thống không tự cắt để tránh mất nội dung."
+    ),
+    DetectionFailureReason.REFINEMENT_REJECTED: (
+        "Tinh chỉnh biên không đủ an toàn; giữ lại kết quả ban đầu."
+    ),
+    DetectionFailureReason.PERSPECTIVE_INVALID: (
+        "Phép nắn phối cảnh không hợp lệ; giữ nguyên ảnh gốc để tránh cắt sai."
+    ),
+    DetectionFailureReason.FALLBACK_FULL_IMAGE: (
+        "Không đủ bằng chứng để cắt an toàn; giữ nguyên toàn bộ ảnh."
+    ),
+}
+
 
 @dataclass(frozen=True)
 class ScannerErrorInfo:
@@ -73,6 +104,42 @@ class ScannerErrorInfo:
 def scanner_error_user_message(code: ScannerErrorCode) -> str:
     """Return the actionable Vietnamese message for a stable error code."""
     return _USER_MESSAGES[code]
+
+
+def summarize_detection_failure(
+    *,
+    document_detected: bool,
+    warning_codes: Sequence[str] = (),
+    fallback_used: bool = False,
+) -> DetectionFailureSummary:
+    """Map internal scan warnings to a typed compact taxonomy summary."""
+    if document_detected:
+        return DetectionFailureSummary()
+    warnings = {code.upper() for code in warning_codes}
+    if "HYBRID_AMBIGUOUS" in warnings or "DETECTION_AMBIGUOUS" in warnings:
+        primary = DetectionFailureReason.HYBRID_AMBIGUOUS
+    elif "PERSPECTIVE_INVALID" in warnings or "WARP_FALLBACK" in warnings:
+        primary = DetectionFailureReason.PERSPECTIVE_INVALID
+    elif "QUAD_FIT_FAILED" in warnings or "DOCUMENT_CLIPPED" in warnings:
+        primary = DetectionFailureReason.QUAD_FIT_FAILED
+    elif "MASK_INVALID" in warnings:
+        primary = DetectionFailureReason.MASK_INVALID
+    elif "MASK_AMBIGUOUS_COMPONENTS" in warnings:
+        primary = DetectionFailureReason.MASK_AMBIGUOUS_COMPONENTS
+    elif "REFINEMENT_REJECTED" in warnings:
+        primary = DetectionFailureReason.REFINEMENT_REJECTED
+    elif "SEGMENTATION_LOW_CONFIDENCE" in warnings:
+        primary = DetectionFailureReason.SEGMENTATION_LOW_CONFIDENCE
+    else:
+        primary = DetectionFailureReason.CV_NO_CANDIDATE
+    reasons: List[DetectionFailureReason] = [primary]
+    if fallback_used or "FALLBACK_FULL_IMAGE" in warnings:
+        reasons.append(DetectionFailureReason.FALLBACK_FULL_IMAGE)
+    return DetectionFailureSummary(
+        primary_reason=primary,
+        reason_codes=list(dict.fromkeys(reasons)),
+        user_message=_DETECTION_USER_MESSAGES[primary],
+    )
 
 
 def _technical_message(exc: BaseException) -> str:

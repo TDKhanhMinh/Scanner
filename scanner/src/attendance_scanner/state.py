@@ -15,6 +15,7 @@ from .contracts import (
     BaseContract,
     BatchPeriod,
     CompletenessStatus,
+    DetectionFailureReason,
     DocumentGroupKey,
     ExportMode,
     FileProcessingStatus,
@@ -24,6 +25,16 @@ from .contracts import (
 )
 
 logger = logging.getLogger(__name__)
+
+_FORBIDDEN_QUALITY_KEYS = {"rawmask", "binarymask", "probabilitymap", "rawtrace"}
+
+
+def _validate_quality_summary(values: Dict[str, Union[str, int, float, bool, None]]) -> None:
+    for key in values:
+        normalized = "".join(character for character in key.lower() if character.isalnum())
+        if normalized in _FORBIDDEN_QUALITY_KEYS:
+            raise ValueError(f"{key} is not allowed in persisted quality summary")
+
 
 # Canonical schema version for manifest files
 CURRENT_SCHEMA_VERSION = 2
@@ -88,7 +99,12 @@ class ManifestEntry(BaseContract):
     detector_model_checksum: Optional[str] = None
     detection_status: Optional[str] = None
     detection_fallback_used: Optional[bool] = None
-    detection_quality_summary: Dict[str, Any] = Field(default_factory=dict)
+    detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = Field(
+        default_factory=dict
+    )
+    detection_reason: Optional[DetectionFailureReason] = None
+    detection_reason_codes: List[DetectionFailureReason] = Field(default_factory=list)
+    detection_user_message: Optional[str] = None
     period: Optional[BatchPeriod] = None
     group_key: Optional[DocumentGroupKey] = None
     page_identity: PageIdentity = Field(default_factory=PageIdentity)
@@ -107,6 +123,11 @@ class ManifestEntry(BaseContract):
             self.output_relative_path = self.output_relative_paths[0]
         return self
 
+    @model_validator(mode="after")
+    def _validate_detection_quality(self) -> "ManifestEntry":
+        _validate_quality_summary(self.detection_quality_summary)
+        return self
+
 
 class ManifestArtifact(BaseContract):
     """One output artifact and its ordered source dependencies."""
@@ -122,7 +143,18 @@ class ManifestArtifact(BaseContract):
     detector_model_checksum: Optional[str] = None
     detection_status: Optional[str] = None
     detection_fallback_used: Optional[bool] = None
-    detection_quality_summary: Dict[str, Any] = Field(default_factory=dict)
+    detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = Field(
+        default_factory=dict
+    )
+    detection_reason: Optional[DetectionFailureReason] = None
+    detection_reason_codes: List[DetectionFailureReason] = Field(default_factory=list)
+    detection_user_message: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_detection_quality(self) -> "ManifestArtifact":
+        _validate_quality_summary(self.detection_quality_summary)
+        return self
+
     artifact_hash: Optional[str] = None
     stale: bool = False
 
