@@ -68,6 +68,17 @@ def test_all_failure_categories_map_to_typed_primary_reasons(wire_warning, expec
     assert summary.primary_reason == expected
 
 
+def test_ai_unavailable_warning_maps_to_actionable_segmentation_reason():
+    summary = summarize_detection_failure(
+        document_detected=False,
+        warning_codes=["SEGMENTATION_LOW_CONFIDENCE", "FALLBACK_FULL_IMAGE"],
+        fallback_used=True,
+    )
+
+    assert summary.primary_reason == DetectionFailureReason.SEGMENTATION_LOW_CONFIDENCE
+    assert "AI" in (summary.user_message or "")
+
+
 @pytest.mark.parametrize("model", [ManifestEntry, ManifestArtifact])
 def test_persisted_quality_summary_rejects_raw_masks_and_nested_debug_data(model):
     payload = {"detection_quality_summary": {"raw_mask": [[0, 1], [1, 0]]}}

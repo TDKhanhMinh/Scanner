@@ -1,9 +1,18 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
-import { FileResultList } from "@/components/scanner/FileResultList";
+import {
+  FileResultList,
+  formatWarningMessage,
+} from "@/components/scanner/FileResultList";
 
 describe("FileResultList", () => {
+  it("maps V2 provider fallback warnings to actionable copy", () => {
+    expect(formatWarningMessage("SEGMENTATION_FALLBACK,DETECTION_AMBIGUOUS")).toBe(
+      "AI không khả dụng hoặc chưa đủ tin cậy — đã dùng fallback; Nhiều khả năng nhận diện gần nhau — không tự cắt để tránh mất nội dung",
+    );
+  });
+
   it("formats clipped warnings and exposes the source preview action", () => {
     const onPreview = vi.fn();
 

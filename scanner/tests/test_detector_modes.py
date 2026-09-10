@@ -145,3 +145,18 @@ def test_scan_one_uses_configured_detector_without_model_name_in_product_mode(
     )
     assert bounded is not None
     assert max(bounded.shape[:2]) <= 1280
+
+
+def test_ai_mode_keeps_no_candidate_as_full_image_with_typed_reason(tmp_path: Path) -> None:
+    source = tmp_path / "blank.png"
+    image = np.full((240, 320, 3), 128, dtype=np.uint8)
+    assert cv2.imwrite(str(source), image)
+
+    result = scan_one(source, mode="gray", detector_mode="ai_enhanced")
+
+    assert result.document_detected is False
+    assert result.output_width == 320
+    assert result.output_height == 240
+    assert result.detection_reason is not None
+    assert result.detection_reason.value == "SEGMENTATION_LOW_CONFIDENCE"
+    assert "FALLBACK_FULL_IMAGE" in {reason.value for reason in result.detection_reason_codes}

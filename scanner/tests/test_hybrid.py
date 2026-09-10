@@ -162,6 +162,23 @@ def test_segmentation_failure_rescues_with_cv_and_records_warning(tmp_path: Path
     assert result.decision_trace is not None
     assert result.decision_trace.path == "cv_fallback"
     assert "SEGMENTATION_FALLBACK" in result.warnings
+    assert "SEGMENTATION_LOW_CONFIDENCE" in result.warnings
+
+
+def test_missing_segmentation_provider_is_explicit_before_cv_fallback(tmp_path: Path):
+    image = load_image(_write_document(tmp_path / "sheet.png"))
+    detector = HybridDocumentDetector(
+        None,
+        config=HybridConfig(use_hough=False),
+        cv_provider=lambda _image: _empty_cv_pool(),
+    )
+
+    result = detector.detect(image)
+
+    assert result.detected is False
+    assert result.fallback_used is True
+    assert "SEGMENTATION_LOW_CONFIDENCE" in result.warnings
+    assert "FALLBACK_FULL_IMAGE" in result.warnings
 
 
 def test_ambiguous_ranking_does_not_autocrop_and_full_failure_falls_back(tmp_path: Path):

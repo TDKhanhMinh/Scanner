@@ -327,8 +327,10 @@ class HybridDocumentDetector:
     @staticmethod
     def _warnings(segmentation_state: str, ranking: CandidateRankingResult) -> List[str]:
         warnings: List[str] = []
-        if segmentation_state in {"failed", "ambiguous"}:
+        if segmentation_state in {"failed", "ambiguous", "not_configured"}:
             warnings.append("SEGMENTATION_FALLBACK")
+        if segmentation_state in {"failed", "not_configured"}:
+            warnings.append("SEGMENTATION_LOW_CONFIDENCE")
         if ranking.status == "ambiguous":
             warnings.append("DETECTION_AMBIGUOUS")
         return warnings
