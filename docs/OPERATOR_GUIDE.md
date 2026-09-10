@@ -115,3 +115,23 @@ Scanner state is stored under `%APPDATA%\attendance-scanner\state`. Installer
 uninstall may remove application state according to Windows installer defaults,
 but must never remove the user-selected input root or PDF output root. Back up
 important PDFs independently of application state.
+
+## 8. V2 detector controls and diagnostics
+
+- **AI Enhanced** is the default document detector. It combines configured AI
+  segmentation evidence with CV fitting/refinement and falls back safely when
+  evidence is unavailable.
+- **Classic** uses the OpenCV-only detector and is the operator fallback. The
+  image enhancement choice (Gray, B&W, Color Enhanced, Smart Document) is a
+  separate setting and continues to work as before.
+- The selected detector mode and diagnostics toggle are remembered locally for
+  the next app session. **Cho phép reprocess** is reset when the app starts and
+  must be explicitly enabled after reviewing the `needs_reprocess` count.
+- When diagnostics or a warning is available, select the preview icon in the
+  result list. The overlay shows the bounded preview, candidate/final corners,
+  fallback reason and quality score. A quality score is not an absolute
+  probability. Missing preview data never blocks the batch.
+
+If the detector cannot safely identify the paper, the PDF uses the full
+normalized image and displays a warning such as `DOCUMENT_NOT_DETECTED` or
+`FALLBACK_FULL_IMAGE`; the system does not silently crop a doubtful candidate.

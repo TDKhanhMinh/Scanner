@@ -66,8 +66,28 @@ function Invoke-Sidecar {
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
     $startInfo.Environment["APPDATA"] = $AppDataPath
-    foreach ($argument in $Arguments) {
-        $startInfo.ArgumentList.Add($argument)
+    function Quote-WindowsArgument {
+        param([string]$Argument)
+
+        if ($Argument -notmatch '[\s"]' -and $Argument.Length -gt 0) {
+            return $Argument
+        }
+        $escaped = [regex]::Replace($Argument, '(\\*)"', '$1$1\"')
+        $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+        return '"' + $escaped + '"'
+    }
+
+    if ($startInfo.PSObject.Properties.Name -contains "ArgumentList") {
+        foreach ($argument in $Arguments) {
+            $startInfo.ArgumentList.Add($argument)
+        }
+    } else {
+        # Windows PowerShell 5.1 targets .NET Framework, which does not expose
+        # ProcessStartInfo.ArgumentList. Quote each argument for its legacy
+        # command-line parser while preserving spaces and Unicode paths.
+        $startInfo.Arguments = (($Arguments | ForEach-Object {
+            Quote-WindowsArgument ([string]$_)
+        }) -join ' ')
     }
 
     $process = [System.Diagnostics.Process]::new()

@@ -156,9 +156,21 @@ $manifest = [ordered]@{
     installers = $installerMetadata
     offline = $true
     appDataState = "APPDATA/attendance-scanner/state"
+    v2 = [ordered]@{
+        detectorModes = @("ai_enhanced", "classic")
+        modelArtifact = $null
+        productionReady = $false
+        packagedStartupVerified = $false
+        note = "Set modelArtifact only after approved model checksum and clean packaged validation."
+    }
     generatedAtUtc = [DateTime]::UtcNow.ToString("O")
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+
+$verifyScript = Join-Path $PSScriptRoot "verify-release-manifest.ps1"
+Invoke-Checked $psPath @(
+    "-NoProfile", "-File", $verifyScript, "-ManifestPath", "build\windows\release-manifest.json"
+) "[5/5] Verifying release manifest hashes"
 
 Write-Host "Windows release build completed successfully." -ForegroundColor Green
 Write-Host "Release manifest: $manifestPath"

@@ -139,3 +139,31 @@ append evidence and re-fetch the page, then commit task-scoped changes. Preserve
 unrelated work. Do not push unless the user explicitly requests it. Do not mark
 Done when a required packaged, clean-environment, browser, or runtime gate is still
 unverified.
+
+## V2 detector and diagnostic contracts
+
+The product detector setting is independent from the enhancement `ScanMode`:
+`ai_enhanced` maps to the provider-neutral hybrid detector and `classic` keeps
+the V1 OpenCV path. Benchmark-only modes are exposed through the CLI, not the
+normal operator UI. A configured provider can be injected into `run_batch`; an
+absent approved model is recorded as an explicit hybrid fallback.
+
+`DetectionPreview` is emitted only for warning/diagnostic results. Its image is
+a bounded JPEG data URL (maximum 1280px dimension), its corner points use
+`original_pixels`, and the desktop SVG normalizes them to a 0..100 viewBox.
+Raw masks/tensors/traces are never persisted in the manifest or sent as normal
+technical UI diagnostics.
+
+The decision and performance workflows are:
+
+    .\scanner\.venv\Scripts\python scripts\benchmark-v2-performance.py --input-root <images> --output <report.json>
+    .\scanner\.venv\Scripts\python scripts\run-v2-decision.py --manifest <manifest.json> --output <decision.json>
+    .\scripts\verify-release-manifest.ps1
+
+AS-59 blocks promotion when V2 prediction bundles/checksums are missing or
+when hybrid has silent wrong crops or metric regression. AS-60 must keep the
+packaged clean-Windows/model-artifact gate explicit; dev tests alone do not
+approve a V2 release.
+
+The complete AS-60 release sequence and the current blocked-gate policy are in
+`docs/V2_RELEASE_RUNBOOK.md`.
