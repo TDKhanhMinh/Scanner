@@ -85,6 +85,13 @@ from attendance_scanner.contracts import (
     SourcePage,
     StateError,
 )
+from attendance_scanner.cv_candidates import (
+    CV_CANDIDATE_GENERATOR_VERSION,
+    CvCandidate,
+    CvCandidateConfig,
+    CvCandidateSet,
+    generate_cv_candidates,
+)
 from attendance_scanner.detector import (
     CandidateCorners,
     CanonicalCorners,
@@ -438,4 +445,9 @@ __all__ = [
     "validate_candidate",
     "validate_mask",
     "validate_quadrilateral",
+    "CV_CANDIDATE_GENERATOR_VERSION",
+    "CvCandidate",
+    "CvCandidateConfig",
+    "CvCandidateSet",
+    "generate_cv_candidates",
 ]
