@@ -124,6 +124,14 @@ from attendance_scanner.discovery import (
     pipeline_version_for_mode,
     resolve_target_pdf,
 )
+from attendance_scanner.edge_support import (
+    EDGE_SUPPORT_VERSION,
+    EdgeMap,
+    EdgeSupportConfig,
+    EdgeSupportResult,
+    build_edge_map,
+    score_quad_edge_support,
+)
 from attendance_scanner.events import (
     BaseEvent,
     FileCompletedEvent,
@@ -285,6 +293,12 @@ __all__ = [
     "V1CvDocumentDetector",
     "adapt_v1_detector",
     "canonical_points_for_perspective",
+    "EDGE_SUPPORT_VERSION",
+    "EdgeMap",
+    "EdgeSupportConfig",
+    "EdgeSupportResult",
+    "build_edge_map",
+    "score_quad_edge_support",
     "ExportPage",
     "ExportArtifact",
     "ExportReviewRequiredError",
