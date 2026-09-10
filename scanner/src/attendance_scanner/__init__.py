@@ -108,6 +108,7 @@ from attendance_scanner.detector import (
     CandidateCorners,
     CanonicalCorners,
     DetectionTiming,
+    DetectorDecisionTrace,
     DetectorEvidence,
     DocumentDetectionResult,
     DocumentDetector,
@@ -188,6 +189,12 @@ from attendance_scanner.hough_lines import (
     HoughLineSegment,
     detect_hough_lines,
     extrapolate_line_to_bounds,
+)
+from attendance_scanner.hybrid import (
+    HybridConfig,
+    HybridDocumentDetector,
+    SegmentationProvider,
+    create_detector,
 )
 from attendance_scanner.mask_postprocess import (
     MaskComponent,
@@ -325,6 +332,7 @@ __all__ = [
     "CandidateCorners",
     "CanonicalCorners",
     "DetectionTiming",
+    "DetectorDecisionTrace",
     "DetectorEvidence",
     "DocumentDetectionResult",
     "DocumentDetector",
@@ -511,6 +519,10 @@ __all__ = [
     "HoughLineSegment",
     "detect_hough_lines",
     "extrapolate_line_to_bounds",
+    "HybridConfig",
+    "HybridDocumentDetector",
+    "SegmentationProvider",
+    "create_detector",
     "CV_CANDIDATE_GENERATOR_VERSION",
     "CvCandidate",
     "CvCandidateConfig",

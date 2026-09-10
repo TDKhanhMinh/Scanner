@@ -34,10 +34,21 @@ DetectorCoordinateSpace = Literal["original_pixels", "detection_pixels"]
 DetectorFailureCode = Literal[
     "no_document",
     "mask_only",
+    "ambiguous",
     "document_clipped",
     "invalid_geometry",
     "provider_unavailable",
     "inference_failed",
+]
+DecisionPath = Literal[
+    "segmentation_first",
+    "cv_fallback",
+    "agreement",
+    "disagreement",
+    "ambiguous",
+    "below_threshold",
+    "no_candidate",
+    "full_image_fallback",
 ]
 WireScalar = Optional[Union[str, int, float, bool]]
 WireDiagnostics = Dict[str, WireScalar]
@@ -177,6 +188,21 @@ class DetectionTiming(BaseContract):
     additional_ms: Dict[str, float] = Field(default_factory=dict)
 
 
+class DetectorDecisionTrace(BaseContract):
+    """Compact structured decision trace safe for diagnostics serialization."""
+
+    trace_version: Literal["1.0"] = "1.0"
+    path: DecisionPath
+    segmentation_state: Literal["not_configured", "success", "failed", "ambiguous"]
+    candidate_count: int = Field(ge=0)
+    rejected_candidate_count: int = Field(ge=0)
+    source_counts: Dict[str, int] = Field(default_factory=dict)
+    ranking_status: str = Field(min_length=1)
+    selected_candidate_id: Optional[int] = Field(default=None, ge=0)
+    fallback_used: bool = False
+    reason_codes: List[str] = Field(default_factory=list)
+
+
 class DocumentDetectionResult(BaseContract):
     """Canonical detector result shared by AI, CV, hybrid, and fallback providers."""
 
@@ -196,6 +222,7 @@ class DocumentDetectionResult(BaseContract):
     failure_code: Optional[DetectorFailureCode] = None
     timing: DetectionTiming = Field(default_factory=DetectionTiming)
     metadata: WireDiagnostics = Field(default_factory=dict)
+    decision_trace: Optional[DetectorDecisionTrace] = None
 
     @model_validator(mode="after")
     def validate_result_state(self) -> "DocumentDetectionResult":
@@ -330,6 +357,7 @@ __all__ = [
     "CandidateCorners",
     "CanonicalCorners",
     "DetectionTiming",
+    "DetectorDecisionTrace",
     "DetectorEvidence",
     "DocumentDetectionResult",
     "DocumentDetector",
