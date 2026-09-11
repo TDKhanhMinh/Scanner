@@ -181,7 +181,10 @@ def test_missing_segmentation_provider_is_explicit_before_cv_fallback(tmp_path: 
     assert "FALLBACK_FULL_IMAGE" in result.warnings
 
 
-def test_ambiguous_ranking_does_not_autocrop_and_full_failure_falls_back(tmp_path: Path):
+def test_ambiguous_ranking_resolved_by_tiebreaker_when_coverage_differs(tmp_path: Path):
+    """When ambiguity_margin is very wide but candidates have different mask
+    coverage, the tiebreaker should resolve in favor of the higher-coverage
+    candidate instead of giving up with 'ambiguous'."""
     image = load_image(_write_document(tmp_path / "sheet.png"))
     ambiguous = HybridDocumentDetector(
         AmbiguousSegmentation(),
@@ -191,14 +194,18 @@ def test_ambiguous_ranking_does_not_autocrop_and_full_failure_falls_back(tmp_pat
         ),
         cv_provider=lambda _image: _cv_pool_with_candidate(),
     )
-    ambiguous_result = ambiguous.detect(image)
+    result = ambiguous.detect(image)
 
-    assert ambiguous_result.detected is False
-    assert ambiguous_result.corners is None
-    assert ambiguous_result.failure_code == "ambiguous"
-    assert ambiguous_result.decision_trace is not None
-    assert ambiguous_result.decision_trace.path == "ambiguous"
-    assert "DETECTION_AMBIGUOUS" in ambiguous_result.warnings
+    # Tiebreaker resolves: mask_fit candidate has higher coverage than contour
+    assert result.detected is True
+    assert result.corners is not None
+    assert result.decision_trace is not None
+    assert result.decision_trace.ranking_status == "selected"
+
+
+def test_ambiguous_ranking_fallback_and_disabled_fallback(tmp_path: Path):
+    """Verify that segmentation failure still triggers fallback behaviors."""
+    image = load_image(_write_document(tmp_path / "sheet.png"))
 
     failed = HybridDocumentDetector(
         BrokenSegmentation(),

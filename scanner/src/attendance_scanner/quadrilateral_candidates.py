@@ -163,12 +163,18 @@ def _candidate_score(
     geometry_quality: float,
     mask_quad_iou: Optional[float],
     edge_support: Optional[float],
+    mask_coverage: Optional[float] = None,
 ) -> float:
-    score = 0.7 * geometry_quality
+    score = 0.6 * geometry_quality
     if mask_quad_iou is not None:
         score += 0.2 * mask_quad_iou
     if edge_support is not None:
         score += 0.1 * edge_support
+    if mask_coverage is not None:
+        cov_score = max(0.0, min(1.0, (mask_coverage - 0.7) / 0.3))
+        score += 0.1 * cov_score
+    else:
+        score += 0.05
     return max(0.0, min(1.0, score))
 
 
@@ -363,16 +369,26 @@ def build_quadrilateral_candidates(
                         )
                         found_polygon_quad = True
 
-            if not found_polygon_quad:
-                rectangle = cv2.minAreaRect(contour)
-                box = cv2.boxPoints(rectangle)
-                canonical = _order_points([(float(point[0]), float(point[1])) for point in box])
-                if canonical is not None:
-                    if mask_reference is None:
-                        mask_reference = canonical
-                    raw_candidates.append(
-                        (canonical, "mask_fit", {"fitMethod": "min_area_rect"}, None)
-                    )
+            rectangle = cv2.minAreaRect(contour)
+            (cx, cy), (w, h), angle = rectangle
+            # Apply safe padding (2% per side, 1.04x) to safeguard faint margins & signatures
+            w_pad = w * 1.04
+            h_pad = h * 1.04
+            box = cv2.boxPoints(((cx, cy), (w_pad, h_pad), angle))
+            clipped_box = [
+                (
+                    max(0.0, min(float(image_width - 1), float(point[0]))),
+                    max(0.0, min(float(image_height - 1), float(point[1]))),
+                )
+                for point in box
+            ]
+            canonical = _order_points(clipped_box)
+            if canonical is not None:
+                if mask_reference is None:
+                    mask_reference = canonical
+                raw_candidates.append(
+                    (canonical, "mask_fit", {"fitMethod": "min_area_rect"}, None)
+                )
 
     if cv_candidates is not None:
         for candidate in cv_candidates.candidates:
@@ -449,7 +465,12 @@ def build_quadrilateral_candidates(
                 )
             )
             continue
-        score = _candidate_score(validation.quality_score, mask_quad_iou, edge_support)
+        score = _candidate_score(
+            validation.quality_score,
+            mask_quad_iou,
+            edge_support,
+            mask_coverage=mask_coverage,
+        )
         accepted.append(
             QuadrilateralCandidate(
                 candidate_id=0,
@@ -466,6 +487,7 @@ def build_quadrilateral_candidates(
     accepted.sort(
         key=lambda candidate: (
             -candidate.score,
+            -(candidate.evidence.get("maskCoverage") or 0.0),
             -candidate.mask_quad_iou if candidate.mask_quad_iou is not None else 0.0,
             candidate.source,
             candidate.corners.model_dump_json(),
@@ -495,14 +517,24 @@ def build_quadrilateral_candidates(
                 existing_candidate.source,
             } == {"mixed", "mask_fit"}
             if is_strictly_same_source:
-                iou_threshold = min(policy.dedup_same_source_iou, 0.75)
+                iou_threshold = min(policy.dedup_same_source_iou, 0.70)
             elif is_same_family:
                 iou_threshold = policy.dedup_same_source_iou
             else:
                 iou_threshold = policy.dedup_polygon_iou
             if max(distances) <= policy.dedup_corner_distance_px or iou >= iou_threshold:
+                exist_cov = existing_candidate.evidence.get("maskCoverage") or 0.0
+                quad_cov = quad_candidate.evidence.get("maskCoverage") or 0.0
+                if (
+                    quad_cov > exist_cov + 0.05
+                    and quad_candidate.geometry_quality >= existing_candidate.geometry_quality - 0.05
+                    and is_same_family
+                ):
+                    idx = deduplicated.index(existing_candidate)
+                    deduplicated[idx] = quad_candidate
                 duplicate = True
                 break
+
         if not duplicate:
             deduplicated.append(quad_candidate)
         if len(deduplicated) >= policy.max_candidates:

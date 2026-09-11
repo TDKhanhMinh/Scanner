@@ -45,6 +45,7 @@ class EnhancementConfig(BaseContract):
     bw_magic_white_point: int = Field(default=215, ge=0, le=255)
     bw_magic_sat_boost: float = Field(default=1.3, ge=0.5, le=3.0)
     bw_magic_sharpen: float = Field(default=0.3, ge=0.0, le=2.0)
+    bw_magic_adaptive: bool = True
 
     # Color Enhanced mode parameters
     color_clahe_clip_limit: float = Field(default=1.5, gt=0.0, le=20.0)
@@ -240,6 +241,21 @@ def enhance_bw(
 
     black_pt = float(config.bw_magic_black_point)
     white_pt = float(config.bw_magic_white_point)
+
+    if config.bw_magic_adaptive:
+        p_ink = float(np.percentile(v_c, 0.1))
+        p_paper = float(np.percentile(v_c, 95.0))
+        contrast_span = p_paper - p_ink
+        # If the image has document content (contrast_span >= 10) but low contrast
+        # or faint/underexposed ink (ink is lighter than default black threshold)
+        if contrast_span >= 10.0 and (contrast_span < 120.0 or p_ink > (black_pt - 20.0)):
+            black_pt = max(0.0, p_ink + contrast_span * 0.25)
+            white_pt = min(255.0, p_paper - contrast_span * 0.10)
+            if white_pt - black_pt < 15.0:
+                mid = (white_pt + black_pt) / 2.0
+                black_pt = max(0.0, mid - 8.0)
+                white_pt = min(255.0, mid + 8.0)
+
     v_scaled = (v_c - black_pt) / max(1.0, white_pt - black_pt)
     v_curved = np.clip(v_scaled * 255.0, 0.0, 255.0)
     v_curved = 255.0 * np.power(v_curved / 255.0, 0.85)

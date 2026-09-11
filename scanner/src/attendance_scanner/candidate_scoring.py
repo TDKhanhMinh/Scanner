@@ -46,7 +46,7 @@ class CandidateScoringConfig(BaseContract):
     neutral_aspect_score: float = Field(default=0.5, ge=0.0, le=1.0)
     border_touch_score: float = Field(default=0.8, ge=0.0, le=1.0)
     minimum_final_score: float = Field(default=0.55, ge=0.0, le=1.0)
-    ambiguity_margin: float = Field(default=0.05, ge=0.0, le=1.0)
+    ambiguity_margin: float = Field(default=0.01, ge=0.0, le=1.0)
     source_reliability: Dict[str, float] = Field(
         default_factory=lambda: {
             "mask_fit": 0.95,
@@ -246,6 +246,62 @@ def score_candidate(
     )
 
 
+def _resolve_ambiguity(
+    scored: List[CandidateScore],
+    candidate_list: List[QuadrilateralCandidate],
+    policy: CandidateScoringConfig,
+) -> Optional[int]:
+    """Break a tie among candidates within the ambiguity margin.
+
+    When candidates have nearly identical final scores, we prefer the candidate
+    with significantly higher mask coverage (which means it preserves more of
+    the document area, including signatures and margins) and better geometry
+    (which indicates more regular, rectangular shape with parallel edges).
+
+    Returns the candidate_id of the resolved winner, or None if the tie
+    cannot be broken with confidence.
+    """
+    if len(scored) < 2:
+        return scored[0].candidate_id if scored else None
+
+    top_score = scored[0].final_score
+    # Gather all candidates within the ambiguity window
+    contenders = [s for s in scored if top_score - s.final_score <= policy.ambiguity_margin]
+    if len(contenders) < 2:
+        return contenders[0].candidate_id if contenders else None
+
+    # Build a lookup from candidate_id -> original QuadrilateralCandidate
+    cand_map = {c.candidate_id: c for c in candidate_list}
+
+    # Compute a composite tiebreaker score:
+    #   70% maskCoverage + 30% geometry_quality
+    # maskCoverage captures how much of the AI mask the quad actually covers.
+    # geometry_quality captures parallelism, angle regularity, etc.
+    def tiebreaker_score(cs: CandidateScore) -> float:
+        orig = cand_map.get(cs.candidate_id)
+        if orig is None:
+            return 0.0
+        coverage = orig.evidence.get("maskCoverage", 0.0)
+        if not isinstance(coverage, (int, float)):
+            coverage = 0.0
+        geo = orig.geometry_quality
+        return 0.7 * float(coverage) + 0.3 * float(geo)
+
+    contenders.sort(key=lambda s: (-tiebreaker_score(s), s.candidate_id))
+    best = contenders[0]
+    second = contenders[1]
+
+    best_tb = tiebreaker_score(best)
+    second_tb = tiebreaker_score(second)
+
+    # Require a minimum meaningful advantage to resolve the tiebreak
+    if best_tb - second_tb >= 0.03:
+        return best.candidate_id
+
+    # Cannot resolve with confidence
+    return None
+
+
 def rank_candidate_pool(
     candidates: Sequence[QuadrilateralCandidate] | QuadrilateralCandidateSet,
     *,
@@ -272,6 +328,7 @@ def rank_candidate_pool(
     scored.sort(
         key=lambda score: (
             -score.final_score,
+            -(score.breakdown["mask_coverage"].value if "mask_coverage" in score.breakdown else 0.0),
             -score.breakdown["geometry"].value,
             score.source,
             score.candidate_id,
@@ -295,8 +352,15 @@ def rank_candidate_pool(
         status = "below_threshold"
         selected_id = None
     elif second_score is not None and top_score - second_score <= policy.ambiguity_margin:
-        status = "ambiguous"
-        selected_id = None
+        # Ambiguity tiebreaker: prefer candidate with higher mask coverage and
+        # better geometry (parallelism) instead of giving up with "ambiguous".
+        resolved_id = _resolve_ambiguity(scored, candidate_list, policy)
+        if resolved_id is not None:
+            status = "selected"
+            selected_id = resolved_id
+        else:
+            status = "ambiguous"
+            selected_id = None
     else:
         status = "selected"
         selected_id = scored[0].candidate_id

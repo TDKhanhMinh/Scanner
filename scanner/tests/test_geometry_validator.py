@@ -139,3 +139,23 @@ def test_validator_does_not_change_input_mask_or_perform_warp():
 
     assert np.array_equal(mask, original)
     assert result.quadrilateral.normalized_corners is not None
+
+
+def test_parallelism_score_favors_rectangular_quad_over_severely_distorted_trapezoid():
+    # Rectangular quad (parallel edges)
+    rect = validate_quadrilateral(
+        [(20, 10), (120, 10), (120, 90), (20, 90)],
+        image_size=(140, 100),
+    )
+    # Severely distorted trapezoid where bottom edge is slanted at ~25 degrees
+    distorted = validate_quadrilateral(
+        [(20, 10), (120, 10), (100, 50), (20, 90)],
+        image_size=(140, 100),
+    )
+
+    assert rect.valid is True
+    assert rect.parallelism_score == 1.0
+    assert distorted.valid is True
+    assert distorted.parallelism_score is not None
+    assert distorted.parallelism_score < rect.parallelism_score
+    assert rect.quality_score > distorted.quality_score

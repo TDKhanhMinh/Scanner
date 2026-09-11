@@ -242,3 +242,19 @@ def test_end_to_end_pipeline_integration(tmp_path: Path):
     enhanced_smart = enhance_image(warped, ScanMode.SMART_DOCUMENT)
     assert enhanced_smart.shape == (warped.height, warped.width, 3)
     assert enhanced_smart.dtype == np.uint8
+
+
+def test_enhance_bw_adaptive_faint_ink():
+    """Verify that faint ink on low-contrast images is preserved and darkened in BW Magic Pro."""
+    w, h = 200, 200
+    # Create low-contrast image where paper is 210 and ink is 175 (difference of only 35 levels)
+    bgr = np.full((h, w, 3), 210, dtype=np.uint8)
+    cv2.putText(bgr, "FAINT", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (175, 175, 175), 2)
+
+    # With adaptive thresholding enabled (default)
+    res_adaptive = enhance_bw(bgr, EnhancementConfig(bw_magic_adaptive=True))
+    gray_adaptive = cv2.cvtColor(res_adaptive, cv2.COLOR_BGR2GRAY)
+    # Faint text should be darkened significantly (< 100) while background is white (> 240)
+    assert np.min(gray_adaptive) < 100
+    assert np.max(gray_adaptive) >= 240
+

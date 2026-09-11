@@ -225,3 +225,22 @@ def test_convex_hull_approx_rot90_for_portrait_landscape_documents():
     assert result.diagnostics["rawCandidateCount"] >= 2
     assert any(c.source == "mask_fit" for c in result.candidates)
 
+
+def test_min_area_rect_preserves_bottom_when_mask_is_notched():
+    # Mask with an indented/cut bottom corner (like Văn A)
+    mask = np.zeros((300, 200), dtype=np.uint8)
+    poly = np.array([[20, 20], [180, 20], [180, 220], [80, 280], [20, 280]], dtype=np.int32)
+    cv2.fillPoly(mask, [poly], 1)
+
+    result = build_quadrilateral_candidates(
+        image_size=(200, 300),
+        mask=mask,
+    )
+    assert result.candidates
+    top_cand = result.candidates[0]
+    # The top candidate should have high mask coverage (>= 0.95), not cutting the document
+    assert (top_cand.evidence.get("maskCoverage") or 0.0) >= 0.95
+    # Bottom margin around y=280 should be preserved
+    max_y = max(p[1] for p in top_cand.corners.as_list())
+    assert max_y >= 270.0
+

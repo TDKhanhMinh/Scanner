@@ -100,6 +100,7 @@ class QuadValidationEvidence(BaseContract):
     aspect_ratio: Optional[float] = None
     aspect_hint_score: Optional[float] = None
     border_contact: List[str] = Field(default_factory=list)
+    parallelism_score: Optional[float] = None
     quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
@@ -398,8 +399,36 @@ def validate_quadrilateral(
         aspect_hint_score = max(
             0.0, min(1.0, 1.0 - abs(aspect_ratio - policy.aspect_hint) / policy.aspect_hint)
         )
+    v_top = np.asarray(canonical_points[1]) - np.asarray(canonical_points[0])
+    v_bottom = np.asarray(canonical_points[2]) - np.asarray(canonical_points[3])
+    n_top = float(np.linalg.norm(v_top))
+    n_bottom = float(np.linalg.norm(v_bottom))
+    angle_tb = (
+        math.degrees(
+            math.acos(max(-1.0, min(1.0, float(np.dot(v_top, v_bottom) / (n_top * n_bottom)))))
+        )
+        if n_top > 1e-9 and n_bottom > 1e-9
+        else 0.0
+    )
+
+    v_left = np.asarray(canonical_points[3]) - np.asarray(canonical_points[0])
+    v_right = np.asarray(canonical_points[2]) - np.asarray(canonical_points[1])
+    n_left = float(np.linalg.norm(v_left))
+    n_right = float(np.linalg.norm(v_right))
+    angle_lr = (
+        math.degrees(
+            math.acos(max(-1.0, min(1.0, float(np.dot(v_left, v_right) / (n_left * n_right)))))
+        )
+        if n_left > 1e-9 and n_right > 1e-9
+        else 0.0
+    )
+
+    max_parallelism_error = max(angle_tb, angle_lr)
+    parallelism_score = max(0.0, min(1.0, 1.0 - max(0.0, max_parallelism_error - 5.0) / 40.0))
+
     hard_reasons = {reason for reason in reasons if reason != GeometryReasonCode.BORDER_TOUCHING}
     quality_score = min(1.0, area_ratio / 0.5)
+    quality_score = 0.85 * quality_score + 0.15 * parallelism_score
     if aspect_hint_score is not None:
         quality_score = 0.8 * quality_score + 0.2 * aspect_hint_score
     return QuadValidationEvidence(
@@ -414,6 +443,7 @@ def validate_quadrilateral(
         aspect_ratio=aspect_ratio,
         aspect_hint_score=aspect_hint_score,
         border_contact=border_contact,
+        parallelism_score=parallelism_score,
         quality_score=max(0.0, min(1.0, quality_score)),
     )
 

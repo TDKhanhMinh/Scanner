@@ -55,8 +55,19 @@ class HybridConfig(BaseContract):
     use_hough: bool = True
     fallback_full_image: bool = True
     geometry: GeometryValidationConfig = Field(default_factory=GeometryValidationConfig)
-    candidates: QuadrilateralCandidateConfig = Field(default_factory=QuadrilateralCandidateConfig)
-    scoring: CandidateScoringConfig = Field(default_factory=CandidateScoringConfig)
+    candidates: QuadrilateralCandidateConfig = Field(
+        default_factory=lambda: QuadrilateralCandidateConfig(dedup_same_source_iou=0.70)
+    )
+    scoring: CandidateScoringConfig = Field(
+        default_factory=lambda: CandidateScoringConfig(
+            source_reliability={
+                "mask_fit": 0.95,
+                "mixed": 0.80,
+                "contour": 0.65,
+                "hough": 0.60,
+            }
+        )
+    )
     cv: CvCandidateConfig = Field(default_factory=CvCandidateConfig)
     hough: HoughLineConfig = Field(default_factory=HoughLineConfig)
     edge: EdgeSupportConfig = Field(default_factory=EdgeSupportConfig)
