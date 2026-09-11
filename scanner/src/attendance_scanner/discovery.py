@@ -35,7 +35,7 @@ from attendance_scanner.state import (
 )
 
 # Increment whenever scan output semantics change so existing manifests are rebuilt.
-DEFAULT_PIPELINE_VERSION = "0.3.0"
+DEFAULT_PIPELINE_VERSION = "0.4.0"
 
 
 def pipeline_version_for_mode(
@@ -545,6 +545,7 @@ def build_group_aware_scan_plan(
     )
     effective_output_root = output_root or manifest.output_root
     discovered_paths = {file.relative_path.replace("\\", "/") for file in discovery.files}
+    manifest.prune_orphaned_state(discovered_paths, effective_output_root)
     grouped_files: Dict[str, List[DiscoveredFile]] = {}
     group_reasons: Dict[str, List[str]] = {}
     group_keys: Dict[str, DocumentGroupKey] = {}
@@ -685,6 +686,10 @@ def build_group_aware_scan_plan(
         ]
         if not missing_sources or storage_key in grouped_files:
             continue
+        if not _group_artifacts_exist(
+            effective_output_root, persisted_group.artifact_relative_paths
+        ):
+            continue
         affected_groups.append(
             GroupRebuildPlan(
                 key=persisted_group.key,
@@ -693,7 +698,7 @@ def build_group_aware_scan_plan(
                 artifact_relative_paths=list(persisted_group.artifact_relative_paths),
                 reasons=["source_removed"],
                 completeness_status=CompletenessStatus.INCOMPLETE,
-                review_required=True,
+                review_required=False,
             )
         )
 
@@ -714,6 +719,11 @@ def build_group_aware_scan_plan(
     review_groups: List[ReviewGroup] = []
     for group in affected_groups:
         if not group.review_required and group.completeness_status != CompletenessStatus.AMBIGUOUS:
+            continue
+        has_discovered_sources = any(
+            path.replace("\\", "/") in discovered_paths for path in group.source_relative_paths
+        )
+        if not has_discovered_sources:
             continue
         source_pages: List[SourcePage] = []
         for relative_path in group.source_relative_paths:

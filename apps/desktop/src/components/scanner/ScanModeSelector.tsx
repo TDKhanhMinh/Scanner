@@ -37,10 +37,11 @@ const MODES: ModeOption[] = [
   },
   {
     id: "bw",
-    name: "Black & White",
-    icon: FileText,
-    description: "Adaptive threshold nhị phân. Làm sạch nền hoàn toàn, nền trắng chữ đen.",
-    highlight: "Thích hợp tài liệu chữ đậm rõ nét",
+    name: "Magic Pro (B&W)",
+    badge: "CamScanner",
+    icon: Sparkles,
+    description: "Khử sạch bóng đổ, nền giấy trắng tinh khiết, chữ in & kẻ bảng đen đậm sắc nét, bảo toàn con dấu & chữ ký.",
+    highlight: "Chất lượng cao phong cách CamScanner Magic Pro",
   },
   {
     id: "color",

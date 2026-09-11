@@ -96,7 +96,10 @@ class HybridDocumentDetector:
         segmentation_output: Optional[SegmentationOutput] = None
         mask: Optional[np.ndarray] = None
         reason_codes: List[str] = []
-        if self.config.segmentation_enabled and self.segmentation_provider is not None:
+        if float(np.std(image.image)) < 5.0:
+            segmentation_state = "failed"
+            reason_codes.append("segmentation_low_contrast")
+        elif self.config.segmentation_enabled and self.segmentation_provider is not None:
             try:
                 segmentation_output = self.segmentation_provider.segment(image)
                 mask = segmentation_output.binary_mask
@@ -381,6 +384,10 @@ def create_detector(
             None,
             config=(config or HybridConfig()).model_copy(update={"segmentation_enabled": False}),
         )
+    if segmentation_provider is None:
+        from attendance_scanner.segmentation import get_default_segmentation_adapter
+
+        segmentation_provider = get_default_segmentation_adapter()
     return HybridDocumentDetector(segmentation_provider, config=config)
 
 

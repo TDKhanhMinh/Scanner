@@ -230,3 +230,48 @@ def test_persisted_manual_order_suppresses_review_until_source_changes(tmp_path:
     assert changed_plan.affected_group_count == 1
     assert "manual_order_invalidated" in changed_plan.affected_groups[0].reasons
     assert changed_plan.review_groups[0].review_required is True
+
+
+def test_entirely_removed_employee_group_is_pruned_and_not_in_review(tmp_path: Path):
+    import shutil
+
+    input_root, output_root, manifest, store, period = _seed_grouped_context(tmp_path)
+    # Remove employee B completely from input and output
+    shutil.rmtree(input_root / "B")
+    (output_root / "B/2026-09_B.pdf").unlink()
+
+    plan = build_group_aware_scan_plan(
+        discover_employee_folders(input_root),
+        manifest,
+        output_root,
+        period,
+        export_mode=ExportMode.GROUPED,
+    )
+
+    # Employee B should not require review or appear in review_groups
+    assert not any(group.key.employee_relative_dir == "B" for group in plan.review_groups)
+    assert not any(group.key.employee_relative_dir == "B" for group in plan.affected_groups)
+    assert "B:2026-09" not in manifest.groups
+    assert not any("B/" in path for path in manifest.entries)
+
+
+def test_entirely_removed_sources_with_persisted_artifact_does_not_require_review(tmp_path: Path):
+    import shutil
+
+    input_root, output_root, manifest, store, period = _seed_grouped_context(tmp_path)
+    # Remove employee B input images, but keep output artifact
+    shutil.rmtree(input_root / "B")
+
+    plan = build_group_aware_scan_plan(
+        discover_employee_folders(input_root),
+        manifest,
+        output_root,
+        period,
+        export_mode=ExportMode.GROUPED,
+    )
+
+    # Should not appear in review_groups since there are no images on disk
+    assert not any(group.key.employee_relative_dir == "B" for group in plan.review_groups)
+    b_group = next(g for g in plan.affected_groups if g.key.employee_relative_dir == "B")
+    assert b_group.completeness_status == CompletenessStatus.INCOMPLETE
+    assert b_group.review_required is False

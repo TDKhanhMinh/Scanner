@@ -22,7 +22,7 @@ class PageClassificationConfig(BaseContract):
 
     first_half_columns: int = Field(default=21, ge=2, le=64)
     second_half_columns: int = Field(default=10, ge=2, le=64)
-    min_confidence: float = Field(default=0.72, ge=0.0, le=1.0)
+    min_confidence: float = Field(default=0.68, ge=0.0, le=1.0)
     min_margin: float = Field(default=0.15, ge=0.0, le=1.0)
     min_table_ink_ratio: float = Field(default=0.01, ge=0.0, le=1.0)
 
@@ -100,13 +100,17 @@ def _day_grid_features(
             elif abs(x2 - x1) >= abs(y2 - y1) * 2:
                 horizontal_positions.append(int(round((y1 + y2) / 2)))
 
+    gap_v = max(6, int(roi.shape[1] / 90))
+    gap_h = max(6, int(roi.shape[0] / 90))
     vertical_count = max(
         0,
-        len(_group_columns(np.array(sorted(vertical_positions), dtype=np.int32))) - 1,
+        len(_group_columns(np.array(sorted(vertical_positions), dtype=np.int32), merge_gap=gap_v))
+        - 1,
     )
     horizontal_count = max(
         0,
-        len(_group_columns(np.array(sorted(horizontal_positions), dtype=np.int32))) - 1,
+        len(_group_columns(np.array(sorted(horizontal_positions), dtype=np.int32), merge_gap=gap_h))
+        - 1,
     )
     vertical_score = max(
         _score_column_count(vertical_count, config.first_half_columns),
@@ -116,7 +120,7 @@ def _day_grid_features(
         _score_column_count(horizontal_count, config.first_half_columns),
         _score_column_count(horizontal_count, config.second_half_columns),
     )
-    detected_axis = "vertical" if vertical_score >= horizontal_score else "horizontal"
+    detected_axis = "vertical" if vertical_score > horizontal_score else "horizontal"
     detected_count = vertical_count if detected_axis == "vertical" else horizontal_count
     return (
         detected_count,

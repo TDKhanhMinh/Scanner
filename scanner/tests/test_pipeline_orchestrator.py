@@ -134,11 +134,11 @@ def test_scan_one_mode_dispatch(tmp_path: Path):
     assert res_gray.image.ndim == 2
     assert res_gray.image.dtype == np.uint8
 
-    # 2. B&W mode
+    # 2. B&W (Magic Pro) mode
     res_bw = scan_one(img_path, mode=ScanMode.BW)
-    assert res_bw.channels == 1
-    assert res_bw.image.ndim == 2
-    assert set(np.unique(res_bw.image)).issubset({0, 255})
+    assert res_bw.channels == 3
+    assert res_bw.image.ndim == 3
+    assert res_bw.image.dtype == np.uint8
 
     # 3. Color Enhanced mode
     res_color = scan_one(img_path, mode=ScanMode.COLOR)

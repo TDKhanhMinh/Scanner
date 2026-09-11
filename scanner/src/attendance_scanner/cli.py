@@ -214,9 +214,9 @@ def _group_summary(
     scan_mode: ScanMode | str,
     reprocess_policy: Optional[ReprocessPolicy] = None,
 ) -> tuple[dict[str, int], List[ReviewGroup]]:
-    """Summarize affected document groups for a typed scan-plan event."""
     discovery = discover_employee_folders(input_root)
-    manifest = ManifestStore().load_manifest(input_root, output_root=output_root)
+    store = ManifestStore()
+    manifest = store.load_manifest(input_root, output_root=output_root)
     group_plan = build_group_aware_scan_plan(
         discovery,
         manifest,
@@ -226,6 +226,7 @@ def _group_summary(
         scan_mode=scan_mode,
         reprocess_policy=reprocess_policy,
     )
+    store.save_manifest(manifest)
     counts = {
         "document_groups": group_plan.affected_group_count,
         "expected_artifacts": (

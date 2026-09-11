@@ -31,8 +31,25 @@ class QuadrilateralCandidateConfig(BaseContract):
     max_candidates: int = Field(default=16, ge=1, le=128)
     max_rejected_candidates: int = Field(default=32, ge=1, le=256)
     mask_approximation_epsilon_ratios: Tuple[float, ...] = (0.01, 0.02, 0.04, 0.08)
+    hull_approximation_epsilon_ratios: Tuple[float, ...] = (
+        0.005,
+        0.008,
+        0.01,
+        0.015,
+        0.02,
+        0.025,
+        0.03,
+        0.035,
+        0.04,
+        0.05,
+        0.06,
+        0.08,
+        0.10,
+        0.12,
+    )
     dedup_corner_distance_px: float = Field(default=8.0, gt=0.0, le=100.0)
     dedup_polygon_iou: float = Field(default=0.97, ge=0.0, le=1.0)
+    dedup_same_source_iou: float = Field(default=0.85, ge=0.0, le=1.0)
     max_line_pairs: int = Field(default=32, ge=1, le=256)
     geometry: GeometryValidationConfig = Field(default_factory=GeometryValidationConfig)
 
@@ -42,6 +59,10 @@ class QuadrilateralCandidateConfig(BaseContract):
             epsilon <= 0.0 or epsilon >= 1.0 for epsilon in self.mask_approximation_epsilon_ratios
         ):
             raise ValueError("mask_approximation_epsilon_ratios must contain values in (0,1)")
+        if not self.hull_approximation_epsilon_ratios or any(
+            epsilon <= 0.0 or epsilon >= 1.0 for epsilon in self.hull_approximation_epsilon_ratios
+        ):
+            raise ValueError("hull_approximation_epsilon_ratios must contain values in (0,1)")
         return self
 
 
@@ -117,14 +138,25 @@ def _order_points(points: Sequence[DetectorPoint]) -> Optional[CanonicalCorners]
         return None
 
 
-def _polygon_iou_with_mask(corners: CanonicalCorners, mask: np.ndarray) -> float:
+def _polygon_iou_and_coverage_with_mask(
+    corners: CanonicalCorners, mask: np.ndarray
+) -> Tuple[float, float]:
     polygon = np.zeros(mask.shape, dtype=np.uint8)
     points = np.round(np.asarray(corners.as_list(), dtype=np.float32)).astype(np.int32)
     cv2.fillConvexPoly(polygon, points, 1)
     expected = mask > 0
     predicted = polygon > 0
-    union = np.logical_or(expected, predicted).sum()
-    return float(np.logical_and(expected, predicted).sum() / union) if union else 0.0
+    intersection = float(np.logical_and(expected, predicted).sum())
+    union = float(np.logical_or(expected, predicted).sum())
+    mask_sum = float(expected.sum())
+    iou = float(intersection / union) if union > 0 else 0.0
+    coverage = float(intersection / mask_sum) if mask_sum > 0 else 0.0
+    return iou, coverage
+
+
+def _polygon_iou_with_mask(corners: CanonicalCorners, mask: np.ndarray) -> float:
+    iou, _ = _polygon_iou_and_coverage_with_mask(corners, mask)
+    return iou
 
 
 def _candidate_score(
@@ -251,6 +283,66 @@ def build_quadrilateral_candidates(
         contours, _ = cv2.findContours(source_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         contour = max(contours, key=cv2.contourArea) if contours else None
         if contour is not None:
+            hull = cv2.convexHull(contour)
+            hull_perimeter = cv2.arcLength(hull, True)
+            found_polygon_quad = False
+            for epsilon_ratio in policy.hull_approximation_epsilon_ratios:
+                approximation = cv2.approxPolyDP(hull, epsilon_ratio * hull_perimeter, True)
+                if len(approximation) == 4:
+                    canonical = _order_points(
+                        [(float(point[0][0]), float(point[0][1])) for point in approximation]
+                    )
+                    if canonical is not None:
+                        if mask_reference is None:
+                            mask_reference = canonical
+                        raw_candidates.append(
+                            (
+                                canonical,
+                                "mask_fit",
+                                {"epsilonRatio": epsilon_ratio, "fitMethod": "convex_hull_approx"},
+                                None,
+                            )
+                        )
+                        found_polygon_quad = True
+                        break
+
+            if image_height != image_width:
+                mask_rot = cv2.rotate(source_mask, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                cnts_r, _ = cv2.findContours(mask_rot, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if cnts_r:
+                    c_r = max(cnts_r, key=cv2.contourArea)
+                    hull_r = cv2.convexHull(c_r)
+                    hull_peri_r = cv2.arcLength(hull_r, True)
+                    for epsilon_ratio in policy.hull_approximation_epsilon_ratios:
+                        approximation_r = cv2.approxPolyDP(
+                            hull_r, epsilon_ratio * hull_peri_r, True
+                        )
+                        if len(approximation_r) == 4:
+                            mapped_points = [
+                                (
+                                    float(image_width - 1 - point[0][1]),
+                                    float(point[0][0]),
+                                )
+                                for point in approximation_r
+                            ]
+                            canonical_r = _order_points(mapped_points)
+                            if canonical_r is not None:
+                                if mask_reference is None:
+                                    mask_reference = canonical_r
+                                raw_candidates.append(
+                                    (
+                                        canonical_r,
+                                        "mask_fit",
+                                        {
+                                            "epsilonRatio": epsilon_ratio,
+                                            "fitMethod": "convex_hull_approx_rot90",
+                                        },
+                                        None,
+                                    )
+                                )
+                                found_polygon_quad = True
+                                break
+
             perimeter = cv2.arcLength(contour, True)
             for epsilon_ratio in policy.mask_approximation_epsilon_ratios:
                 approximation = cv2.approxPolyDP(contour, epsilon_ratio * perimeter, True)
@@ -269,13 +361,18 @@ def build_quadrilateral_candidates(
                                 None,
                             )
                         )
-            rectangle = cv2.minAreaRect(contour)
-            box = cv2.boxPoints(rectangle)
-            canonical = _order_points([(float(point[0]), float(point[1])) for point in box])
-            if canonical is not None:
-                if mask_reference is None:
-                    mask_reference = canonical
-                raw_candidates.append((canonical, "mask_fit", {"fitMethod": "min_area_rect"}, None))
+                        found_polygon_quad = True
+
+            if not found_polygon_quad:
+                rectangle = cv2.minAreaRect(contour)
+                box = cv2.boxPoints(rectangle)
+                canonical = _order_points([(float(point[0]), float(point[1])) for point in box])
+                if canonical is not None:
+                    if mask_reference is None:
+                        mask_reference = canonical
+                    raw_candidates.append(
+                        (canonical, "mask_fit", {"fitMethod": "min_area_rect"}, None)
+                    )
 
     if cv_candidates is not None:
         for candidate in cv_candidates.candidates:
@@ -331,6 +428,14 @@ def build_quadrilateral_candidates(
             config=policy.geometry,
         )
         normalized = validation.normalized_corners
+        mask_quad_iou, mask_coverage = (
+            _polygon_iou_and_coverage_with_mask(normalized, source_mask)
+            if normalized is not None and source_mask is not None
+            else (None, None)
+        )
+        cand_evidence = {**evidence, "quadAreaRatio": validation.area_ratio or 0.0}
+        if mask_coverage is not None:
+            cand_evidence["maskCoverage"] = mask_coverage
         if not validation.valid or normalized is None:
             rejected.append(
                 RejectedQuadrilateralCandidate(
@@ -339,18 +444,11 @@ def build_quadrilateral_candidates(
                     source=source,
                     reason_codes=validation.reason_codes or [GeometryReasonCode.QUAD_DEGENERATE],
                     geometry_quality=validation.quality_score,
-                    mask_quad_iou=(
-                        _polygon_iou_with_mask(normalized, source_mask)
-                        if normalized is not None and source_mask is not None
-                        else None
-                    ),
-                    evidence={**evidence, "quadAreaRatio": validation.area_ratio or 0.0},
+                    mask_quad_iou=mask_quad_iou,
+                    evidence=cand_evidence,
                 )
             )
             continue
-        mask_quad_iou = (
-            _polygon_iou_with_mask(normalized, source_mask) if source_mask is not None else None
-        )
         score = _candidate_score(validation.quality_score, mask_quad_iou, edge_support)
         accepted.append(
             QuadrilateralCandidate(
@@ -361,7 +459,7 @@ def build_quadrilateral_candidates(
                 mask_quad_iou=mask_quad_iou,
                 edge_support=edge_support,
                 geometry_quality=validation.quality_score,
-                evidence={**evidence, "quadAreaRatio": validation.area_ratio or 0.0},
+                evidence=cand_evidence,
             )
         )
 
@@ -391,7 +489,18 @@ def build_quadrilateral_candidates(
                 image_width,
                 image_height,
             )
-            if max(distances) <= policy.dedup_corner_distance_px or iou >= policy.dedup_polygon_iou:
+            is_strictly_same_source = quad_candidate.source == existing_candidate.source
+            is_same_family = is_strictly_same_source or {
+                quad_candidate.source,
+                existing_candidate.source,
+            } == {"mixed", "mask_fit"}
+            if is_strictly_same_source:
+                iou_threshold = min(policy.dedup_same_source_iou, 0.75)
+            elif is_same_family:
+                iou_threshold = policy.dedup_same_source_iou
+            else:
+                iou_threshold = policy.dedup_polygon_iou
+            if max(distances) <= policy.dedup_corner_distance_px or iou >= iou_threshold:
                 duplicate = True
                 break
         if not duplicate:

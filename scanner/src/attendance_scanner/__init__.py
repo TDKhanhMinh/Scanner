@@ -330,7 +330,10 @@ from attendance_scanner.segmentation import (
     SegmentationModelCard,
     SegmentationOutput,
     SegmentationTransform,
+    create_default_segmentation_adapter,
     decode_segmentation_output,
+    get_default_segmentation_adapter,
+    get_default_segmentation_model_path,
     preprocess_segmentation_input,
 )
 from attendance_scanner.state import (
@@ -591,7 +594,10 @@ __all__ = [
     "SegmentationModelCard",
     "SegmentationOutput",
     "SegmentationTransform",
+    "create_default_segmentation_adapter",
     "decode_segmentation_output",
+    "get_default_segmentation_adapter",
+    "get_default_segmentation_model_path",
     "preprocess_segmentation_input",
     "MaskComponent",
     "MaskPostprocessConfig",

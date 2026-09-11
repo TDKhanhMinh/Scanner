@@ -21,14 +21,14 @@ class CandidateScoreWeights(BaseContract):
     """Tunable weighted score components; weights are normalized at evaluation time."""
 
     mask_iou: float = Field(default=0.3, ge=0.0, le=1.0)
-    mask_coverage: float = Field(default=0.1, ge=0.0, le=1.0)
+    mask_coverage: float = Field(default=0.15, ge=0.0, le=1.0)
     mask_confidence: float = Field(default=0.1, ge=0.0, le=1.0)
-    edge_support: float = Field(default=0.2, ge=0.0, le=1.0)
+    edge_support: float = Field(default=0.1, ge=0.0, le=1.0)
     geometry: float = Field(default=0.15, ge=0.0, le=1.0)
     convexity: float = Field(default=0.05, ge=0.0, le=1.0)
     border: float = Field(default=0.05, ge=0.0, le=1.0)
     aspect: float = Field(default=0.05, ge=0.0, le=1.0)
-    source_reliability: float = Field(default=0.05, ge=0.0, le=1.0)
+    source_reliability: float = Field(default=0.15, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def require_positive_weight(self) -> "CandidateScoreWeights":

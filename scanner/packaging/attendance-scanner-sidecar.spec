@@ -21,6 +21,9 @@ binaries = collect_dynamic_libs("cv2") + collect_dynamic_libs("onnxruntime")
 hiddenimports = collect_submodules("attendance_scanner")
 for package_name in ("cv2", "numpy", "PIL", "onnxruntime"):
     datas.extend(collect_data_files(package_name))
+models_dir = SOURCE_ROOT / "attendance_scanner" / "models"
+if models_dir.is_dir():
+    datas.append((str(models_dir), "attendance_scanner/models"))
 hiddenimports.extend(
     [
         "cv2.cv2",

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Sequence, Tuple
+from typing import Any, Dict, Literal, Optional, Sequence, Tuple, Union
 
 import cv2
 import numpy as np
@@ -91,6 +93,7 @@ class SegmentationConfig(BaseModel):
     document_class_index: int = Field(default=1, ge=0)
     threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     postprocess: MaskPostprocessConfig = Field(default_factory=MaskPostprocessConfig)
+    multi_orientation: bool = True
     debug_artifact_dir: Optional[Path] = None
 
     @model_validator(mode="after")
@@ -173,7 +176,7 @@ def preprocess_segmentation_input(
             resized = cv2.resize(
                 rgb,
                 (config.input_width, config.input_height),
-                interpolation=cv2.INTER_AREA,
+                interpolation=cv2.INTER_LINEAR,
             )
             pad_x = pad_y = 0
             resized_width = config.input_width
@@ -185,7 +188,7 @@ def preprocess_segmentation_input(
             resized_content = cv2.resize(
                 rgb,
                 (resized_width, resized_height),
-                interpolation=cv2.INTER_AREA,
+                interpolation=cv2.INTER_LINEAR,
             )
             resized = np.full(
                 (config.input_height, config.input_width, 3),
@@ -438,12 +441,24 @@ class OnnxSegmentationAdapter:
         self.model_card = model_card
         self.config = config or SegmentationConfig()
 
-    def segment(self, image: LoadedImage) -> SegmentationOutput:
-        """Return internal masks and a mask-only generic detector summary."""
-        total_started_at = time.perf_counter()
-        preprocess_started_at = time.perf_counter()
+    def _segment_pass(
+        self,
+        image: LoadedImage,
+    ) -> Tuple[
+        np.ndarray,
+        SegmentationTransform,
+        MaskPostprocessResult,
+        float,
+        float,
+        float,
+        float,
+        float,
+        Tuple[int, ...],
+        Tuple[int, ...],
+    ]:
+        t_prep = time.perf_counter()
         tensor, transform = preprocess_segmentation_input(image, self.config)
-        preprocess_ms = (time.perf_counter() - preprocess_started_at) * 1000.0
+        preprocess_ms = (time.perf_counter() - t_prep) * 1000.0
         try:
             inference = self.service.infer(tensor)
         except OnnxRuntimeError as exc:
@@ -452,7 +467,7 @@ class OnnxSegmentationAdapter:
                 "Model segmentation không thể xử lý ảnh này.",
                 exc.diagnostic,
             ) from exc
-        postprocess_started_at = time.perf_counter()
+        t_post = time.perf_counter()
         if self.config.output_index >= len(inference.outputs):
             raise SegmentationAdapterError(
                 SegmentationErrorCode.OUTPUT_INVALID,
@@ -468,10 +483,120 @@ class OnnxSegmentationAdapter:
             self.config.postprocess.model_copy(update={"threshold": self.config.threshold}),
         )
         binary_mask = postprocess.selected_mask
-        component_count = postprocess.component_count
         mask_area_ratio = float(binary_mask.mean())
         mask_confidence = float(probability_mask[binary_mask].mean()) if binary_mask.any() else 0.0
-        mask_postprocess_ms = (time.perf_counter() - postprocess_started_at) * 1000.0
+        mask_postprocess_ms = (time.perf_counter() - t_post) * 1000.0
+        return (
+            probability_mask,
+            transform,
+            postprocess,
+            mask_area_ratio,
+            mask_confidence,
+            preprocess_ms,
+            inference.duration_ms,
+            mask_postprocess_ms,
+            tensor.shape,
+            probability_small.shape,
+        )
+
+    def segment(self, image: LoadedImage) -> SegmentationOutput:
+        """Return internal masks and a mask-only generic detector summary."""
+        total_started_at = time.perf_counter()
+        (
+            prob0,
+            transform0,
+            post0,
+            ar0,
+            conf0,
+            prep_ms,
+            inf_ms,
+            post_ms,
+            tensor_shape,
+            prob_s_shape,
+        ) = self._segment_pass(image)
+
+        best_turns = 0
+        best_prob = prob0
+        best_bin = post0.selected_mask
+        best_post = post0
+        best_ar = ar0
+        best_conf = conf0
+        best_inf_ms = inf_ms
+        best_post_ms = post_ms
+        best_tensor_shape = tensor_shape
+        best_prob_s_shape = prob_s_shape
+
+        if self.config.multi_orientation and (image.height > image.width or ar0 < 0.70):
+            for turns in (1, 3):
+                try:
+                    rot_code = (
+                        cv2.ROTATE_90_COUNTERCLOCKWISE if turns == 1 else cv2.ROTATE_90_CLOCKWISE
+                    )
+                    rev_code = (
+                        cv2.ROTATE_90_CLOCKWISE if turns == 1 else cv2.ROTATE_90_COUNTERCLOCKWISE
+                    )
+                    mat_rot = cv2.rotate(image.image, rot_code)
+                    rh, rw = mat_rot.shape[:2]
+                    img_rot = LoadedImage(
+                        path=image.path,
+                        image=mat_rot,
+                        metadata=image.metadata.model_copy(
+                            update={
+                                "width": rw,
+                                "height": rh,
+                                "original_width": rw,
+                                "original_height": rh,
+                            }
+                        ),
+                    )
+                    (
+                        t_prob,
+                        _,
+                        t_post,
+                        _,
+                        _,
+                        _,
+                        t_inf_ms,
+                        t_post_ms,
+                        t_tensor_shape,
+                        t_prob_s_shape,
+                    ) = self._segment_pass(img_rot)
+                    prob_back = cv2.rotate(t_prob, rev_code)
+                    bin_back = cv2.rotate(t_post.selected_mask.astype(np.uint8), rev_code).astype(
+                        bool
+                    )
+                    ar_cand = float(bin_back.mean())
+                    conf_cand = float(prob_back[bin_back].mean()) if bin_back.any() else 0.0
+
+                    is_better = False
+                    if image.height > image.width:
+                        if (
+                            conf_cand >= 0.90
+                            and ar_cand >= 0.50
+                            and conf_cand >= (best_conf * 0.98)
+                        ):
+                            if best_turns == 0 or (ar_cand * conf_cand) > (best_ar * best_conf):
+                                is_better = True
+                        elif (ar_cand * conf_cand) > (best_ar * best_conf * 1.02):
+                            is_better = True
+                    else:
+                        if (ar_cand * conf_cand) > (best_ar * best_conf * 1.02):
+                            is_better = True
+
+                    if is_better:
+                        best_turns = turns
+                        best_prob = prob_back
+                        best_bin = bin_back
+                        best_post = t_post
+                        best_ar = ar_cand
+                        best_conf = conf_cand
+                        best_inf_ms = t_inf_ms
+                        best_post_ms = t_post_ms
+                        best_tensor_shape = t_tensor_shape
+                        best_prob_s_shape = t_prob_s_shape
+                except Exception:
+                    continue
+
         detection = DocumentDetectionResult(
             detected=False,
             detector_version=self.detector_version,
@@ -479,34 +604,35 @@ class OnnxSegmentationAdapter:
             pipeline_version=self.pipeline_version,
             candidate_corners=[],
             evidence=DetectorEvidence(
-                mask_confidence=mask_confidence,
-                mask_area_ratio=mask_area_ratio,
-                component_count=component_count,
+                mask_confidence=best_conf,
+                mask_area_ratio=best_ar,
+                component_count=best_post.component_count,
                 mask_to_quad_iou=None,
                 model_specific={
                     "outputIndex": self.config.output_index,
-                    "outputShape": str(probability_small.shape),
+                    "outputShape": str(best_prob_s_shape),
                     "threshold": self.config.threshold,
-                    "componentAmbiguous": postprocess.ambiguous,
-                    "selectedComponentLabel": postprocess.selected_label or 0,
-                    "borderContact": ",".join(postprocess.border_contact),
+                    "componentAmbiguous": best_post.ambiguous,
+                    "selectedComponentLabel": best_post.selected_label or 0,
+                    "borderContact": ",".join(best_post.border_contact),
                     "resizeMode": self.config.resize_mode,
-                    "padding": f"{transform.pad_x},{transform.pad_y}",
+                    "padding": f"{transform0.pad_x},{transform0.pad_y}",
                     "modelSha256": self.service.model_info.model_sha256
                     if self.service.model_info is not None
                     else "unknown",
+                    "segmentationTurns": best_turns,
                 },
             ),
             timing=DetectionTiming(
-                segmentation_inference_ms=inference.duration_ms,
-                mask_postprocess_ms=mask_postprocess_ms,
+                segmentation_inference_ms=best_inf_ms,
+                mask_postprocess_ms=best_post_ms,
                 total_detection_ms=(time.perf_counter() - total_started_at) * 1000.0,
-                additional_ms={"preprocess_ms": preprocess_ms},
+                additional_ms={"preprocess_ms": prep_ms},
             ),
             metadata={
                 "modelLicense": self.model_card.license,
                 "modelAttribution": self.model_card.attribution,
-                "inputShape": str(tensor.shape),
+                "inputShape": str(best_tensor_shape),
                 "channelOrder": self.config.channel_order,
                 "resizeMode": self.config.resize_mode,
             },
@@ -514,15 +640,15 @@ class OnnxSegmentationAdapter:
         )
         debug_artifacts = _write_debug_artifacts(
             image,
-            probability_mask,
-            binary_mask,
+            best_prob,
+            best_bin,
             self.config.debug_artifact_dir,
         )
         return SegmentationOutput(
-            probability_mask=probability_mask,
-            binary_mask=binary_mask,
-            transform=transform,
-            postprocess=postprocess,
+            probability_mask=best_prob,
+            binary_mask=best_bin,
+            transform=transform0,
+            postprocess=best_post,
             detection=detection,
             debug_artifacts=debug_artifacts,
         )
@@ -543,6 +669,88 @@ class OnnxSegmentationAdapter:
             )
 
 
+_DEFAULT_ADAPTER_INSTANCE: Optional[OnnxSegmentationAdapter] = None
+
+
+def get_default_segmentation_model_path() -> Optional[Path]:
+    """Resolve the default ONNX segmentation model path if available on disk."""
+    env_path = os.environ.get("ATTENDANCE_SCANNER_MODEL_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.is_file():
+            return p
+
+    # 1. Package models directory
+    package_model = Path(__file__).resolve().parent / "models" / "deeplabv3_mbv3_docseg.onnx"
+    if package_model.is_file():
+        return package_model
+
+    # 2. PyInstaller frozen onefile bundle (_MEIPASS)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        model_name = "deeplabv3_mbv3_docseg.onnx"
+        frozen_model = Path(meipass) / "attendance_scanner" / "models" / model_name
+        if frozen_model.is_file():
+            return frozen_model
+        frozen_direct = Path(meipass) / "models" / model_name
+        if frozen_direct.is_file():
+            return frozen_direct
+
+    return None
+
+
+def create_default_segmentation_adapter(
+    *,
+    model_path: Optional[Union[str, Path]] = None,
+    config: Optional[SegmentationConfig] = None,
+) -> Optional[OnnxSegmentationAdapter]:
+    """Instantiate the default MobileNetV3 DeepLabV3 segmentation adapter."""
+    resolved_path = Path(model_path) if model_path else get_default_segmentation_model_path()
+    if resolved_path is None or not resolved_path.is_file():
+        return None
+
+    from attendance_scanner.onnx_runtime import OnnxInferenceService, OnnxSessionConfig
+
+    service = OnnxInferenceService(
+        str(resolved_path),
+        config=OnnxSessionConfig(
+            providers=["CPUExecutionProvider"],
+            intra_op_num_threads=2,
+            inter_op_num_threads=1,
+            execution_mode="sequential",
+        ),
+    )
+    seg_config = config or SegmentationConfig(
+        input_width=384,
+        input_height=384,
+        resize_mode="stretch",
+        output_index=0,
+        document_class_index=1,
+    )
+    model_card = SegmentationModelCard(
+        version="deeplabv3-mobilenetv3-large-384",
+        license="MIT",
+        attribution="attendance-scanner-weights",
+        url="https://huggingface.co/7rplus/pagescan-weights",
+    )
+    return OnnxSegmentationAdapter(service, model_card=model_card, config=seg_config)
+
+
+def get_default_segmentation_adapter(
+    *,
+    model_path: Optional[Union[str, Path]] = None,
+    config: Optional[SegmentationConfig] = None,
+) -> Optional[OnnxSegmentationAdapter]:
+    """Return a shared default segmentation adapter, lazily initialized."""
+    global _DEFAULT_ADAPTER_INSTANCE
+    if model_path is None and config is None and _DEFAULT_ADAPTER_INSTANCE is not None:
+        return _DEFAULT_ADAPTER_INSTANCE
+    adapter = create_default_segmentation_adapter(model_path=model_path, config=config)
+    if model_path is None and config is None and adapter is not None:
+        _DEFAULT_ADAPTER_INSTANCE = adapter
+    return adapter
+
+
 __all__ = [
     "OnnxSegmentationAdapter",
     "SegmentationAdapterError",
@@ -551,6 +759,9 @@ __all__ = [
     "SegmentationModelCard",
     "SegmentationOutput",
     "SegmentationTransform",
+    "create_default_segmentation_adapter",
     "decode_segmentation_output",
+    "get_default_segmentation_adapter",
+    "get_default_segmentation_model_path",
     "preprocess_segmentation_input",
 ]

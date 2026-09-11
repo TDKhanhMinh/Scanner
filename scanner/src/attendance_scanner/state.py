@@ -7,7 +7,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from pydantic import Field, model_validator
 
@@ -230,10 +230,77 @@ class Manifest(BaseContract):
         self.groups[key] = group
         self.updated_at = datetime.now(timezone.utc).isoformat()
 
+    def remove_group(self, key: DocumentGroupKey) -> Optional[ManifestGroup]:
+        """Remove a group by DocumentGroupKey, updating manifest timestamp."""
+        storage_key = _group_storage_key(key)
+        removed = self.groups.pop(storage_key, None)
+        if removed is not None:
+            self.updated_at = datetime.now(timezone.utc).isoformat()
+        return removed
+
     def set_artifact(self, artifact: ManifestArtifact) -> None:
         """Persist an artifact in memory; the caller commits it atomically."""
         self.artifacts[artifact.output_relative_path.replace("\\", "/")] = artifact
         self.updated_at = datetime.now(timezone.utc).isoformat()
+
+    def prune_orphaned_state(
+        self,
+        discovered_paths: Set[str],
+        output_root: Optional[Union[str, Path]] = None,
+    ) -> bool:
+        """Prune groups and entries whose sources no longer exist on disk
+        and have no output artifact.
+
+        Args:
+            discovered_paths: Set of relative source paths currently discovered on disk.
+            output_root: Root directory of output artifacts.
+
+        Returns:
+            True if any group or entry was pruned, False otherwise.
+        """
+        changed = False
+        normalized_discovered = {p.replace("\\", "/") for p in discovered_paths}
+        out_root = Path(output_root).resolve() if output_root else Path(self.output_root).resolve()
+
+        # 1. Prune groups whose sources are all missing and have no existing output artifacts
+        groups_to_prune: List[str] = []
+        for storage_key, group in self.groups.items():
+            sources = [p.replace("\\", "/") for p in group.source_relative_paths]
+            has_sources = any(p in normalized_discovered for p in sources)
+            if not has_sources:
+                has_artifact = False
+                for art_path in group.artifact_relative_paths:
+                    if (out_root / art_path.replace("\\", "/")).is_file():
+                        has_artifact = True
+                        break
+                if not has_artifact:
+                    groups_to_prune.append(storage_key)
+
+        for storage_key in groups_to_prune:
+            self.groups.pop(storage_key, None)
+            changed = True
+
+        # 2. Prune entries whose source files no longer exist on disk
+        # and are not referenced by existing artifacts
+        entries_to_prune: List[str] = []
+        for entry_path, entry in self.entries.items():
+            if entry_path.replace("\\", "/") not in normalized_discovered:
+                has_artifact = False
+                for art_path in entry.output_relative_paths:
+                    if (out_root / art_path.replace("\\", "/")).is_file():
+                        has_artifact = True
+                        break
+                if not has_artifact:
+                    entries_to_prune.append(entry_path)
+
+        for entry_path in entries_to_prune:
+            self.entries.pop(entry_path, None)
+            changed = True
+
+        if changed:
+            self.updated_at = datetime.now(timezone.utc).isoformat()
+
+        return changed
 
 
 def _group_storage_key(key: DocumentGroupKey) -> str:

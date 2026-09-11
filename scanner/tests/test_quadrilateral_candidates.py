@@ -192,3 +192,36 @@ def test_rejected_tiny_contour_remains_bounded_evidence_for_downstream_scoring()
     assert rejected.source == "contour"
     assert GeometryReasonCode.QUAD_AREA_OUT_OF_RANGE in rejected.reason_codes
     assert result.diagnostics["rejectedCandidateCount"] == 1
+
+
+def test_convex_hull_approx_finds_tight_quadrilateral_and_avoids_min_area_rect_fallback():
+    mask = np.zeros((200, 200), dtype=np.uint8)
+    base_poly = np.array([[30, 25], [170, 28], [160, 180], [35, 175]], dtype=np.int32)
+    cv2.fillPoly(mask, [base_poly], 1)
+    mask[24:26, 80:90] = 1
+    mask[178:182, 100:110] = 0
+
+    result = build_quadrilateral_candidates(
+        image_size=(200, 200),
+        mask=mask,
+    )
+    assert result.candidates
+    mask_fit_candidates = [c for c in result.candidates if c.source == "mask_fit"]
+    assert mask_fit_candidates
+    assert any(c.evidence.get("fitMethod") == "convex_hull_approx" for c in mask_fit_candidates)
+    assert all(c.evidence.get("fitMethod") != "min_area_rect" for c in mask_fit_candidates)
+
+
+def test_convex_hull_approx_rot90_for_portrait_landscape_documents():
+    mask = np.zeros((300, 200), dtype=np.uint8)
+    poly = np.array([[30, 40], [170, 35], [165, 260], [35, 265]], dtype=np.int32)
+    cv2.fillPoly(mask, [poly], 1)
+
+    result = build_quadrilateral_candidates(
+        image_size=(200, 300),
+        mask=mask,
+    )
+    assert result.candidates
+    assert result.diagnostics["rawCandidateCount"] >= 2
+    assert any(c.source == "mask_fit" for c in result.candidates)
+

@@ -303,6 +303,11 @@ def _export_grouped_results(
         group_id = _group_id(group.key)
         if group_id in skip_groups:
             continue
+        if not any(
+            source_path.replace("\\", "/") in outcome_by_path
+            for source_path in group.source_relative_paths
+        ):
+            continue
         group_pages: List[ExportPage] = []
         source_entries: List[ManifestEntry] = []
         group_failed = False

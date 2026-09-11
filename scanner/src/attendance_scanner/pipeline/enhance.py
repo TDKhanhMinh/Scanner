@@ -5,8 +5,8 @@ in-memory functions on OpenCV images (without filesystem I/O), it applies contra
 enhancement, noise reduction, and binarization according to the selected ScanMode:
 1. Gray (default): Grayscale + CLAHE + edge-preserving bilateral denoise + mild unsharp mask.
    Preserves faint pen strokes and table grid lines.
-2. B&W: Grayscale + background normalization + Gaussian adaptive thresholding.
-   Crisp binary output for clean dark text (warning: faint handwriting may lose fidelity).
+2. B&W (Magic Pro): CamScanner-style background flattening + deep black text + colored ink preservation.
+   Crisp white paper, dark text, and vibrant signatures/stamps without shadow casts.
 3. Color Enhanced: LAB color-space CLAHE strictly on Luminance (L) + unsharp mask.
    Preserves stamps and colored signatures without color cast distortion.
 4. Smart Document: background illumination correction + paper whitening + LAB contrast.
@@ -34,11 +34,17 @@ class EnhancementConfig(BaseContract):
     gray_sharpen_amount: float = Field(default=0.3, ge=0.0, le=2.0)
     gray_sharpen_sigma: float = Field(default=1.0, gt=0.0, le=5.0)
 
-    # B&W mode parameters
+    # B&W mode parameters (legacy fields preserved for backward compatibility)
     bw_adaptive_block_size: int = Field(default=21, ge=3, le=101)
     bw_adaptive_c: int = Field(default=10, ge=-30, le=50)
     bw_bg_normalize: bool = True
     bw_bg_kernel_size: int = Field(default=25, ge=3, le=101)
+    # B&W Magic Pro parameters
+    bw_magic_kernel_size: int = Field(default=61, ge=9, le=201)
+    bw_magic_black_point: int = Field(default=130, ge=0, le=255)
+    bw_magic_white_point: int = Field(default=215, ge=0, le=255)
+    bw_magic_sat_boost: float = Field(default=1.3, ge=0.5, le=3.0)
+    bw_magic_sharpen: float = Field(default=0.3, ge=0.0, le=2.0)
 
     # Color Enhanced mode parameters
     color_clahe_clip_limit: float = Field(default=1.5, gt=0.0, le=20.0)
@@ -75,6 +81,8 @@ class EnhancementConfig(BaseContract):
             self.bw_adaptive_block_size += 1
         if self.bw_bg_kernel_size % 2 == 0:
             self.bw_bg_kernel_size += 1
+        if self.bw_magic_kernel_size % 2 == 0:
+            self.bw_magic_kernel_size += 1
         if self.smart_background_kernel_size % 2 == 0:
             self.smart_background_kernel_size += 1
         return self
@@ -171,72 +179,93 @@ def enhance_bw(
     image: Union[np.ndarray, WarpedDocument, LoadedImage],
     config: Optional[EnhancementConfig] = None,
 ) -> np.ndarray:
-    """Enhance image in B&W binary mode (clean text documents with dark ink).
+    """Enhance image in CamScanner Magic Pro mode (replacing legacy adaptive binarization).
 
-    Document Scanning Note:
-    B&W mode applies high-contrast adaptive binarization which maximizes text crispness
-    on printed tables and dark ink. However, faint ballpoint pen marks, light pencil notes,
-    or faded signatures may be eroded. Gray mode is recommended when faint handwriting
-    fidelity is critical.
-
-    Pipeline:
-    1. Grayscale conversion.
-    2. Background normalization via morphological dilation + blur to level shadow gradients.
-    3. Gaussian adaptive thresholding using a validated odd block size.
+    CamScanner Magic Pro:
+    1. Multi-channel morphological background illumination map (dilation + Gaussian blur)
+       to completely eliminate uneven lighting, shadows, and yellowish/grayish casts.
+    2. Divide original channels by the background map to flatten the paper to pure white.
+    3. Non-linear tone curve on luminance/value:
+       - Deepens dark strokes, table lines, and text (below black point).
+       - Clamps bright paper pixels (above white point) to pure spotless white (255).
+    4. Intelligent chroma & saturation handling:
+       - Paper background has saturation neutralized to 0 (pure clean white paper).
+       - Colored ink (red official stamps, blue ballpoint signatures, colored marks)
+         has saturation preserved and boosted (+30%).
+    5. High-pass unsharp masking for crisp text edges.
 
     Args:
         image: Source image array, WarpedDocument, or LoadedImage.
         config: Optional configuration thresholds.
 
     Returns:
-        1-channel 2D binary NumPy array of shape (height, width) with values in {0, 255}.
+        3-channel BGR uint8 array (or 1-channel if input was 1-channel) with pure white paper,
+        deep black text/tables, and preserved colored ink/stamps.
     """
     if config is None:
         config = EnhancementConfig()
 
     bgr = _extract_bgr_array(image)
-
-    if bgr.ndim == 3:
-        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    is_2d = (bgr.ndim == 2)
+    if is_2d:
+        img_bgr = cv2.cvtColor(bgr, cv2.COLOR_GRAY2BGR)
     else:
-        gray = bgr.copy()
+        img_bgr = bgr.copy()
 
-    h, w = gray.shape[:2]
-    if h < 2 or w < 2:
-        return np.where(gray >= 128, 255, 0).astype(np.uint8)
+    h, w = img_bgr.shape[:2]
+    if h < 4 or w < 4:
+        return bgr.copy()
 
-    # 1. Background normalization
-    if config.bw_bg_normalize:
-        k = config.bw_bg_kernel_size
-        k = min(k, max(3, (min(h, w) // 4) * 2 + 1))  # Prevent kernel larger than image
-        struct_elem = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
-        bg = cv2.morphologyEx(gray, cv2.MORPH_DILATE, struct_elem)
-        bg = cv2.medianBlur(bg, k)
-        # Avoid division by zero on black background pixels
-        bg = np.maximum(bg, 1)
-        normalized = cv2.divide(gray, bg, scale=255)
-    else:
-        normalized = gray
+    # Kernel for local paper background illumination estimation
+    k = min(config.bw_magic_kernel_size, max(3, (min(h, w) // 2) * 2 + 1))
+    if k % 2 == 0:
+        k -= 1
+    struct_elem = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    img_f = img_bgr.astype(np.float32)
 
-    # 2. Gaussian adaptive thresholding
-    block_size = config.bw_adaptive_block_size
-    # Ensure block size is strictly odd and smaller than min image dimension
-    min_dim = min(h, w)
-    if block_size >= min_dim:
-        block_size = max(3, (min_dim // 2) * 2 + 1)
-    if block_size % 2 == 0:
-        block_size += 1
+    # 1. Background map per channel (removes color cast, dark corners, and shadows)
+    bg = np.zeros_like(img_f)
+    for c in range(3):
+        dilated = cv2.dilate(img_f[:, :, c], struct_elem)
+        bg[:, :, c] = cv2.GaussianBlur(dilated, (0, 0), sigmaX=max(1.0, k / 3.0))
+    bg = np.maximum(bg, 1.0)
 
-    binary = cv2.adaptiveThreshold(
-        normalized,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        block_size,
-        config.bw_adaptive_c,
+    # 2. Divide by background -> flattened paper (paper pixels reach ~255)
+    norm = np.clip((img_f / bg) * 255.0, 0.0, 255.0)
+    norm_u8 = norm.astype(np.uint8)
+
+    # 3. Tone curve & saturation in HSV
+    hsv = cv2.cvtColor(norm_u8, cv2.COLOR_BGR2HSV).astype(np.float32)
+    h_c, s_c, v_c = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    black_pt = float(config.bw_magic_black_point)
+    white_pt = float(config.bw_magic_white_point)
+    v_scaled = (v_c - black_pt) / max(1.0, white_pt - black_pt)
+    v_curved = np.clip(v_scaled * 255.0, 0.0, 255.0)
+    v_curved = 255.0 * np.power(v_curved / 255.0, 0.85)
+
+    # 4. Saturation handling:
+    # If paper is white (v_curved > 230), kill saturation to prevent yellow/gray stains.
+    # If colored ink / stamp (s_c > 25 and v_c < 220), boost saturation.
+    is_colored_ink = (s_c > 25.0) & (v_c < 220.0)
+    s_new = np.where(
+        is_colored_ink,
+        np.clip(s_c * config.bw_magic_sat_boost, 0.0, 255.0),
+        np.where(v_curved > 230.0, 0.0, s_c * 0.5),
     )
 
-    return binary
+    hsv_new = cv2.merge([h_c, np.clip(s_new, 0.0, 255.0), np.clip(v_curved, 0.0, 255.0)]).astype(np.uint8)
+    res_bgr = cv2.cvtColor(hsv_new, cv2.COLOR_HSV2BGR)
+
+    # 5. Crisp edge sharpening (Unsharp Mask)
+    if config.bw_magic_sharpen > 0.0:
+        blurred = cv2.GaussianBlur(res_bgr, (0, 0), sigmaX=1.0)
+        res_bgr = cv2.addWeighted(res_bgr, 1.0 + config.bw_magic_sharpen, blurred, -config.bw_magic_sharpen, 0)
+        res_bgr = np.clip(res_bgr, 0, 255).astype(np.uint8)
+
+    if is_2d:
+        return cv2.cvtColor(res_bgr, cv2.COLOR_BGR2GRAY)
+    return res_bgr
 
 
 def enhance_color(
@@ -414,8 +443,8 @@ def enhance_image(
         config: Optional configuration parameters. Uses defaults if omitted.
 
     Returns:
-        Enhanced NumPy array: 1-channel uint8 (H, W) for Gray and B&W,
-        3-channel uint8 (H, W, 3) for Color and Smart Document.
+        Enhanced NumPy array: 1-channel uint8 (H, W) for Gray,
+        3-channel uint8 (H, W, 3) for B&W (Magic Pro), Color, and Smart Document.
 
     Raises:
         ValueError: If an unsupported mode or invalid image format is passed.

@@ -37,13 +37,11 @@ def test_enhance_output_invariants():
     assert gray_out.shape == (h, w)
     assert gray_out.dtype == np.uint8
 
-    # 2. B&W mode: 1-channel (2D) binary uint8 ({0, 255})
+    # 2. B&W (Magic Pro) mode: 3-channel (3D) uint8 with clean white background and dark text
     bw_out = enhance_bw(bgr)
-    assert bw_out.ndim == 2
-    assert bw_out.shape == (h, w)
+    assert bw_out.ndim == 3
+    assert bw_out.shape == (h, w, 3)
     assert bw_out.dtype == np.uint8
-    unique_vals = set(np.unique(bw_out))
-    assert unique_vals.issubset({0, 255})
 
     # 3. Color Enhanced mode: 3-channel (3D) uint8
     color_out = enhance_color(bgr)
@@ -81,12 +79,12 @@ def test_enhance_synthetic_uneven_lighting_and_stamp_preservation():
     # The faint signature and dark text should both have local contrast
     assert gray_res[120, 50] < gray_res[100, 50]  # text pixel darker than surrounding paper
 
-    # --- Test B&W mode ---
+    # --- Test B&W (Magic Pro) mode ---
     bw_res = enhance_image(bgr, mode=ScanMode.BW)
-    assert bw_res.shape == (h, w)
-    # Paper background on both sides should be normalized to pure white (255)
-    assert bw_res[40, 40] == 255
-    assert bw_res[40, 360] == 255
+    assert bw_res.shape == (h, w, 3)
+    # Paper background on both sides should be normalized to pure white (>= 250)
+    assert np.all(bw_res[40, 40] >= 250)
+    assert np.all(bw_res[40, 360] >= 250)
 
     # --- Test Color Enhanced mode ---
     color_res = enhance_image(bgr, mode=ScanMode.COLOR)
@@ -117,7 +115,7 @@ def test_enhance_uniform_images_no_crash():
         assert res_gray.shape == (100, 100)
 
         res_bw = enhance_bw(uniform_img)
-        assert res_bw.shape == (100, 100)
+        assert res_bw.shape == (100, 100, 3)
 
         res_color = enhance_color(uniform_img)
         assert res_color.shape == (100, 100, 3)
@@ -130,7 +128,7 @@ def test_enhance_small_image():
     """Verify small images (e.g. 4x4) are handled safely without kernel boundary errors."""
     tiny = np.full((4, 4, 3), 150, dtype=np.uint8)
     assert enhance_gray(tiny).shape == (4, 4)
-    assert enhance_bw(tiny).shape == (4, 4)
+    assert enhance_bw(tiny).shape == (4, 4, 3)
     assert enhance_color(tiny).shape == (4, 4, 3)
     assert enhance_smart_document(tiny).shape == (4, 4, 3)
 
@@ -185,14 +183,14 @@ def test_enhance_image_mode_dispatch_and_errors():
 
     # Enum dispatch
     assert enhance_image(bgr, ScanMode.GRAY).ndim == 2
-    assert enhance_image(bgr, ScanMode.BW).ndim == 2
+    assert enhance_image(bgr, ScanMode.BW).ndim == 3
     assert enhance_image(bgr, ScanMode.COLOR).ndim == 3
     assert enhance_image(bgr, ScanMode.SMART_DOCUMENT).ndim == 3
 
     # String dispatch
     assert enhance_image(bgr, "gray").ndim == 2
     assert enhance_image(bgr, "GRAY").ndim == 2
-    assert enhance_image(bgr, "bw").ndim == 2
+    assert enhance_image(bgr, "bw").ndim == 3
     assert enhance_image(bgr, "color").ndim == 3
     assert enhance_image(bgr, "color_enhanced").ndim == 3
     assert enhance_image(bgr, "smart").ndim == 3
@@ -234,8 +232,8 @@ def test_end_to_end_pipeline_integration(tmp_path: Path):
     assert enhanced_gray.dtype == np.uint8
 
     enhanced_bw = enhance_image(warped, ScanMode.BW)
-    assert enhanced_bw.shape == (warped.height, warped.width)
-    assert set(np.unique(enhanced_bw)).issubset({0, 255})
+    assert enhanced_bw.shape == (warped.height, warped.width, 3)
+    assert enhanced_bw.dtype == np.uint8
 
     enhanced_color = enhance_image(warped, ScanMode.COLOR)
     assert enhanced_color.shape == (warped.height, warped.width, 3)
