@@ -109,7 +109,6 @@ export function App() {
   const skippedReviewGroupsRef = useRef<string[]>([]);
   const latestSettingsRef = useRef<ScannerSettings>(settings);
   latestSettingsRef.current = settings;
-  const inFlightPlanCount = useRef<number>(0);
 
   // Plan state and fingerprint lifecycle
   const [currentPlan, setCurrentPlan] = useState<ScanPlanEvent | null>(null);
@@ -191,7 +190,6 @@ export function App() {
   ): Promise<ScanPlanEvent | null> => {
     const requestId = ++planRequestId.current;
     const requestFingerprint = createPlanFingerprint(path, nextOutputPath, requestSettings);
-    inFlightPlanCount.current += 1;
     setIsPlanning(true);
     setErrorMessage("");
     setHasPlanError(false);
@@ -262,8 +260,10 @@ export function App() {
       }
       return null;
     } finally {
-      inFlightPlanCount.current = Math.max(0, inFlightPlanCount.current - 1);
-      if (inFlightPlanCount.current === 0) {
+      if (
+        requestId === planRequestId.current &&
+        requestFingerprint === currentFingerprintRef.current
+      ) {
         setIsPlanning(false);
       }
     }
@@ -299,6 +299,7 @@ export function App() {
     skippedReviewGroupsRef.current = [];
     setSelectedPreview(null);
     planRequestId.current += 1;
+    setIsPlanning(false);
     setIsPlanReady(false);
     const trimmed = path.trim();
     const nextOutputPath = trimmed ? `${trimmed}_pdf` : "";
@@ -312,7 +313,6 @@ export function App() {
         planDebounceTimer.current = undefined;
       }
       planRequestId.current += 1;
-      inFlightPlanCount.current = 0;
       setIsPlanning(false);
       setErrorMessage("");
       setHasPlanError(false);
@@ -338,9 +338,8 @@ export function App() {
 
   const handleSettingChange = (updater: (prev: ScannerSettings) => ScannerSettings) => {
     planRequestId.current += 1;
-    // P1 #1 Fix: immediately release loading state and clear stale review groups
+    // Immediately release loading state and clear stale review groups.
     setIsPlanning(false);
-    inFlightPlanCount.current = 0;
     setReviewGroups([]);
     setResolvedReviewGroups({});
     resolvedReviewGroupsRef.current = {};
@@ -349,21 +348,20 @@ export function App() {
     setSkippedReviewGroups([]);
     skippedReviewGroupsRef.current = [];
 
-    setSettings((previous) => {
-      const nextSettings = updater(previous);
-      latestSettingsRef.current = nextSettings;
+    const nextSettings = updater(latestSettingsRef.current);
+    latestSettingsRef.current = nextSettings;
+    setSettings(nextSettings);
 
-      // If user typed a folder path within the 250ms debounce window, reschedule with new settings
-      if (planDebounceTimer.current !== undefined) {
-        clearTimeout(planDebounceTimer.current);
-        planDebounceTimer.current = undefined;
-        if (inputPath.trim()) {
-          schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
-        }
+    // If the user typed a folder path within the 250ms debounce window,
+    // reschedule using the latest settings without putting side effects inside
+    // the functional state updater.
+    if (planDebounceTimer.current !== undefined) {
+      clearTimeout(planDebounceTimer.current);
+      planDebounceTimer.current = undefined;
+      if (inputPath.trim()) {
+        schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
       }
-
-      return nextSettings;
-    });
+    }
   };
 
   const handlePeriodChange = (period: BatchPeriod) => {
@@ -384,6 +382,14 @@ export function App() {
 
   const handleReprocessChange = (reprocess: boolean) => {
     handleSettingChange((prev) => ({ ...prev, reprocess }));
+  };
+
+  const handleDebugDiagnosticsChange = (debugDiagnostics: boolean) => {
+    // Diagnostics changes affect execution logging, not plan membership or
+    // grouped review ordering. Keep the current plan and review state intact.
+    const nextSettings = { ...latestSettingsRef.current, debugDiagnostics };
+    latestSettingsRef.current = nextSettings;
+    setSettings(nextSettings);
   };
 
   const chooseDirectory = async (title: string): Promise<string | null> => {
@@ -420,6 +426,7 @@ export function App() {
     setManualOrderOverrides({});
     setSkippedReviewGroups([]);
     planRequestId.current += 1;
+    setIsPlanning(false);
     setIsPlanReady(false);
     setHasPlanError(false);
     setOutputPath(nextOutputPath);
@@ -791,9 +798,7 @@ export function App() {
                   debugDiagnostics={settings.debugDiagnostics}
                   reprocess={settings.reprocess}
                   needsReprocess={planStats.needsReprocess ?? 0}
-                  onDebugDiagnosticsChange={(debugDiagnostics) => {
-                    handleSettingChange((previous) => ({ ...previous, debugDiagnostics }));
-                  }}
+                  onDebugDiagnosticsChange={handleDebugDiagnosticsChange}
                   onReprocessChange={handleReprocessChange}
                   disabled={isScanning}
                 />
@@ -872,6 +877,15 @@ export function App() {
                 Tổng số đã xử lý: {results.length} file
               </span>
             </div>
+
+            {isPlanStale && results.length > 0 && (
+              <p
+                role="status"
+                className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-medium text-amber-800 dark:text-amber-300"
+              >
+                Kết quả của lượt quét trước. Các thay đổi thiết lập sẽ được áp dụng khi bấm Quét lại.
+              </p>
+            )}
 
             {selectedPreview && (
               <DetectionPreviewPanel

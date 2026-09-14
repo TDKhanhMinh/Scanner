@@ -446,4 +446,69 @@ describe("App scan plan states", () => {
     expect(startScan).not.toHaveBeenCalled();
     expect(screen.getByText(/Cần xác nhận thứ tự page/i)).toBeInTheDocument();
   });
+
+  it("keeps grouped review state when debug diagnostics changes", async () => {
+    vi.mocked(planScan).mockResolvedValue({
+      ...validPlan,
+      exportMode: "GROUPED" as const,
+      reviewGroups: [ambiguousGroup],
+    });
+    render(<App />);
+    await enterInputPath();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Nhiều ảnh → một PDF/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Đồng bộ & Quét/i }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/Cần xác nhận thứ tự page/i)).toBeInTheDocument();
+    const planCallCount = vi.mocked(planScan).mock.calls.length;
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Bật diagnostics/i }));
+
+    expect(screen.getByText(/Cần xác nhận thứ tự page/i)).toBeInTheDocument();
+    expect(vi.mocked(planScan)).toHaveBeenCalledTimes(planCallCount);
+  });
+
+  it("keeps the newest plan loading while an invalidated older request finishes", async () => {
+    let resolveFirstPlan: ((value: typeof validPlan) => void) | undefined;
+    let resolveSecondPlan: ((value: typeof validPlan) => void) | undefined;
+    vi.mocked(planScan)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstPlan = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondPlan = resolve;
+          }),
+      );
+    render(<App />);
+
+    const input = screen.getByPlaceholderText(/Nhập hoặc chọn đường dẫn thư mục/i);
+    fireEvent.change(input, { target: { value: "C:/Attendance Input" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Smart Document/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Làm mới/i }));
+    expect(screen.getByText(/Đang phân tích thư mục/i)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveFirstPlan?.(validPlan);
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/Đang phân tích thư mục/i)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSecondPlan?.(validPlan);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/Đang phân tích thư mục/i)).not.toBeInTheDocument();
+  });
 });
