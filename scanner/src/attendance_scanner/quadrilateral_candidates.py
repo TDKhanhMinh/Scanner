@@ -165,9 +165,9 @@ def _candidate_score(
     edge_support: Optional[float],
     mask_coverage: Optional[float] = None,
 ) -> float:
-    score = 0.6 * geometry_quality
+    score = 0.5 * geometry_quality
     if mask_quad_iou is not None:
-        score += 0.2 * mask_quad_iou
+        score += 0.3 * mask_quad_iou
     if edge_support is not None:
         score += 0.1 * edge_support
     if mask_coverage is not None:
@@ -371,10 +371,7 @@ def build_quadrilateral_candidates(
 
             rectangle = cv2.minAreaRect(contour)
             (cx, cy), (w, h), angle = rectangle
-            # Apply safe padding (2% per side, 1.04x) to safeguard faint margins & signatures
-            w_pad = w * 1.04
-            h_pad = h * 1.04
-            box = cv2.boxPoints(((cx, cy), (w_pad, h_pad), angle))
+            box = cv2.boxPoints(((cx, cy), (w, h), angle))
             clipped_box = [
                 (
                     max(0.0, min(float(image_width - 1), float(point[0]))),
@@ -487,8 +484,8 @@ def build_quadrilateral_candidates(
     accepted.sort(
         key=lambda candidate: (
             -candidate.score,
-            -(candidate.evidence.get("maskCoverage") or 0.0),
             -candidate.mask_quad_iou if candidate.mask_quad_iou is not None else 0.0,
+            -(candidate.evidence.get("maskCoverage") or 0.0),
             candidate.source,
             candidate.corners.model_dump_json(),
         )
@@ -511,11 +508,16 @@ def build_quadrilateral_candidates(
                 image_width,
                 image_height,
             )
-            is_strictly_same_source = quad_candidate.source == existing_candidate.source
-            is_same_family = is_strictly_same_source or {
-                quad_candidate.source,
-                existing_candidate.source,
-            } == {"mixed", "mask_fit"}
+            fit1 = quad_candidate.evidence.get("fitMethod")
+            fit2 = existing_candidate.evidence.get("fitMethod")
+            same_fit = fit1 == fit2 and fit1 is not None
+            is_strictly_same_source = (quad_candidate.source == existing_candidate.source) and (
+                same_fit or fit1 is None or fit2 is None
+            )
+            is_same_family = (
+                (quad_candidate.source == existing_candidate.source and same_fit)
+                or {quad_candidate.source, existing_candidate.source} == {"mixed", "mask_fit"}
+            )
             if is_strictly_same_source:
                 iou_threshold = min(policy.dedup_same_source_iou, 0.70)
             elif is_same_family:
@@ -526,7 +528,7 @@ def build_quadrilateral_candidates(
                 exist_cov = existing_candidate.evidence.get("maskCoverage") or 0.0
                 quad_cov = quad_candidate.evidence.get("maskCoverage") or 0.0
                 if (
-                    quad_cov > exist_cov + 0.05
+                    quad_cov > exist_cov + 0.10
                     and quad_candidate.geometry_quality >= existing_candidate.geometry_quality - 0.05
                     and is_same_family
                 ):

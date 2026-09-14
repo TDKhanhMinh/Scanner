@@ -253,10 +253,11 @@ def _resolve_ambiguity(
 ) -> Optional[int]:
     """Break a tie among candidates within the ambiguity margin.
 
-    When candidates have nearly identical final scores, we prefer the candidate
-    with significantly higher mask coverage (which means it preserves more of
-    the document area, including signatures and margins) and better geometry
-    (which indicates more regular, rectangular shape with parallel edges).
+    Strategy:
+    - If one candidate has substantially higher mask coverage (≥10%),
+      it likely preserves content the other cuts off → prefer it.
+    - Otherwise, prefer the candidate with higher IoU (tighter, less
+      background) combined with geometry quality.
 
     Returns the candidate_id of the resolved winner, or None if the tie
     cannot be broken with confidence.
@@ -273,30 +274,40 @@ def _resolve_ambiguity(
     # Build a lookup from candidate_id -> original QuadrilateralCandidate
     cand_map = {c.candidate_id: c for c in candidate_list}
 
-    # Compute a composite tiebreaker score:
-    #   70% maskCoverage + 30% geometry_quality
-    # maskCoverage captures how much of the AI mask the quad actually covers.
-    # geometry_quality captures parallelism, angle regularity, etc.
-    def tiebreaker_score(cs: CandidateScore) -> float:
+    def _get_metrics(cs: CandidateScore) -> tuple:
+        """Return (coverage, iou, geometry) for a candidate."""
         orig = cand_map.get(cs.candidate_id)
         if orig is None:
-            return 0.0
+            return (0.0, 0.0, 0.0)
         coverage = orig.evidence.get("maskCoverage", 0.0)
         if not isinstance(coverage, (int, float)):
             coverage = 0.0
+        iou = orig.mask_quad_iou if orig.mask_quad_iou is not None else 0.0
         geo = orig.geometry_quality
-        return 0.7 * float(coverage) + 0.3 * float(geo)
+        return (float(coverage), float(iou), float(geo))
 
-    contenders.sort(key=lambda s: (-tiebreaker_score(s), s.candidate_id))
-    best = contenders[0]
-    second = contenders[1]
+    # Check if any contender has substantially higher coverage
+    metrics = [(cs, _get_metrics(cs)) for cs in contenders]
+    coverages = [m[1][0] for m in metrics]
+    max_cov = max(coverages)
+    min_cov = min(coverages)
 
-    best_tb = tiebreaker_score(best)
-    second_tb = tiebreaker_score(second)
-
-    # Require a minimum meaningful advantage to resolve the tiebreak
-    if best_tb - second_tb >= 0.03:
-        return best.candidate_id
+    if max_cov - min_cov >= 0.08:
+        # Large coverage gap (>=8%): one candidate preserves significantly more
+        # content (e.g. Văn A notched mask cutting off signatures or headers).
+        # Prefer higher coverage.
+        metrics.sort(key=lambda m: (-m[1][0], -m[1][2], m[0].candidate_id))
+        return metrics[0][0].candidate_id
+    else:
+        # Small coverage gap (<8%): both cover essential content.
+        # Prefer tighter fit (higher IoU = less background/desk/binding).
+        metrics.sort(key=lambda m: (-m[1][1], -m[1][2], m[0].candidate_id))
+        best_cs, best_m = metrics[0]
+        second_cs, second_m = metrics[1]
+        if best_m[1] - second_m[1] >= 0.005:
+            return best_cs.candidate_id
+        if best_m[2] - second_m[2] >= 0.02:
+            return best_cs.candidate_id
 
     # Cannot resolve with confidence
     return None
