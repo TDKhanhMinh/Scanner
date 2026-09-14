@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
-from typing import Callable, List, Literal, Optional, Protocol
+from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, Tuple
 
+import cv2
 import numpy as np
 from pydantic import Field
 
@@ -14,6 +15,11 @@ from attendance_scanner.candidate_scoring import (
     rank_candidate_pool,
 )
 from attendance_scanner.contracts import BaseContract
+from attendance_scanner.corner_refinement import (
+    CornerRefinementConfig,
+    refine_document_corners,
+)
+from attendance_scanner.corner_search import CornerSearchConfig, search_corner_rois
 from attendance_scanner.cv_candidates import (
     CvCandidateConfig,
     CvCandidateSet,
@@ -35,12 +41,14 @@ from attendance_scanner.edge_support import (
 )
 from attendance_scanner.geometry_validator import GeometryValidationConfig, validate_quadrilateral
 from attendance_scanner.hough_lines import HoughLineConfig, HoughLineEvidence, detect_hough_lines
+from attendance_scanner.line_fitting import LineFittingConfig, fit_document_edge_lines
 from attendance_scanner.pipeline.load import LoadedImage
 from attendance_scanner.quadrilateral_candidates import (
     QuadrilateralCandidate,
     QuadrilateralCandidateConfig,
     QuadrilateralCandidateSet,
     build_quadrilateral_candidates,
+    polygon_iou_and_coverage_with_mask,
 )
 from attendance_scanner.segmentation import SegmentationOutput
 
@@ -71,6 +79,16 @@ class HybridConfig(BaseContract):
     cv: CvCandidateConfig = Field(default_factory=CvCandidateConfig)
     hough: HoughLineConfig = Field(default_factory=HoughLineConfig)
     edge: EdgeSupportConfig = Field(default_factory=EdgeSupportConfig)
+    refinement_enabled: bool = True
+    line_fitting: LineFittingConfig = Field(
+        default_factory=lambda: LineFittingConfig(
+            minimum_inliers=2,
+            minimum_inlier_ratio=0.1,
+        )
+    )
+    corner_search_enabled: bool = True
+    corner_search: CornerSearchConfig = Field(default_factory=CornerSearchConfig)
+    corner_refinement: CornerRefinementConfig = Field(default_factory=CornerRefinementConfig)
 
 
 class SegmentationProvider(Protocol):
@@ -126,13 +144,13 @@ class HybridDocumentDetector:
         elif self.config.segmentation_enabled:
             reason_codes.append("segmentation_provider_not_configured")
 
+        hough_evidence: Optional[HoughLineEvidence] = None
         try:
             cv_candidates = (
                 self.cv_provider(image)
                 if self.cv_provider is not None
                 else generate_cv_candidates(image, config=self.config.cv)
             )
-            hough_evidence = None
             if self.config.use_hough:
                 hough_evidence = (
                     self.hough_provider(image)
@@ -166,6 +184,13 @@ class HybridDocumentDetector:
             mask_confidence=mask_confidence,
         )
         selected = self._selected_candidate(scored_candidates, ranking)
+        selected, refinement_diagnostics = self._refine_selected_candidate(
+            image,
+            selected,
+            mask=mask,
+            hough_evidence=hough_evidence,
+        )
+        refinement_metadata = self._refinement_wire_metadata(refinement_diagnostics)
         decision_path = self._decision_path(segmentation_state, ranking, selected)
         fallback_used = (
             selected is None and self.config.fallback_full_image and ranking.status != "ambiguous"
@@ -236,7 +261,9 @@ class HybridDocumentDetector:
                 metadata={
                     "rankingStatus": ranking.status,
                     "selectedSource": selected.source,
+                    "selectedFitMethod": selected.evidence.get("fitMethod"),
                     "segmentationState": segmentation_state,
+                    **refinement_metadata,
                 },
                 decision_trace=trace,
             )
@@ -261,6 +288,7 @@ class HybridDocumentDetector:
             metadata={
                 "rankingStatus": ranking.status,
                 "segmentationState": segmentation_state,
+                **refinement_metadata,
             },
             decision_trace=trace,
         )
@@ -294,6 +322,150 @@ class HybridDocumentDetector:
                 )
             )
         return pool.model_copy(update={"candidates": candidates})
+
+    def _refine_selected_candidate(
+        self,
+        image: LoadedImage,
+        selected: Optional[QuadrilateralCandidate],
+        *,
+        mask: Optional[np.ndarray],
+        hough_evidence: Optional[HoughLineEvidence],
+    ) -> Tuple[Optional[QuadrilateralCandidate], Dict[str, Any]]:
+        """Refine a selected quad only when line evidence passes safety gates."""
+        diagnostics: Dict[str, Any] = {
+            "enabled": self.config.refinement_enabled,
+            "attempted": False,
+            "accepted": False,
+        }
+        if selected is None or not self.config.refinement_enabled:
+            diagnostics["reason"] = "disabled_or_no_selected_candidate"
+            return selected, diagnostics
+        if mask is None or not bool(np.asarray(mask).any()):
+            diagnostics["reason"] = "mask_evidence_required"
+            return selected, diagnostics
+        diagnostics["attempted"] = True
+        try:
+            local_search = (
+                search_corner_rois(
+                    image,
+                    selected.corners,
+                    config=self.config.corner_search,
+                )
+                if self.config.corner_search_enabled
+                else None
+            )
+            fitted_lines = fit_document_edge_lines(
+                selected.corners.as_list(),
+                source_size=(image.width, image.height),
+                local_search=local_search,
+                hough_evidence=hough_evidence,
+                config=self.config.line_fitting,
+            )
+            refinement_config = self.config.corner_refinement.model_copy(
+                update={"geometry": self.config.geometry}
+            )
+            before_support = selected.edge_support
+            edge_map = build_edge_map(image, config=self.config.edge)
+            if before_support is None:
+                before_support = score_quad_edge_support(
+                    edge_map,
+                    selected.corners,
+                ).overall_score
+            provisional = refine_document_corners(
+                selected.corners,
+                fitted_lines,
+                image_size=(image.width, image.height),
+                config=refinement_config,
+                before_edge_support=before_support,
+                after_edge_support=None,
+            )
+            after_support = score_quad_edge_support(
+                edge_map,
+                provisional.refined_corners,
+            ).overall_score
+            refinement = refine_document_corners(
+                selected.corners,
+                fitted_lines,
+                image_size=(image.width, image.height),
+                config=refinement_config,
+                before_edge_support=before_support,
+                after_edge_support=after_support,
+            )
+        except (TypeError, ValueError, RuntimeError, cv2.error) as exc:
+            diagnostics["reason"] = f"refinement_{type(exc).__name__.lower()}"
+            return selected, diagnostics
+
+        diagnostics.update(refinement.model_dump(mode="json"))
+        diagnostics["localSearchProvided"] = local_search is not None
+        diagnostics["houghProvided"] = hough_evidence is not None
+        diagnostics["afterEdgeSupport"] = after_support
+        if not refinement.accepted:
+            diagnostics["reason"] = "quality_gate_rejected"
+            return selected, diagnostics
+
+        refined_iou = selected.mask_quad_iou
+        refined_coverage: Optional[float] = None
+        if mask is not None:
+            refined_iou, refined_coverage = polygon_iou_and_coverage_with_mask(
+                refinement.selected_corners,
+                mask,
+            )
+            diagnostics["refinedMaskIoU"] = refined_iou
+            diagnostics["refinedMaskCoverage"] = refined_coverage
+            if (
+                selected.mask_quad_iou is not None
+                and refined_iou + refinement_config.max_mask_iou_drop < selected.mask_quad_iou
+            ):
+                diagnostics["accepted"] = False
+                diagnostics["reason"] = "mask_iou_drop"
+                return selected, diagnostics
+
+        evidence = {
+            **selected.evidence,
+            "fitMethod": "line_refined",
+            "baseFitMethod": selected.evidence.get("fitMethod"),
+            "cornerRefinementAccepted": True,
+            "cornerRefinementVersion": refinement.refinement_version,
+        }
+        if refined_coverage is not None:
+            evidence["maskCoverage"] = refined_coverage
+        refined_candidate = selected.model_copy(
+            update={
+                "corners": refinement.selected_corners,
+                "mask_quad_iou": refined_iou,
+                "edge_support": after_support,
+                "evidence": evidence,
+            }
+        )
+        diagnostics["accepted"] = True
+        return refined_candidate, diagnostics
+
+    @staticmethod
+    def _refinement_wire_metadata(diagnostics: Dict[str, Any]) -> Dict[str, Any]:
+        """Project nested refinement diagnostics to scalar wire-safe fields."""
+        max_displacement = diagnostics.get("max_displacement_px")
+        refined_iou = diagnostics.get("refinedMaskIoU")
+        after_edge_support = diagnostics.get("afterEdgeSupport")
+        return {
+            "cornerRefinementEnabled": diagnostics.get("enabled", False),
+            "cornerRefinementAttempted": diagnostics.get("attempted", False),
+            "cornerRefinementAccepted": diagnostics.get("accepted", False),
+            "cornerRefinementReason": str(
+                diagnostics.get(
+                    "reason",
+                    "accepted" if diagnostics.get("accepted", False) else "not_run",
+                )
+            ),
+            "cornerRefinementMaxDisplacementPx": (
+                float(max_displacement) if isinstance(max_displacement, (int, float)) else None
+            ),
+            "cornerRefinementMaskIoU": (
+                float(refined_iou) if isinstance(refined_iou, (int, float)) else None
+            ),
+            "cornerRefinementEdgeSupport": (
+                float(after_edge_support) if isinstance(after_edge_support, (int, float)) else None
+            ),
+        }
 
     @staticmethod
     def _selected_candidate(

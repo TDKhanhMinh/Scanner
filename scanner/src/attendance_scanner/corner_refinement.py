@@ -40,6 +40,7 @@ class CornerRefinementConfig(BaseContract):
     minimum_refined_edges: int = Field(default=2, ge=1, le=4)
     allow_partial_refinement: bool = True
     edge_support_drop_tolerance: float = Field(default=0.05, ge=0.0, le=1.0)
+    max_mask_iou_drop: float = Field(default=0.03, ge=0.0, le=1.0)
     geometry: GeometryValidationConfig = Field(default_factory=GeometryValidationConfig)
 
 

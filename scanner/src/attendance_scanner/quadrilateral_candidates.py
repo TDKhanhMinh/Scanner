@@ -21,7 +21,7 @@ from attendance_scanner.geometry_validator import (
 from attendance_scanner.hough_lines import HoughLineEvidence, HoughLineSegment
 from attendance_scanner.segmentation import SegmentationTransform
 
-QUADRILATERAL_CANDIDATE_VERSION = "1.0"
+QUADRILATERAL_CANDIDATE_VERSION = "1.1"
 CandidateSource = Literal["mask_fit", "contour", "hough", "mixed"]
 
 
@@ -50,6 +50,9 @@ class QuadrilateralCandidateConfig(BaseContract):
     dedup_corner_distance_px: float = Field(default=8.0, gt=0.0, le=100.0)
     dedup_polygon_iou: float = Field(default=0.97, ge=0.0, le=1.0)
     dedup_same_source_iou: float = Field(default=0.85, ge=0.0, le=1.0)
+    tight_fit_min_iou: float = Field(default=0.90, ge=0.0, le=1.0)
+    tight_fit_min_coverage: float = Field(default=0.97, ge=0.0, le=1.0)
+    tight_fit_iou_gain: float = Field(default=0.03, ge=0.0, le=1.0)
     max_line_pairs: int = Field(default=32, ge=1, le=256)
     geometry: GeometryValidationConfig = Field(default_factory=GeometryValidationConfig)
 
@@ -159,20 +162,29 @@ def _polygon_iou_with_mask(corners: CanonicalCorners, mask: np.ndarray) -> float
     return iou
 
 
+def polygon_iou_and_coverage_with_mask(
+    corners: CanonicalCorners, mask: np.ndarray
+) -> Tuple[float, float]:
+    """Return mask IoU and mask coverage for a source-space quadrilateral."""
+    return _polygon_iou_and_coverage_with_mask(corners, mask)
+
+
 def _candidate_score(
     geometry_quality: float,
     mask_quad_iou: Optional[float],
     edge_support: Optional[float],
     mask_coverage: Optional[float] = None,
 ) -> float:
-    score = 0.5 * geometry_quality
+    # IoU is the safer positive signal for document boundaries. Coverage is
+    # retained as a guard against clipping, but must not reward a large
+    # minAreaRect that includes desk/background pixels.
+    score = 0.45 * geometry_quality
     if mask_quad_iou is not None:
-        score += 0.3 * mask_quad_iou
+        score += 0.4 * mask_quad_iou
     if edge_support is not None:
         score += 0.1 * edge_support
     if mask_coverage is not None:
-        cov_score = max(0.0, min(1.0, (mask_coverage - 0.7) / 0.3))
-        score += 0.1 * cov_score
+        score += 0.05 * mask_coverage
     else:
         score += 0.05
     return max(0.0, min(1.0, score))
@@ -256,6 +268,55 @@ def _hough_candidates(
     return candidates
 
 
+def _preferred_mask_fit_candidate(
+    existing: QuadrilateralCandidate,
+    incoming: QuadrilateralCandidate,
+    policy: QuadrilateralCandidateConfig,
+) -> Optional[QuadrilateralCandidate]:
+    """Choose between a tight mask fit and the minAreaRect safety fallback.
+
+    ``minAreaRect`` is useful when segmentation has a notch or missing region,
+    but it can also expand across the desk.  Once two mask-fit candidates are
+    known to be duplicates, prefer the convex-hull fit only when its mask
+    overlap is materially better and its coverage still indicates that it did
+    not cut away a meaningful part of the mask.
+
+    Returning ``None`` leaves the existing generic deduplication policy in
+    charge for all other candidate combinations.
+    """
+    if existing.source != "mask_fit" or incoming.source != "mask_fit":
+        return None
+    existing_method = existing.evidence.get("fitMethod")
+    incoming_method = incoming.evidence.get("fitMethod")
+    tight_methods = {"convex_hull_approx", "convex_hull_approx_rot90"}
+    if existing_method in tight_methods and incoming_method == "min_area_rect":
+        tight, fallback = existing, incoming
+    elif incoming_method in tight_methods and existing_method == "min_area_rect":
+        tight, fallback = incoming, existing
+    else:
+        return None
+
+    tight_iou = tight.mask_quad_iou or 0.0
+    fallback_iou = fallback.mask_quad_iou or 0.0
+    tight_coverage = tight.evidence.get("maskCoverage") or 0.0
+    if (
+        tight_iou >= policy.tight_fit_min_iou
+        and tight_coverage >= policy.tight_fit_min_coverage
+        and tight_iou >= fallback_iou + policy.tight_fit_iou_gain
+        and tight.geometry_quality >= fallback.geometry_quality - 0.05
+    ):
+        return tight.model_copy(
+            update={
+                "evidence": {
+                    **tight.evidence,
+                    "fallbackSuppressed": "min_area_rect",
+                    "fallbackSuppressionReason": "tight_fit_iou_gain",
+                }
+            }
+        )
+    return fallback
+
+
 def build_quadrilateral_candidates(
     *,
     image_size: Tuple[int, int],
@@ -291,7 +352,6 @@ def build_quadrilateral_candidates(
         if contour is not None:
             hull = cv2.convexHull(contour)
             hull_perimeter = cv2.arcLength(hull, True)
-            found_polygon_quad = False
             for epsilon_ratio in policy.hull_approximation_epsilon_ratios:
                 approximation = cv2.approxPolyDP(hull, epsilon_ratio * hull_perimeter, True)
                 if len(approximation) == 4:
@@ -309,7 +369,6 @@ def build_quadrilateral_candidates(
                                 None,
                             )
                         )
-                        found_polygon_quad = True
                         break
 
             if image_height != image_width:
@@ -346,7 +405,6 @@ def build_quadrilateral_candidates(
                                         None,
                                     )
                                 )
-                                found_polygon_quad = True
                                 break
 
             perimeter = cv2.arcLength(contour, True)
@@ -367,7 +425,6 @@ def build_quadrilateral_candidates(
                                 None,
                             )
                         )
-                        found_polygon_quad = True
 
             rectangle = cv2.minAreaRect(contour)
             (cx, cy), (w, h), angle = rectangle
@@ -383,9 +440,7 @@ def build_quadrilateral_candidates(
             if canonical is not None:
                 if mask_reference is None:
                     mask_reference = canonical
-                raw_candidates.append(
-                    (canonical, "mask_fit", {"fitMethod": "min_area_rect"}, None)
-                )
+                raw_candidates.append((canonical, "mask_fit", {"fitMethod": "min_area_rect"}, None))
 
     if cv_candidates is not None:
         for candidate in cv_candidates.candidates:
@@ -514,8 +569,10 @@ def build_quadrilateral_candidates(
             is_strictly_same_source = (quad_candidate.source == existing_candidate.source) and (
                 same_fit or fit1 is None or fit2 is None
             )
+            is_same_mask_family = quad_candidate.source == existing_candidate.source == "mask_fit"
             is_same_family = (
                 (quad_candidate.source == existing_candidate.source and same_fit)
+                or is_same_mask_family
                 or {quad_candidate.source, existing_candidate.source} == {"mixed", "mask_fit"}
             )
             if is_strictly_same_source:
@@ -525,11 +582,22 @@ def build_quadrilateral_candidates(
             else:
                 iou_threshold = policy.dedup_polygon_iou
             if max(distances) <= policy.dedup_corner_distance_px or iou >= iou_threshold:
+                preferred_mask_candidate = _preferred_mask_fit_candidate(
+                    existing_candidate,
+                    quad_candidate,
+                    policy,
+                )
+                if preferred_mask_candidate is not None:
+                    idx = deduplicated.index(existing_candidate)
+                    deduplicated[idx] = preferred_mask_candidate
+                    duplicate = True
+                    break
                 exist_cov = existing_candidate.evidence.get("maskCoverage") or 0.0
                 quad_cov = quad_candidate.evidence.get("maskCoverage") or 0.0
                 if (
                     quad_cov > exist_cov + 0.10
-                    and quad_candidate.geometry_quality >= existing_candidate.geometry_quality - 0.05
+                    and quad_candidate.geometry_quality
+                    >= existing_candidate.geometry_quality - 0.05
                     and is_same_family
                 ):
                     idx = deduplicated.index(existing_candidate)
@@ -600,4 +668,5 @@ __all__ = [
     "QuadrilateralCandidateSet",
     "RejectedQuadrilateralCandidate",
     "build_quadrilateral_candidates",
+    "polygon_iou_and_coverage_with_mask",
 ]

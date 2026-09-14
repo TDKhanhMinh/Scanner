@@ -210,6 +210,9 @@ def test_convex_hull_approx_finds_tight_quadrilateral_and_ranks_above_min_area_r
     assert mask_fit_candidates
     assert mask_fit_candidates[0].evidence.get("fitMethod") == "convex_hull_approx"
     assert (mask_fit_candidates[0].mask_quad_iou or 0.0) > 0.95
+    assert not any(
+        candidate.evidence.get("fitMethod") == "min_area_rect" for candidate in mask_fit_candidates
+    )
 
 
 def test_convex_hull_approx_rot90_for_portrait_landscape_documents():
@@ -238,9 +241,9 @@ def test_min_area_rect_preserves_bottom_when_mask_is_notched():
     )
     assert result.candidates
     top_cand = result.candidates[0]
+    assert top_cand.evidence.get("fitMethod") == "min_area_rect"
     # The top candidate should have high mask coverage (>= 0.95), not cutting the document
     assert (top_cand.evidence.get("maskCoverage") or 0.0) >= 0.95
     # Bottom margin around y=280 should be preserved
     max_y = max(p[1] for p in top_cand.corners.as_list())
     assert max_y >= 270.0
-

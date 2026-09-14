@@ -14,6 +14,7 @@ from attendance_scanner.detector import (
     DetectorEvidence,
     DocumentDetectionResult,
 )
+from attendance_scanner.hough_lines import HoughLineConfig, HoughLineEvidence, HoughLineSegment
 from attendance_scanner.hybrid import HybridConfig, HybridDocumentDetector, create_detector
 from attendance_scanner.mask_postprocess import MaskPostprocessConfig, postprocess_document_mask
 from attendance_scanner.pipeline.load import load_image
@@ -66,6 +67,56 @@ def _cv_pool_with_candidate() -> CvCandidateSet:
             ),
         ],
         preprocessing=CvCandidateConfig(),
+    )
+
+
+def _hough_edge_evidence() -> HoughLineEvidence:
+    segments = [
+        HoughLineSegment(
+            segment_id=0,
+            p1=(20, 20),
+            p2=(300, 20),
+            angle_deg=0.0,
+            length_px=280.0,
+            support=0.95,
+            orientation="horizontal",
+        ),
+        HoughLineSegment(
+            segment_id=1,
+            p1=(300, 20),
+            p2=(300, 220),
+            angle_deg=90.0,
+            length_px=200.0,
+            support=0.95,
+            orientation="vertical",
+        ),
+        HoughLineSegment(
+            segment_id=2,
+            p1=(300, 220),
+            p2=(20, 220),
+            angle_deg=0.0,
+            length_px=280.0,
+            support=0.95,
+            orientation="horizontal",
+        ),
+        HoughLineSegment(
+            segment_id=3,
+            p1=(20, 220),
+            p2=(20, 20),
+            angle_deg=90.0,
+            length_px=200.0,
+            support=0.95,
+            orientation="vertical",
+        ),
+    ]
+    return HoughLineEvidence(
+        source_width=320,
+        source_height=240,
+        detection_width=320,
+        detection_height=240,
+        scale_factor=1.0,
+        segments=segments,
+        preprocessing=HoughLineConfig(),
     )
 
 
@@ -163,6 +214,70 @@ def test_segmentation_failure_rescues_with_cv_and_records_warning(tmp_path: Path
     assert result.decision_trace.path == "cv_fallback"
     assert "SEGMENTATION_FALLBACK" in result.warnings
     assert "SEGMENTATION_LOW_CONFIDENCE" in result.warnings
+
+
+def test_hybrid_wires_quality_gated_line_refinement_into_selected_result(tmp_path: Path):
+    image = load_image(_write_document(tmp_path / "sheet.png"))
+    detector = HybridDocumentDetector(
+        SuccessfulSegmentation(),
+        config=HybridConfig(
+            use_hough=True,
+            corner_search_enabled=False,
+            scoring=CandidateScoringConfig(minimum_final_score=0.0, ambiguity_margin=0.0),
+        ),
+        cv_provider=lambda _image: _cv_pool_with_candidate(),
+        hough_provider=lambda _image: _hough_edge_evidence(),
+    )
+
+    result = detector.detect(image)
+
+    assert result.detected is True
+    assert result.metadata["cornerRefinementAttempted"] is True
+    assert result.metadata["cornerRefinementAccepted"] is True
+    assert result.metadata["selectedFitMethod"] == "line_refined"
+
+
+def test_hybrid_rejects_unverified_refinement_without_segmentation_mask(tmp_path: Path):
+    image = load_image(_write_document(tmp_path / "sheet.png"))
+    detector = HybridDocumentDetector(
+        None,
+        config=HybridConfig(
+            segmentation_enabled=False,
+            use_hough=True,
+            scoring=CandidateScoringConfig(minimum_final_score=0.0, ambiguity_margin=0.0),
+        ),
+        cv_provider=lambda _image: _cv_pool_with_candidate(),
+        hough_provider=lambda _image: _hough_edge_evidence(),
+    )
+
+    result = detector.detect(image)
+
+    assert result.detected is True
+    assert result.metadata["cornerRefinementAttempted"] is False
+    assert result.metadata["cornerRefinementAccepted"] is False
+    assert result.metadata["cornerRefinementReason"] == "mask_evidence_required"
+    assert result.metadata["selectedFitMethod"] != "line_refined"
+
+
+def test_hybrid_rejects_refinement_that_drops_mask_iou(tmp_path: Path):
+    image = load_image(_write_document(tmp_path / "sheet.png"))
+    detector = HybridDocumentDetector(
+        SuccessfulSegmentation(),
+        config=HybridConfig(
+            use_hough=True,
+            scoring=CandidateScoringConfig(minimum_final_score=0.0, ambiguity_margin=0.0),
+        ),
+        cv_provider=lambda _image: _cv_pool_with_candidate(),
+        hough_provider=lambda _image: _hough_edge_evidence(),
+    )
+
+    result = detector.detect(image)
+
+    assert result.detected is True
+    assert result.metadata["cornerRefinementAttempted"] is True
+    assert result.metadata["cornerRefinementAccepted"] is False
+    assert result.metadata["cornerRefinementReason"] == "mask_iou_drop"
+    assert result.metadata["selectedFitMethod"] != "line_refined"
 
 
 def test_missing_segmentation_provider_is_explicit_before_cv_fallback(tmp_path: Path):
