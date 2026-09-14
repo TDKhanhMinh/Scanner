@@ -496,13 +496,14 @@ describe("App scan plan states", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Smart Document/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Làm mới/i }));
-    expect(screen.getByText(/Đang phân tích thư mục/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Đang phân tích thư mục/i)).not.toBeInTheDocument();
 
     await act(async () => {
       resolveFirstPlan?.(validPlan);
       await Promise.resolve();
     });
+
+    fireEvent.click(screen.getByRole("button", { name: /Làm mới/i }));
     expect(screen.getByText(/Đang phân tích thư mục/i)).toBeInTheDocument();
 
     await act(async () => {

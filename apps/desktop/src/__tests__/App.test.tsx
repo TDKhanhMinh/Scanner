@@ -1,9 +1,17 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import App from "../App";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+
+vi.mock("@/lib/scannerBridge", () => ({
+  listenScannerEvents: vi.fn(),
+  listenScannerDiagnostics: vi.fn(),
+  planScan: vi.fn(),
+  startScan: vi.fn(),
+  scannerErrorMessage: () => "Sidecar unavailable",
+}));
 
 describe("App with shadcn UI tests", () => {
   it("renders the application heading and tab triggers", () => {

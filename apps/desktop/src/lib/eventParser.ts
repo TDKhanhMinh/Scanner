@@ -4,7 +4,13 @@
  */
 
 import {
+  DocumentOrientation,
+  FlatExportMode,
+  FlatFileCompletedEvent,
+  FlatScanCompletedEvent,
+  FlatScanPlanEvent,
   PROTOCOL_VERSION,
+  QuickScanCompletedEvent,
   ScannerEvent,
   VALID_SCANNER_ERROR_CODES,
   VALID_DETECTOR_MODES,
@@ -16,7 +22,34 @@ const VALID_EVENT_TYPES = new Set([
   "file_completed",
   "file_failed",
   "scan_completed",
+  "quick_scan_completed",
+  "flat_scan_plan",
+  "flat_file_completed",
+  "flat_scan_completed",
 ]);
+
+const VALID_FLAT_EXPORT_MODES: readonly FlatExportMode[] = ["PER_IMAGE", "MERGED"];
+const VALID_ORIENTATIONS: readonly DocumentOrientation[] = [
+  "auto",
+  "landscape",
+  "portrait",
+];
+const VALID_FILE_STATUSES = new Set([
+  "pending",
+  "processing",
+  "success",
+  "warning",
+  "failed",
+  "skipped",
+]);
+
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
 
 function isPreviewPoint(value: unknown): value is { x: number; y: number } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -410,6 +443,120 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         return null;
       }
       return raw as unknown as ScannerEvent;
+    }
+
+    case "quick_scan_completed": {
+      if (
+        typeof raw.success !== "boolean" ||
+        typeof raw.inputPath !== "string" ||
+        raw.inputPath.trim().length === 0 ||
+        !isNonNegativeNumber(raw.durationMs) ||
+        typeof raw.documentDetected !== "boolean" ||
+        !isOptionalString(raw.tempPdfPath) ||
+        !isOptionalString(raw.message) ||
+        !isOptionalString(raw.warning) ||
+        !isOptionalString(raw.errorCode)
+      ) {
+        return null;
+      }
+      if (
+        raw.errorCode !== undefined &&
+        raw.errorCode !== null &&
+        !VALID_SCANNER_ERROR_CODES.has(raw.errorCode)
+      ) {
+        return null;
+      }
+      if (raw.success && raw.errorCode !== null && raw.errorCode !== undefined) {
+        return null;
+      }
+      if (!raw.success && (typeof raw.errorCode !== "string" || !raw.errorCode)) {
+        return null;
+      }
+      if (
+        raw.detectionPreview !== undefined &&
+        raw.detectionPreview !== null &&
+        !isDetectionPreview(raw.detectionPreview)
+      ) {
+        return null;
+      }
+      if (
+        raw.processedPreviewDataUrl !== undefined &&
+        raw.processedPreviewDataUrl !== null &&
+        !isBoundedRasterDataUrl(raw.processedPreviewDataUrl)
+      ) {
+        return null;
+      }
+      return raw as unknown as QuickScanCompletedEvent;
+    }
+
+    case "flat_scan_plan": {
+      if (
+        typeof raw.inputRoot !== "string" ||
+        raw.inputRoot.trim().length === 0 ||
+        typeof raw.outputRoot !== "string" ||
+        raw.outputRoot.trim().length === 0 ||
+        !VALID_FLAT_EXPORT_MODES.includes(raw.exportMode as FlatExportMode) ||
+        !VALID_ORIENTATIONS.includes(raw.orientation as DocumentOrientation) ||
+        !isNonNegativeNumber(raw.totalFiles) ||
+        !isNonNegativeNumber(raw.filesToProcess) ||
+        !isNonNegativeNumber(raw.unchangedFiles) ||
+        !isNonNegativeNumber(raw.expectedArtifacts)
+      ) {
+        return null;
+      }
+      return raw as unknown as FlatScanPlanEvent;
+    }
+
+    case "flat_file_completed": {
+      if (
+        typeof raw.relativePath !== "string" ||
+        raw.relativePath.trim().length === 0 ||
+        !isOptionalString(raw.outputRelativePath) ||
+        typeof raw.status !== "string" ||
+        !VALID_FILE_STATUSES.has(raw.status) ||
+        typeof raw.documentDetected !== "boolean" ||
+        !isOptionalString(raw.warning) ||
+        !isOptionalString(raw.errorCode) ||
+        !isOptionalString(raw.message) ||
+        !isNonNegativeNumber(raw.durationMs)
+      ) {
+        return null;
+      }
+      if (
+        raw.errorCode !== undefined &&
+        raw.errorCode !== null &&
+        !VALID_SCANNER_ERROR_CODES.has(raw.errorCode)
+      ) {
+        return null;
+      }
+      if (
+        raw.detectionPreview !== undefined &&
+        raw.detectionPreview !== null &&
+        !isDetectionPreview(raw.detectionPreview)
+      ) {
+        return null;
+      }
+      return raw as unknown as FlatFileCompletedEvent;
+    }
+
+    case "flat_scan_completed": {
+      if (
+        typeof raw.inputRoot !== "string" ||
+        raw.inputRoot.trim().length === 0 ||
+        typeof raw.outputRoot !== "string" ||
+        raw.outputRoot.trim().length === 0 ||
+        !VALID_FLAT_EXPORT_MODES.includes(raw.exportMode as FlatExportMode) ||
+        !isNonNegativeNumber(raw.totalProcessed) ||
+        !isNonNegativeNumber(raw.success) ||
+        !isNonNegativeNumber(raw.warning) ||
+        !isNonNegativeNumber(raw.failed) ||
+        !isNonNegativeNumber(raw.skipped) ||
+        !isNonNegativeNumber(raw.durationMs) ||
+        !isNonNegativeNumber(raw.exitCode)
+      ) {
+        return null;
+      }
+      return raw as unknown as FlatScanCompletedEvent;
     }
 
     default:

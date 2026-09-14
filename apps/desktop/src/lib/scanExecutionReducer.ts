@@ -54,6 +54,14 @@ function eventKey(event: ScannerEvent): string {
       return `terminal:${event.relativePath}`;
     case "scan_completed":
       return "scan_completed";
+    case "quick_scan_completed":
+      return `quick:${event.inputPath}:${event.timestamp}`;
+    case "flat_scan_plan":
+      return `flat_plan:${event.inputRoot}:${event.timestamp}`;
+    case "flat_file_completed":
+      return `flat_file:${event.relativePath}:${event.timestamp}`;
+    case "flat_scan_completed":
+      return `flat_completed:${event.inputRoot}:${event.timestamp}`;
   }
 }
 
@@ -113,6 +121,14 @@ export function scanExecutionReducer(
       };
     case "scanner_event": {
       const event = action.event;
+      if (
+        event.type === "quick_scan_completed" ||
+        event.type === "flat_scan_plan" ||
+        event.type === "flat_file_completed" ||
+        event.type === "flat_scan_completed"
+      ) {
+        return state;
+      }
       const nextState = withSeenEvent(state, eventKey(event));
       if (nextState === null) {
         return state;

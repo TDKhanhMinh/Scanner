@@ -14,6 +14,10 @@ import {
   isFileCompletedEvent,
   isFileFailedEvent,
   isScanCompletedEvent,
+  isQuickScanCompletedEvent,
+  isFlatScanPlanEvent,
+  isFlatFileCompletedEvent,
+  isFlatScanCompletedEvent,
 } from "@/types/scanner";
 
 describe("eventParser", () => {
@@ -282,6 +286,100 @@ describe("eventParser", () => {
     } else {
       throw new Error("Expected ScanCompletedEvent");
     }
+  });
+
+  it("parses bounded quick and flat workflow events", () => {
+    const preview = {
+      sourceWidth: 200,
+      sourceHeight: 100,
+      coordinateSpace: "original_pixels",
+      finalCorners: [
+        { x: 5, y: 5 },
+        { x: 195, y: 5 },
+        { x: 195, y: 95 },
+        { x: 5, y: 95 },
+      ],
+      candidateCorners: [],
+      maskAvailable: false,
+      confidence: 0.9,
+      confidenceIsCalibrated: false,
+      fallbackUsed: false,
+      reasonCodes: [],
+      warningCodes: [],
+    };
+    const quick = parseScannerEvent(
+      JSON.stringify({
+        protocolVersion: 1,
+        type: "quick_scan_completed",
+        timestamp: "2026-09-14T00:00:00Z",
+        success: true,
+        inputPath: "D:/input/page.jpg",
+        tempPdfPath: "C:/Temp/quick/page.pdf",
+        documentDetected: true,
+        durationMs: 1200,
+        detectionPreview: preview,
+        processedPreviewDataUrl: "data:image/jpeg;base64,AA==",
+        errorCode: null,
+        message: null,
+        warning: null,
+      }),
+    );
+    expect(quick).not.toBeNull();
+    expect(quick && isQuickScanCompletedEvent(quick)).toBe(true);
+
+    const flatPlan = parseScannerEvent(
+      JSON.stringify({
+        protocolVersion: 1,
+        type: "flat_scan_plan",
+        timestamp: "2026-09-14T00:00:00Z",
+        inputRoot: "D:/input",
+        outputRoot: "D:/output",
+        exportMode: "MERGED",
+        orientation: "auto",
+        totalFiles: 5,
+        filesToProcess: 5,
+        unchangedFiles: 0,
+        expectedArtifacts: 1,
+      }),
+    );
+    expect(flatPlan && isFlatScanPlanEvent(flatPlan)).toBe(true);
+
+    const flatFile = parseScannerEvent(
+      JSON.stringify({
+        protocolVersion: 1,
+        type: "flat_file_completed",
+        timestamp: "2026-09-14T00:00:01Z",
+        relativePath: "page.jpg",
+        outputRelativePath: "page.pdf",
+        status: "success",
+        documentDetected: true,
+        warning: null,
+        errorCode: null,
+        message: null,
+        durationMs: 1000,
+        detectionPreview: null,
+      }),
+    );
+    expect(flatFile && isFlatFileCompletedEvent(flatFile)).toBe(true);
+
+    const flatCompleted = parseScannerEvent(
+      JSON.stringify({
+        protocolVersion: 1,
+        type: "flat_scan_completed",
+        timestamp: "2026-09-14T00:00:02Z",
+        inputRoot: "D:/input",
+        outputRoot: "D:/output",
+        exportMode: "MERGED",
+        totalProcessed: 5,
+        success: 5,
+        warning: 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 5000,
+        exitCode: 0,
+      }),
+    );
+    expect(flatCompleted && isFlatScanCompletedEvent(flatCompleted)).toBe(true);
   });
 
   it("safely ignores unknown extra fields for forward compatibility", () => {

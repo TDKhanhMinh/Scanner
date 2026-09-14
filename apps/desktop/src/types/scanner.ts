@@ -34,6 +34,10 @@ export interface BatchPeriod {
 export type ExportMode = "PER_IMAGE" | "GROUPED";
 export const VALID_EXPORT_MODES = ["PER_IMAGE", "GROUPED"] as const;
 
+export type WorkflowMode = "attendance_batch" | "folder_scan" | "quick_scan";
+export type FlatExportMode = "PER_IMAGE" | "MERGED";
+export type DocumentOrientation = "auto" | "landscape" | "portrait";
+
 export interface PlanSettings {
   mode: ScanMode;
   detectorMode: ProductDetectorMode;
@@ -330,12 +334,69 @@ export interface ScanCompletedEvent extends BaseEvent {
   durationMs: number;
 }
 
+export interface QuickScanCompletedEvent extends BaseEvent {
+  type: "quick_scan_completed";
+  success: boolean;
+  inputPath: string;
+  tempPdfPath: string | null;
+  documentDetected: boolean;
+  durationMs: number;
+  detectionPreview: DetectionPreview | null;
+  processedPreviewDataUrl: string | null;
+  errorCode: ScannerErrorCode | null;
+  message: string | null;
+  warning: string | null;
+}
+
+export interface FlatScanPlanEvent extends BaseEvent {
+  type: "flat_scan_plan";
+  inputRoot: string;
+  outputRoot: string;
+  exportMode: FlatExportMode;
+  orientation: DocumentOrientation;
+  totalFiles: number;
+  filesToProcess: number;
+  unchangedFiles: number;
+  expectedArtifacts: number;
+}
+
+export interface FlatFileCompletedEvent extends BaseEvent {
+  type: "flat_file_completed";
+  relativePath: string;
+  outputRelativePath: string | null;
+  status: FileProcessingStatus;
+  documentDetected: boolean;
+  warning: string | null;
+  errorCode: ScannerErrorCode | null;
+  message: string | null;
+  durationMs: number;
+  detectionPreview: DetectionPreview | null;
+}
+
+export interface FlatScanCompletedEvent extends BaseEvent {
+  type: "flat_scan_completed";
+  inputRoot: string;
+  outputRoot: string;
+  exportMode: FlatExportMode;
+  totalProcessed: number;
+  success: number;
+  warning: number;
+  failed: number;
+  skipped: number;
+  durationMs: number;
+  exitCode: number;
+}
+
 export type ScannerEvent =
   | ScanPlanEvent
   | FileStartedEvent
   | FileCompletedEvent
   | FileFailedEvent
-  | ScanCompletedEvent;
+  | ScanCompletedEvent
+  | QuickScanCompletedEvent
+  | FlatScanPlanEvent
+  | FlatFileCompletedEvent
+  | FlatScanCompletedEvent;
 
 export type ScannerEventType = ScannerEvent["type"];
 
@@ -358,4 +419,26 @@ export function isFileFailedEvent(event: ScannerEvent): event is FileFailedEvent
 
 export function isScanCompletedEvent(event: ScannerEvent): event is ScanCompletedEvent {
   return event.type === "scan_completed";
+}
+
+export function isQuickScanCompletedEvent(
+  event: ScannerEvent,
+): event is QuickScanCompletedEvent {
+  return event.type === "quick_scan_completed";
+}
+
+export function isFlatScanPlanEvent(event: ScannerEvent): event is FlatScanPlanEvent {
+  return event.type === "flat_scan_plan";
+}
+
+export function isFlatFileCompletedEvent(
+  event: ScannerEvent,
+): event is FlatFileCompletedEvent {
+  return event.type === "flat_file_completed";
+}
+
+export function isFlatScanCompletedEvent(
+  event: ScannerEvent,
+): event is FlatScanCompletedEvent {
+  return event.type === "flat_scan_completed";
 }

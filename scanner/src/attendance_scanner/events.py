@@ -13,6 +13,8 @@ from attendance_scanner.contracts import (
     DetectionFailureReason,
     DetectionPreview,
     ExportMode,
+    FileProcessingStatus,
+    FlatExportMode,
     ReviewGroup,
     ScannerErrorCode,
     ScanPlan,
@@ -305,6 +307,75 @@ class ScanCompletedEvent(BaseEvent):
         )
 
 
+class QuickScanCompletedEvent(BaseEvent):
+    """Terminal event for a one-image quick-scan workflow."""
+
+    type: Literal["quick_scan_completed"] = "quick_scan_completed"
+    success: bool = False
+    input_path: str = Field(min_length=1)
+    temp_pdf_path: Optional[str] = None
+    document_detected: bool = False
+    duration_ms: int = Field(default=0, ge=0)
+    detection_preview: Optional[DetectionPreview] = None
+    processed_preview_data_url: Optional[str] = Field(default=None, max_length=2_000_000)
+    error_code: Optional[ScannerErrorCode] = None
+    message: Optional[str] = None
+    warning: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_success_contract(self) -> "QuickScanCompletedEvent":
+        if self.success and self.error_code is not None:
+            raise ValueError("successful quick scans must not contain error_code")
+        if not self.success and self.error_code is None:
+            raise ValueError("failed quick scans require error_code")
+        return self
+
+
+class FlatScanPlanEvent(BaseEvent):
+    """Plan event for a flat-folder workflow."""
+
+    type: Literal["flat_scan_plan"] = "flat_scan_plan"
+    input_root: str = Field(min_length=1)
+    output_root: str = Field(min_length=1)
+    export_mode: FlatExportMode
+    orientation: Literal["auto", "landscape", "portrait"]
+    total_files: int = Field(default=0, ge=0)
+    files_to_process: int = Field(default=0, ge=0)
+    unchanged_files: int = Field(default=0, ge=0)
+    expected_artifacts: int = Field(default=0, ge=0)
+
+
+class FlatFileCompletedEvent(BaseEvent):
+    """Terminal per-file event for a flat-folder workflow."""
+
+    type: Literal["flat_file_completed"] = "flat_file_completed"
+    relative_path: str = Field(min_length=1)
+    output_relative_path: Optional[str] = None
+    status: FileProcessingStatus
+    document_detected: bool = False
+    warning: Optional[str] = None
+    error_code: Optional[ScannerErrorCode] = None
+    message: Optional[str] = None
+    duration_ms: int = Field(default=0, ge=0)
+    detection_preview: Optional[DetectionPreview] = None
+
+
+class FlatScanCompletedEvent(BaseEvent):
+    """Terminal summary event for a flat-folder workflow."""
+
+    type: Literal["flat_scan_completed"] = "flat_scan_completed"
+    input_root: str = Field(min_length=1)
+    output_root: str = Field(min_length=1)
+    export_mode: FlatExportMode
+    total_processed: int = Field(default=0, ge=0)
+    success: int = Field(default=0, ge=0)
+    warning: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    duration_ms: int = Field(default=0, ge=0)
+    exit_code: int = Field(default=0, ge=0)
+
+
 ScannerEvent = Annotated[
     Union[
         ScanPlanEvent,
@@ -312,6 +383,10 @@ ScannerEvent = Annotated[
         FileCompletedEvent,
         FileFailedEvent,
         ScanCompletedEvent,
+        QuickScanCompletedEvent,
+        FlatScanPlanEvent,
+        FlatFileCompletedEvent,
+        FlatScanCompletedEvent,
     ],
     Field(discriminator="type"),
 ]

@@ -3,10 +3,12 @@ import type {
   PlanSettings,
   ProductDetectorMode,
   ScanMode,
+  WorkflowMode,
 } from "@/types/scanner";
 
 export const USER_PREFERENCES_STORAGE_KEY = "attendance-scanner.user-preferences.v1";
 export const LEGACY_DETECTOR_STORAGE_KEY = "attendance-scanner.detector-settings.v1";
+export const WORKFLOW_PREFERENCE_STORAGE_KEY = "scanner-workflow.v1";
 
 export interface UserPreferencesV1 {
   schemaVersion: 1;
@@ -39,6 +41,10 @@ function isProductDetectorMode(value: unknown): value is ProductDetectorMode {
 
 function isExportMode(value: unknown): value is ExportMode {
   return value === "PER_IMAGE" || value === "GROUPED";
+}
+
+function isWorkflowMode(value: unknown): value is WorkflowMode {
+  return value === "attendance_batch" || value === "folder_scan" || value === "quick_scan";
 }
 
 export function loadUserPreferences(): UserPreferencesV1 {
@@ -130,6 +136,33 @@ export function saveUserPreferences(preferences: Partial<UserPreferencesV1>): vo
     );
   } catch {
     // Storage can be disabled by the host; in-memory settings still work.
+  }
+}
+
+export const DEFAULT_WORKFLOW_MODE: WorkflowMode = "attendance_batch";
+
+export function loadWorkflowPreference(): WorkflowMode {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return DEFAULT_WORKFLOW_MODE;
+  }
+  try {
+    const value = JSON.parse(
+      window.localStorage.getItem(WORKFLOW_PREFERENCE_STORAGE_KEY) ?? "null",
+    );
+    return isWorkflowMode(value) ? value : DEFAULT_WORKFLOW_MODE;
+  } catch {
+    return DEFAULT_WORKFLOW_MODE;
+  }
+}
+
+export function saveWorkflowPreference(workflow: WorkflowMode): void {
+  if (typeof window === "undefined" || !window.localStorage || !isWorkflowMode(workflow)) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(WORKFLOW_PREFERENCE_STORAGE_KEY, JSON.stringify(workflow));
+  } catch {
+    // Storage can be disabled by the host; in-memory workflow state still works.
   }
 }
 

@@ -32,6 +32,13 @@ class ExportMode(str, Enum):
     GROUPED = "GROUPED"
 
 
+class FlatExportMode(str, Enum):
+    """Output strategy for a flat-folder workflow."""
+
+    PER_IMAGE = "PER_IMAGE"
+    MERGED = "MERGED"
+
+
 class PageType(str, Enum):
     """Known page roles for the current attendance template."""
 

@@ -42,6 +42,7 @@ export interface ScanPlanSummaryCardProps {
   stats: ScanPlanStats;
   isPlanning?: boolean;
   isScanning?: boolean;
+  isExecutionBusy?: boolean;
   canScan?: boolean;
   isPlanStale?: boolean;
   period?: BatchPeriod;
@@ -54,6 +55,7 @@ export function ScanPlanSummaryCard({
   stats,
   isPlanning = false,
   isScanning = false,
+  isExecutionBusy = false,
   canScan = false,
   isPlanStale = false,
   period,
@@ -81,7 +83,7 @@ export function ScanPlanSummaryCard({
               variant="ghost"
               size="sm"
               onClick={onRefreshPlan}
-              disabled={isPlanning || isScanning}
+              disabled={isPlanning || isScanning || isExecutionBusy}
               className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
               title="Làm mới phân tích thư mục"
             >
@@ -269,7 +271,7 @@ export function ScanPlanSummaryCard({
         <Button
           type="button"
           onClick={onStartScan}
-          disabled={!canScan || isPlanning || isScanning || filesToProcess === 0}
+          disabled={!canScan || isPlanning || isScanning || isExecutionBusy || filesToProcess === 0}
           className="w-full shadow-md shadow-primary/20 text-sm font-semibold"
           size="lg"
         >
