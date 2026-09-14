@@ -103,6 +103,14 @@ export function App() {
   const [skippedReviewGroups, setSkippedReviewGroups] = useState<string[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<FileResultItem | null>(null);
 
+  // Synchronous refs for review overrides and latest settings
+  const resolvedReviewGroupsRef = useRef<Record<string, "resolved" | "skipped">>({});
+  const manualOrderOverridesRef = useRef<Record<string, string[]>>({});
+  const skippedReviewGroupsRef = useRef<string[]>([]);
+  const latestSettingsRef = useRef<ScannerSettings>(settings);
+  latestSettingsRef.current = settings;
+  const inFlightPlanCount = useRef<number>(0);
+
   // Plan state and fingerprint lifecycle
   const [currentPlan, setCurrentPlan] = useState<ScanPlanEvent | null>(null);
   const latestPlanRef = useRef<ScanPlanEvent | null>(null);
@@ -183,6 +191,7 @@ export function App() {
   ): Promise<ScanPlanEvent | null> => {
     const requestId = ++planRequestId.current;
     const requestFingerprint = createPlanFingerprint(path, nextOutputPath, requestSettings);
+    inFlightPlanCount.current += 1;
     setIsPlanning(true);
     setErrorMessage("");
     setHasPlanError(false);
@@ -215,8 +224,11 @@ export function App() {
       setOutputPath(plan.outputRoot);
       setReviewGroups(plan.reviewGroups ?? []);
       setResolvedReviewGroups({});
+      resolvedReviewGroupsRef.current = {};
       setManualOrderOverrides({});
+      manualOrderOverridesRef.current = {};
       setSkippedReviewGroups([]);
+      skippedReviewGroupsRef.current = [];
       setIsPlanReady(true);
       return plan;
     } catch (error: unknown) {
@@ -240,17 +252,18 @@ export function App() {
         setErrorMessage(scannerErrorMessage(error));
         setReviewGroups([]);
         setResolvedReviewGroups({});
+        resolvedReviewGroupsRef.current = {};
         setManualOrderOverrides({});
+        manualOrderOverridesRef.current = {};
         setSkippedReviewGroups([]);
+        skippedReviewGroupsRef.current = [];
         setHasPlanError(true);
         setIsPlanReady(false);
       }
       return null;
     } finally {
-      if (
-        requestId === planRequestId.current &&
-        requestFingerprint === currentFingerprintRef.current
-      ) {
+      inFlightPlanCount.current = Math.max(0, inFlightPlanCount.current - 1);
+      if (inFlightPlanCount.current === 0) {
         setIsPlanning(false);
       }
     }
@@ -259,7 +272,7 @@ export function App() {
   const schedulePlan = (
     path: string,
     nextOutputPath: string,
-    requestSettings: ScannerSettings = settings,
+    requestSettings: ScannerSettings = latestSettingsRef.current,
   ) => {
     if (planDebounceTimer.current !== undefined) {
       clearTimeout(planDebounceTimer.current);
@@ -279,8 +292,11 @@ export function App() {
     latestPlanRef.current = null;
     setReviewGroups([]);
     setResolvedReviewGroups({});
+    resolvedReviewGroupsRef.current = {};
     setManualOrderOverrides({});
+    manualOrderOverridesRef.current = {};
     setSkippedReviewGroups([]);
+    skippedReviewGroupsRef.current = [];
     setSelectedPreview(null);
     planRequestId.current += 1;
     setIsPlanReady(false);
@@ -289,13 +305,14 @@ export function App() {
     setOutputPath(nextOutputPath);
 
     if (trimmed) {
-      schedulePlan(trimmed, nextOutputPath, settings);
+      schedulePlan(trimmed, nextOutputPath, latestSettingsRef.current);
     } else {
       if (planDebounceTimer.current !== undefined) {
         clearTimeout(planDebounceTimer.current);
         planDebounceTimer.current = undefined;
       }
       planRequestId.current += 1;
+      inFlightPlanCount.current = 0;
       setIsPlanning(false);
       setErrorMessage("");
       setHasPlanError(false);
@@ -319,29 +336,54 @@ export function App() {
     }
   };
 
-  const handlePeriodChange = (period: BatchPeriod) => {
+  const handleSettingChange = (updater: (prev: ScannerSettings) => ScannerSettings) => {
     planRequestId.current += 1;
-    setSettings((previous) => ({ ...previous, period }));
+    // P1 #1 Fix: immediately release loading state and clear stale review groups
+    setIsPlanning(false);
+    inFlightPlanCount.current = 0;
+    setReviewGroups([]);
+    setResolvedReviewGroups({});
+    resolvedReviewGroupsRef.current = {};
+    setManualOrderOverrides({});
+    manualOrderOverridesRef.current = {};
+    setSkippedReviewGroups([]);
+    skippedReviewGroupsRef.current = [];
+
+    setSettings((previous) => {
+      const nextSettings = updater(previous);
+      latestSettingsRef.current = nextSettings;
+
+      // If user typed a folder path within the 250ms debounce window, reschedule with new settings
+      if (planDebounceTimer.current !== undefined) {
+        clearTimeout(planDebounceTimer.current);
+        planDebounceTimer.current = undefined;
+        if (inputPath.trim()) {
+          schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
+        }
+      }
+
+      return nextSettings;
+    });
+  };
+
+  const handlePeriodChange = (period: BatchPeriod) => {
+    handleSettingChange((prev) => ({ ...prev, period }));
   };
 
   const handleExportModeChange = (exportMode: ExportMode) => {
-    planRequestId.current += 1;
-    setSettings((previous) => ({ ...previous, exportMode }));
+    handleSettingChange((prev) => ({ ...prev, exportMode }));
   };
 
   const handleScanModeChange = (mode: ScanFilterMode) => {
-    planRequestId.current += 1;
-    setSettings((previous) => ({ ...previous, mode }));
+    handleSettingChange((prev) => ({ ...prev, mode }));
   };
 
   const handleDetectorModeChange = (detectorMode: ProductDetectorMode) => {
-    planRequestId.current += 1;
-    setSettings((previous) => ({ ...previous, detectorMode }));
+    handleSettingChange((prev) => ({ ...prev, detectorMode }));
   };
 
   const handleReprocessChange = (reprocess: boolean) => {
-    planRequestId.current += 1;
-    setSettings((previous) => ({ ...previous, reprocess }));
+    handleSettingChange((prev) => ({ ...prev, reprocess }));
   };
 
   const chooseDirectory = async (title: string): Promise<string | null> => {
@@ -417,15 +459,35 @@ export function App() {
   };
 
   const handleResolveReviewGroup = (groupId: string, orderedPaths: string[]) => {
-    setManualOrderOverrides((current) => ({ ...current, [groupId]: orderedPaths }));
-    setResolvedReviewGroups((current) => ({ ...current, [groupId]: "resolved" }));
+    setManualOrderOverrides((current) => {
+      const updated = { ...current, [groupId]: orderedPaths };
+      manualOrderOverridesRef.current = updated;
+      return updated;
+    });
+    setResolvedReviewGroups((current) => {
+      const updated: Record<string, "resolved" | "skipped"> = {
+        ...current,
+        [groupId]: "resolved",
+      };
+      resolvedReviewGroupsRef.current = updated;
+      return updated;
+    });
   };
 
   const handleSkipReviewGroup = (groupId: string) => {
-    setResolvedReviewGroups((current) => ({ ...current, [groupId]: "skipped" }));
-    setSkippedReviewGroups((current) =>
-      current.includes(groupId) ? current : [...current, groupId],
-    );
+    setResolvedReviewGroups((current) => {
+      const updated: Record<string, "resolved" | "skipped"> = {
+        ...current,
+        [groupId]: "skipped",
+      };
+      resolvedReviewGroupsRef.current = updated;
+      return updated;
+    });
+    setSkippedReviewGroups((current) => {
+      const updated = current.includes(groupId) ? current : [...current, groupId];
+      skippedReviewGroupsRef.current = updated;
+      return updated;
+    });
   };
 
   const handlePreviewSource = (relativePath: string) => {
@@ -451,12 +513,13 @@ export function App() {
 
     void (async () => {
       try {
-        let effectivePlan = latestPlanRef.current;
+        let effectivePlan = latestPlanRef.current ?? currentPlan;
         const targetInput = inputPath.trim();
         const targetOutput = outputPath || `${targetInput}_pdf`;
+        const wasPlanStale = Boolean(!effectivePlan || isPlanStale || !isPlanReady);
 
         // If plan is stale, missing, or not ready, refresh plan first
-        if (!effectivePlan || isPlanStale || !isPlanReady) {
+        if (wasPlanStale) {
           if (planDebounceTimer.current !== undefined) {
             clearTimeout(planDebounceTimer.current);
             planDebounceTimer.current = undefined;
@@ -470,16 +533,30 @@ export function App() {
           effectivePlan = freshPlan;
         }
 
+        if (!effectivePlan) {
+          return;
+        }
+
         // Grouped review gate: must resolve or skip all review groups
         if (settings.exportMode === "GROUPED") {
           const groups = effectivePlan.reviewGroups ?? [];
-          const hasUnresolvedReview = groups.some((group) => {
-            const groupKey = `${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`;
-            return !resolvedReviewGroups[groupKey];
-          });
-          if (hasUnresolvedReview) {
-            // Groups need user review before scanning. Do NOT reset progress!
-            return;
+          if (groups.length > 0) {
+            // Finding P1 #2 Fix:
+            // If plan was just refreshed from stale, ANY review groups in the new plan
+            // REQUIRE user review! Old review approvals from previous settings cannot apply!
+            if (wasPlanStale) {
+              return;
+            }
+            // If plan was already up-to-date, verify every group is resolved/skipped in ref
+            const currentResolved = resolvedReviewGroupsRef.current;
+            const hasUnresolvedReview = groups.some((group) => {
+              const groupKey = `${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`;
+              return !currentResolved[groupKey];
+            });
+            if (hasUnresolvedReview) {
+              // Groups need user review before scanning. Do NOT reset progress!
+              return;
+            }
           }
         }
 
@@ -513,8 +590,8 @@ export function App() {
             workers: settings.workers,
             period: settings.period,
             exportMode: settings.exportMode,
-            manualOrder: manualOrderOverrides,
-            skipGroups: skippedReviewGroups,
+            manualOrder: manualOrderOverridesRef.current ?? manualOrderOverrides,
+            skipGroups: skippedReviewGroupsRef.current ?? skippedReviewGroups,
           });
         } catch (error: unknown) {
           if (requestId === scanRequestId.current) {
@@ -573,11 +650,18 @@ export function App() {
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-                    Quá trình quét hoàn tất thành công!
+                    {isPlanStale
+                      ? "Kết quả của lượt quét trước (cấu hình hiện tại đã thay đổi)"
+                      : "Quá trình quét hoàn tất thành công!"}
                   </h3>
                   <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-medium">
                     {execution.processed} file đã xử lý
                   </span>
+                  {isPlanStale && (
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30">
+                      Lượt quét trước
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-foreground/80 leading-relaxed">
                   Đã tạo file PDF an toàn:{" "}
@@ -681,7 +765,7 @@ export function App() {
                   disabled={isScanning}
                 />
 
-                {settings.exportMode === "GROUPED" && reviewGroups.length > 0 && (
+                {settings.exportMode === "GROUPED" && !isPlanStale && reviewGroups.length > 0 && (
                   <PageOrderReviewPanel
                     groups={reviewGroups}
                     resolvedGroups={resolvedReviewGroups}
@@ -708,8 +792,7 @@ export function App() {
                   reprocess={settings.reprocess}
                   needsReprocess={planStats.needsReprocess ?? 0}
                   onDebugDiagnosticsChange={(debugDiagnostics) => {
-                    planRequestId.current += 1;
-                    setSettings((previous) => ({ ...previous, debugDiagnostics }));
+                    handleSettingChange((previous) => ({ ...previous, debugDiagnostics }));
                   }}
                   onReprocessChange={handleReprocessChange}
                   disabled={isScanning}
@@ -768,7 +851,7 @@ export function App() {
                     isScanning={isScanning}
                     isComplete={execution.phase === "completed"}
                     outputReady={
-                      Boolean(outputPath) && isPlanReady && !isPlanning && !hasPlanError
+                      Boolean(outputPath && isPlanReady && !isPlanStale && !isPlanning && !hasPlanError)
                     }
                     onOpenOutputFolder={handleOpenOutputFolder}
                   />

@@ -314,4 +314,136 @@ describe("App scan plan states", () => {
     // Verify stale plan response was dropped: plan is NOT marked ready with stale fingerprint
     expect(screen.getByRole("button", { name: /Quét các file mới/i })).toBeDisabled();
   });
+
+  it("releases loading spinner when plan request is invalidated by setting change and allows new plan to run", async () => {
+    let resolveFirstPlan: ((value: typeof validPlan) => void) | undefined;
+    vi.mocked(planScan).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstPlan = resolve;
+        }),
+    );
+    render(<App />);
+
+    // Start first plan request
+    const input = screen.getByPlaceholderText(/Nhập hoặc chọn đường dẫn thư mục/i);
+    fireEvent.change(input, { target: { value: "C:/Attendance Input" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    // Verify loading spinner is active
+    expect(screen.getByText(/Đang phân tích thư mục/i)).toBeInTheDocument();
+
+    // While request is in flight, user changes mode
+    fireEvent.click(screen.getByRole("button", { name: /Smart Document/i }));
+
+    // Finding P1 #1 Fix: Spinner must be immediately released!
+    expect(screen.queryByText(/Đang phân tích thư mục/i)).not.toBeInTheDocument();
+
+    // Now resolve old request
+    await act(async () => {
+      resolveFirstPlan?.(validPlan);
+      await Promise.resolve();
+    });
+
+    // Still not loading
+    expect(screen.queryByText(/Đang phân tích thư mục/i)).not.toBeInTheDocument();
+
+    // User can now refresh plan with new settings successfully
+    vi.mocked(planScan).mockResolvedValueOnce({
+      ...validPlan,
+      mode: "smart_document",
+    });
+
+    const refreshButton = screen.getByRole("button", { name: /Làm mới/i });
+    fireEvent.click(refreshButton);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(planScan).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        mode: "smart_document",
+      }),
+    );
+  });
+
+  it("reschedules plan with latest settings when option changes during input debounce", async () => {
+    vi.mocked(planScan).mockResolvedValue(validPlan);
+    render(<App />);
+
+    // Type folder path (triggers 250ms debounce)
+    const input = screen.getByPlaceholderText(/Nhập hoặc chọn đường dẫn thư mục/i);
+    fireEvent.change(input, { target: { value: "C:/Attendance Input" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    // Before 250ms elapses, user changes mode to Smart Document
+    fireEvent.click(screen.getByRole("button", { name: /Smart Document/i }));
+
+    // Now advance timers past debounce window
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    // Plan must have been requested with Smart Document (the latest setting)
+    expect(planScan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "smart_document",
+      }),
+    );
+  });
+
+  it("blocks grouped scan when plan refreshed from stale even if old plan had resolved group with same key", async () => {
+    vi.mocked(planScan)
+      .mockResolvedValueOnce(validPlan)
+      .mockResolvedValueOnce({
+        ...validPlan,
+        exportMode: "GROUPED" as const,
+        reviewGroups: [ambiguousGroup],
+      })
+      .mockResolvedValueOnce({
+        ...validPlan,
+        exportMode: "GROUPED" as const,
+        reviewGroups: [ambiguousGroup],
+      });
+    vi.mocked(startScan).mockResolvedValue({ exitCode: 0 });
+
+    render(<App />);
+    await enterInputPath();
+
+    // Switch to GROUPED mode
+    fireEvent.click(screen.getByRole("radio", { name: /Nhiều ảnh → một PDF/i }));
+    const initialSyncButton = screen.getByRole("button", { name: /Đồng bộ & Quét/i });
+    fireEvent.click(initialSyncButton);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // In GROUPED plan, user resolves the review group
+    expect(screen.getByText(/Cần xác nhận thứ tự page/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Xác nhận thứ tự page/i }));
+
+    const scanButton = screen.getByRole("button", { name: /Quét các file mới \(4\)/i });
+    expect(scanButton).toBeEnabled();
+
+    // Now user changes detector mode -> makes plan stale!
+    fireEvent.click(screen.getByRole("button", { name: /^Classic/i }));
+
+    // Finding P2 #3 Fix: Stale review panel must be hidden!
+    expect(screen.queryByText(/Cần xác nhận thứ tự page/i)).not.toBeInTheDocument();
+
+    // User clicks "Đồng bộ & Quét"
+    const syncScanButton = screen.getByRole("button", { name: /Đồng bộ & Quét/i });
+    fireEvent.click(syncScanButton);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Finding P1 #2 Fix: startScan must NOT be called! Group in new plan requires review again!
+    expect(startScan).not.toHaveBeenCalled();
+    expect(screen.getByText(/Cần xác nhận thứ tự page/i)).toBeInTheDocument();
+  });
 });
