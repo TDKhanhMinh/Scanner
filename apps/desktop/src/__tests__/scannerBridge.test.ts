@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   listenScannerEvents,
+  invokeQuickScan,
   planScan,
+  saveQuickScanPdf,
   scannerDiagnosticMessage,
   scannerErrorMessage,
   startScan,
@@ -20,6 +22,52 @@ vi.mock("@tauri-apps/api/event", () => ({
 describe("scannerBridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("forwards quick scan and temporary PDF save requests", async () => {
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        type: "quick_scan_completed",
+        timestamp: "2026-09-14T00:00:00Z",
+        success: true,
+        inputPath: "D:/input/page.jpg",
+        tempPdfPath: "C:/Temp/quick_scan/page.pdf",
+        documentDetected: true,
+        durationMs: 1200,
+        detectionPreview: null,
+        processedPreviewDataUrl: "data:image/jpeg;base64,AA==",
+        errorCode: null,
+        message: null,
+        warning: null,
+      })
+      .mockResolvedValueOnce(undefined);
+
+    const result = await invokeQuickScan({
+      inputPath: "D:/input/page.jpg",
+      mode: "gray",
+      detectorMode: "ai_enhanced",
+      orientation: "auto",
+      debugDiagnostics: false,
+    });
+    await saveQuickScanPdf("C:/Temp/quick_scan/page.pdf", "D:/output/page.pdf");
+
+    expect(result).toMatchObject({
+      success: true,
+      tempPdfPath: "C:/Temp/quick_scan/page.pdf",
+      isSaved: false,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(1, "quick_scan", {
+      inputPath: "D:/input/page.jpg",
+      mode: "gray",
+      detectorMode: "ai_enhanced",
+      orientation: "auto",
+      debugDiagnostics: false,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "save_quick_scan_pdf", {
+      tempPath: "C:/Temp/quick_scan/page.pdf",
+      destinationPath: "D:/output/page.pdf",
+    });
   });
 
   it("passes sidecar request fields as structured invoke arguments", async () => {

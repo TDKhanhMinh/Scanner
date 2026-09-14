@@ -368,6 +368,8 @@ def scan_one(
     detector: Optional[DocumentDetector] = None,
     detector_mode: Optional[str] = None,
     debug_diagnostics: bool = False,
+    force_preview: bool = False,
+    preferred_orientation: Optional[Literal["natural", "landscape", "portrait"]] = None,
 ) -> SingleScanResult:
     """Execute the single-image scan pipeline in memory.
 
@@ -389,6 +391,10 @@ def scan_one(
     """
     t_start = time.perf_counter()
     pipeline_cfg = config or PipelineConfig()
+    if preferred_orientation is not None:
+        pipeline_cfg = pipeline_cfg.model_copy(
+            update={"preferred_orientation": preferred_orientation}
+        )
     stage_durations: Dict[str, float] = {}
     warning_codes: List[str] = []
 
@@ -620,7 +626,7 @@ def scan_one(
         }
 
     detection_preview = None
-    if debug_diagnostics or unique_warnings:
+    if force_preview or debug_diagnostics or unique_warnings:
         detection_preview = _build_detection_preview(
             loaded=loaded,
             v2_detection=v2_detection,

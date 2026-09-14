@@ -37,6 +37,60 @@ fn sidecar_args_keep_user_paths_as_individual_arguments() {
 }
 
 #[test]
+fn quick_scan_args_forward_temp_root_and_orientation() {
+    let args = build_quick_scan_args(
+        r"D:\Attendance Input\page one.jpg",
+        Path::new(r"C:\Users\tester\AppData\Local\Attendance\temp\quick_scan"),
+        "smart_document",
+        "ai_enhanced",
+        "portrait",
+        true,
+    );
+
+    assert_eq!(
+        args,
+        vec![
+            "scan-one",
+            "--input",
+            r"D:\Attendance Input\page one.jpg",
+            "--temp-root",
+            r"C:\Users\tester\AppData\Local\Attendance\temp\quick_scan",
+            "--mode",
+            "smart_document",
+            "--detector-mode",
+            "ai_enhanced",
+            "--orientation",
+            "portrait",
+            "--debug-diagnostics",
+        ]
+    );
+}
+
+#[test]
+fn quick_scan_completed_event_is_parsed_and_validated() {
+    let value = serde_json::json!({
+        "protocolVersion": 1,
+        "type": "quick_scan_completed",
+        "timestamp": "2026-09-14T00:00:00Z",
+        "success": true,
+        "inputPath": "D:\\Input\\page.jpg",
+        "tempPdfPath": "C:\\Temp\\quick_scan\\page.pdf",
+        "documentDetected": true,
+        "durationMs": 1200,
+        "detectionPreview": null,
+        "processedPreviewDataUrl": null,
+        "errorCode": null,
+        "message": null,
+        "warning": null
+    });
+
+    let parsed = parse_quick_scan(&value).expect("quick scan event should be valid");
+    assert_eq!(parsed.event_type, "quick_scan_completed");
+    assert!(parsed.success);
+    assert_eq!(parsed.temp_pdf_path.as_deref(), Some("C:\\Temp\\quick_scan\\page.pdf"));
+}
+
+#[test]
 fn legacy_scan_plan_without_process_count_is_derived() {
     let value = serde_json::json!({
         "protocolVersion": 1,

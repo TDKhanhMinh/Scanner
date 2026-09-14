@@ -38,9 +38,11 @@ from attendance_scanner.discovery import (
 )
 from attendance_scanner.events import (
     BaseEvent,
+    QuickScanCompletedEvent,
     ScanPlanEvent,
     serialize_event,
 )
+from attendance_scanner.quick_scan import execute_quick_scan
 from attendance_scanner.state import Manifest, ManifestStore, get_default_state_dir
 
 
@@ -362,6 +364,47 @@ def create_parser() -> argparse.ArgumentParser:
         help="explicitly opt in to rebuilding version-mismatched outputs",
     )
 
+    quick_parser = subparsers.add_parser(
+        "scan-one",
+        help="Process one image and export a temporary PDF (JSONL)",
+    )
+    quick_parser.add_argument(
+        "--input",
+        "-i",
+        required=True,
+        type=str,
+        help="Path to one input image",
+    )
+    quick_parser.add_argument(
+        "--temp-root",
+        required=True,
+        type=str,
+        help="Rust-owned temporary root for the draft PDF",
+    )
+    quick_parser.add_argument(
+        "--mode",
+        choices=["gray", "bw", "color", "smart_document"],
+        default="gray",
+        help="Enhancement mode (default: gray)",
+    )
+    quick_parser.add_argument(
+        "--detector-mode",
+        choices=list(ALL_DETECTOR_MODES),
+        default=DEFAULT_DETECTOR_MODE,
+        help="Document detector mode (default: ai_enhanced)",
+    )
+    quick_parser.add_argument(
+        "--orientation",
+        choices=["auto", "landscape", "portrait"],
+        default="auto",
+        help="Output orientation (default: auto)",
+    )
+    quick_parser.add_argument(
+        "--debug-diagnostics",
+        action="store_true",
+        help="Include additional safe detector diagnostics",
+    )
+
     # scan-batch subcommand
     scan_parser = subparsers.add_parser(
         "scan-batch",
@@ -540,6 +583,20 @@ def handle_scan_batch(args: argparse.Namespace) -> int:
         return _report_cli_error(exc, operation="request")
 
 
+def handle_scan_one(args: argparse.Namespace) -> int:
+    """Execute a one-image scan and always emit one structured JSONL result."""
+    event: QuickScanCompletedEvent = execute_quick_scan(
+        args.input,
+        args.temp_root,
+        mode=args.mode,
+        detector_mode=args.detector_mode,
+        orientation=args.orientation,
+        debug_diagnostics=args.debug_diagnostics,
+    )
+    emit_jsonl_event(event)
+    return 0 if event.success else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Main CLI entrypoint."""
     configure_stdio()
@@ -556,6 +613,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "plan":
         return handle_plan(args)
+    elif args.command == "scan-one":
+        return handle_scan_one(args)
     elif args.command == "scan-batch":
         return handle_scan_batch(args)
     else:

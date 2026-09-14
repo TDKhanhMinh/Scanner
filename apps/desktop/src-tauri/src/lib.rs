@@ -2,7 +2,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::fs::{self, File};
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
@@ -113,6 +117,25 @@ pub struct ScanPlanPayload {
     pub review_groups: Vec<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickScanPayload {
+    pub protocol_version: u64,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub timestamp: String,
+    pub success: bool,
+    pub input_path: String,
+    pub temp_pdf_path: Option<String>,
+    pub document_detected: bool,
+    pub duration_ms: u64,
+    pub detection_preview: Option<Value>,
+    pub processed_preview_data_url: Option<String>,
+    pub error_code: Option<String>,
+    pub message: Option<String>,
+    pub warning: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanRunOutcome {
@@ -178,6 +201,7 @@ impl ScannerState {
 struct SidecarCapture {
     exit_code: i32,
     plan: Option<ScanPlanPayload>,
+    quick_scan: Option<QuickScanPayload>,
     stderr: Vec<CapturedDiagnostic>,
 }
 
@@ -277,6 +301,64 @@ fn normalize_export_mode(value: &str) -> Option<&'static str> {
         "per-image" => Some("per-image"),
         "grouped" => Some("grouped"),
         _ => None,
+    }
+}
+
+fn normalize_orientation(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some("auto"),
+        "landscape" => Some("landscape"),
+        "portrait" => Some("portrait"),
+        _ => None,
+    }
+}
+
+fn quick_scan_temp_root<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<PathBuf, ScannerBridgeError> {
+    let root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| ScannerBridgeError::Internal {
+            message: format!("Unable to resolve app cache directory: {error}"),
+        })?
+        .join("temp")
+        .join("quick_scan");
+    fs::create_dir_all(&root).map_err(|error| ScannerBridgeError::Internal {
+        message: format!("Unable to create quick scan temp directory: {error}"),
+    })?;
+    Ok(root)
+}
+
+fn sweep_quick_scan_temp<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Ok(root) = quick_scan_temp_root(app) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("pdf") {
+            continue;
+        }
+        if reject_reparse_point(&path).is_err() {
+            continue;
+        }
+        let Ok(metadata) = fs::metadata(&path) else {
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        if now
+            .duration_since(modified)
+            .unwrap_or_default()
+            > Duration::from_secs(60 * 60)
+        {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
@@ -394,6 +476,33 @@ fn build_sidecar_args(
     args
 }
 
+fn build_quick_scan_args(
+    input_path: &str,
+    temp_root: &Path,
+    mode: &str,
+    detector_mode: &str,
+    orientation: &str,
+    debug_diagnostics: bool,
+) -> Vec<String> {
+    let mut args = vec![
+        "scan-one".to_string(),
+        "--input".to_string(),
+        input_path.to_string(),
+        "--temp-root".to_string(),
+        temp_root.to_string_lossy().into_owned(),
+        "--mode".to_string(),
+        mode.to_string(),
+        "--detector-mode".to_string(),
+        detector_mode.to_string(),
+        "--orientation".to_string(),
+        orientation.to_string(),
+    ];
+    if debug_diagnostics {
+        args.push("--debug-diagnostics".to_string());
+    }
+    args
+}
+
 fn validate_wire_event(value: &Value) -> Result<(), ScannerBridgeError> {
     let object = value
         .as_object()
@@ -452,6 +561,18 @@ fn parse_scan_plan(value: &Value) -> Result<ScanPlanPayload, ScannerBridgeError>
     Ok(plan)
 }
 
+fn parse_quick_scan(value: &Value) -> Result<QuickScanPayload, ScannerBridgeError> {
+    validate_wire_event(value)?;
+    if value.get("type").and_then(Value::as_str) != Some("quick_scan_completed") {
+        return Err(ScannerBridgeError::InvalidEvent {
+            message: "Expected quick_scan_completed event".to_string(),
+        });
+    }
+    serde_json::from_value(value.clone()).map_err(|error| ScannerBridgeError::InvalidEvent {
+        message: format!("Invalid quick_scan_completed event: {error}"),
+    })
+}
+
 fn drain_lines(buffer: &mut Vec<u8>, flush_remainder: bool) -> Vec<Vec<u8>> {
     let mut lines = Vec::new();
     let mut consumed = 0;
@@ -500,6 +621,7 @@ fn forward_stdout_line<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     bytes: Vec<u8>,
     plan: &mut Option<ScanPlanPayload>,
+    quick_scan: &mut Option<QuickScanPayload>,
 ) -> Result<(), ScannerBridgeError> {
     let line = String::from_utf8(bytes).map_err(|error| ScannerBridgeError::StreamFailed {
         message: format!("Sidecar emitted non-UTF-8 output: {error}"),
@@ -515,6 +637,9 @@ fn forward_stdout_line<R: tauri::Runtime>(
     validate_wire_event(&value)?;
     if value.get("type").and_then(Value::as_str) == Some("scan_plan") {
         *plan = Some(parse_scan_plan(&value)?);
+    }
+    if value.get("type").and_then(Value::as_str) == Some("quick_scan_completed") {
+        *quick_scan = Some(parse_quick_scan(&value)?);
     }
     app.emit(SCANNER_EVENT_CHANNEL, value)
         .map_err(|error| ScannerBridgeError::StreamFailed {
@@ -579,6 +704,7 @@ async fn consume_sidecar<R: tauri::Runtime>(
 ) -> Result<SidecarCapture, ScannerBridgeError> {
     let mut exit_code = None;
     let mut plan = None;
+    let mut quick_scan = None;
     let mut stderr = Vec::new();
     let mut stdout_buffer = Vec::new();
     let mut stderr_buffer = Vec::new();
@@ -588,7 +714,7 @@ async fn consume_sidecar<R: tauri::Runtime>(
             CommandEvent::Stdout(bytes) => {
                 stdout_buffer.extend(bytes);
                 for line in drain_lines(&mut stdout_buffer, false) {
-                    forward_stdout_line(&app, line, &mut plan)?;
+                    forward_stdout_line(&app, line, &mut plan, &mut quick_scan)?;
                 }
             }
             CommandEvent::Stderr(bytes) => {
@@ -608,7 +734,7 @@ async fn consume_sidecar<R: tauri::Runtime>(
     }
 
     for line in drain_lines(&mut stdout_buffer, true) {
-        forward_stdout_line(&app, line, &mut plan)?;
+        forward_stdout_line(&app, line, &mut plan, &mut quick_scan)?;
     }
     for line in drain_lines(&mut stderr_buffer, true) {
         forward_stderr_line(&app, line, &mut stderr)?;
@@ -620,6 +746,7 @@ async fn consume_sidecar<R: tauri::Runtime>(
     Ok(SidecarCapture {
         exit_code,
         plan,
+        quick_scan,
         stderr,
     })
 }
@@ -781,6 +908,209 @@ async fn start_scan(
     result
 }
 
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn quick_scan(
+    app: tauri::AppHandle,
+    state: State<'_, ScannerState>,
+    input_path: String,
+    mode: Option<String>,
+    detector_mode: Option<String>,
+    orientation: Option<String>,
+    debug_diagnostics: Option<bool>,
+) -> Result<QuickScanPayload, ScannerBridgeError> {
+    validate_request(
+        input_path.as_str(),
+        None,
+        mode.as_deref(),
+        None,
+        None,
+        None,
+        None,
+        detector_mode.as_deref(),
+        debug_diagnostics,
+        None,
+    )?;
+    let orientation = orientation.as_deref().unwrap_or("auto");
+    if normalize_orientation(orientation).is_none() {
+        return Err(ScannerBridgeError::InvalidRequest {
+            message: format!("Unsupported orientation: {orientation}"),
+        });
+    }
+    let temp_root = quick_scan_temp_root(&app)?;
+    let args = build_quick_scan_args(
+        input_path.as_str(),
+        &temp_root,
+        mode.as_deref().unwrap_or("gray"),
+        detector_mode.as_deref().unwrap_or("ai_enhanced"),
+        orientation,
+        debug_diagnostics.unwrap_or(false),
+    );
+    let scanner_state = state.inner().clone();
+    scanner_state.begin()?;
+    let stream_result = stream_sidecar(app, scanner_state.clone(), args).await;
+    scanner_state.finish();
+    match stream_result {
+        Ok(capture) => {
+            if let Some(result) = capture.quick_scan {
+                Ok(result)
+            } else {
+                Err(sidecar_exit_error(&capture))
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn reject_reparse_point(path: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("symbolic links are not allowed for quick-scan temp files".to_string());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err("reparse points are not allowed for quick-scan temp files".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn reject_reparse_components(path: &Path) -> Result<(), String> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(_) => reject_reparse_point(&current)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file_same_volume(source: &Path, target: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let target_wide: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    let moved = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            target_wide.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file_same_volume(source: &Path, target: &Path) -> io::Result<()> {
+    fs::rename(source, target)
+}
+
+#[tauri::command]
+fn save_quick_scan_pdf(
+    app: tauri::AppHandle,
+    temp_path: String,
+    target_path: String,
+) -> Result<(), String> {
+    let temp_root = quick_scan_temp_root(&app).map_err(|error| format!("{error:?}"))?;
+    reject_reparse_components(&temp_root)?;
+    let canonical_root = fs::canonicalize(&temp_root).map_err(|error| error.to_string())?;
+    let requested_temp = PathBuf::from(temp_path);
+    reject_reparse_components(&requested_temp)?;
+    reject_reparse_point(&requested_temp)?;
+    let canonical_temp = fs::canonicalize(&requested_temp).map_err(|error| error.to_string())?;
+    if !canonical_temp.starts_with(&canonical_root) || canonical_temp == canonical_root {
+        return Err("quick-scan temp path is outside the allowed directory".to_string());
+    }
+    if canonical_temp.extension().and_then(|value| value.to_str()) != Some("pdf") {
+        return Err("quick-scan temp path must be a PDF file".to_string());
+    }
+    if !canonical_temp.is_file() {
+        return Err("quick-scan temp path is not a file".to_string());
+    }
+
+    let target = PathBuf::from(target_path);
+    if target.as_os_str().is_empty() || target.is_dir() {
+        return Err("PDF destination must be a file path".to_string());
+    }
+    let target = if target.is_absolute() {
+        target
+    } else {
+        std::env::current_dir()
+            .map_err(|error| error.to_string())?
+            .join(target)
+    };
+    if target.extension().and_then(|value| value.to_str()) != Some("pdf") {
+        return Err("PDF destination must use the .pdf extension".to_string());
+    }
+    let target_parent = target
+        .parent()
+        .ok_or_else(|| "PDF destination has no parent directory".to_string())?
+        .to_path_buf();
+    reject_reparse_components(&target_parent)?;
+    fs::create_dir_all(&target_parent).map_err(|error| error.to_string())?;
+    reject_reparse_components(&target_parent)?;
+    let canonical_target_parent =
+        fs::canonicalize(&target_parent).map_err(|error| error.to_string())?;
+    let target = canonical_target_parent.join(
+        target
+            .file_name()
+            .ok_or_else(|| "PDF destination has no filename".to_string())?,
+    );
+    if target.exists() {
+        reject_reparse_point(&target)?;
+        if target.is_dir() {
+            return Err("PDF destination is a directory".to_string());
+        }
+    }
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
+    let target_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "PDF destination filename is invalid".to_string())?;
+    let staging = target
+        .parent()
+        .unwrap()
+        .join(format!(".{target_name}.tmp.{nonce}"));
+    fs::copy(&canonical_temp, &staging).map_err(|error| error.to_string())?;
+    let copy_result = (|| -> Result<(), String> {
+        let file = File::open(&staging).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        let source_size = fs::metadata(&canonical_temp)
+            .map_err(|error| error.to_string())?
+            .len();
+        let staging_size = fs::metadata(&staging)
+            .map_err(|error| error.to_string())?
+            .len();
+        if source_size != staging_size {
+            return Err("temporary PDF copy failed size verification".to_string());
+        }
+        replace_file_same_volume(&staging, &target).map_err(|error| error.to_string())
+    })();
+    if copy_result.is_err() {
+        let _ = fs::remove_file(&staging);
+        return copy_result;
+    }
+    let _ = fs::remove_file(&canonical_temp);
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
 fn hide_helper_windows() {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
@@ -852,9 +1182,12 @@ pub fn run() {
             greet,
             plan_scan,
             start_scan,
+            quick_scan,
+            save_quick_scan_pdf,
             open_output_folder
         ])
         .setup(|app| {
+            sweep_quick_scan_temp(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -880,6 +1213,7 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             app_handle.state::<ScannerState>().terminate_child();
+            sweep_quick_scan_temp(app_handle);
         }
     });
 }

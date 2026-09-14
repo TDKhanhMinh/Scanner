@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { parseScannerEvent } from "@/lib/eventParser";
+import { parseQuickScanEvent, parseScannerEvent } from "@/lib/eventParser";
 import type {
   BatchPeriod,
   DetectorMode,
@@ -9,6 +9,12 @@ import type {
   ScanPlanEvent,
   ScannerEvent,
 } from "@/types/scanner";
+import type {
+  FlatScanRequest,
+  FlatScanRunOutcome,
+  QuickScanRequest,
+  QuickScanResult,
+} from "@/types/workflow";
 
 export const SCANNER_EVENT_CHANNEL = "scanner://event";
 export const SCANNER_STDERR_CHANNEL = "scanner://stderr";
@@ -72,6 +78,43 @@ export async function startScan(request: ScannerRequest): Promise<ScanRunOutcome
     exportMode: request.exportMode ?? null,
     manualOrder: request.manualOrder ?? null,
     skipGroups: request.skipGroups ?? null,
+  });
+}
+
+export async function invokeQuickScan(request: QuickScanRequest): Promise<QuickScanResult> {
+  const raw = await invoke<unknown>("quick_scan", {
+    inputPath: request.inputPath,
+    mode: request.mode,
+    detectorMode: request.detectorMode,
+    orientation: request.orientation,
+    debugDiagnostics: request.debugDiagnostics,
+  });
+  const result = parseQuickScanEvent(raw);
+  if (!result) {
+    throw { kind: "invalidEvent", message: "Invalid quick scan result" } satisfies ScannerBridgeError;
+  }
+  return result;
+}
+
+export async function saveQuickScanPdf(
+  tempPath: string,
+  destinationPath: string,
+): Promise<void> {
+  await invoke("save_quick_scan_pdf", {
+    tempPath,
+    destinationPath,
+  });
+}
+
+export async function invokeFlatScan(request: FlatScanRequest): Promise<FlatScanRunOutcome> {
+  return invoke<FlatScanRunOutcome>("scan_flat_folder", {
+    inputRoot: request.inputRoot,
+    outputRoot: request.outputRoot,
+    exportMode: request.exportMode,
+    mode: request.mode,
+    detectorMode: request.detectorMode,
+    orientation: request.orientation,
+    workers: request.workers,
   });
 }
 

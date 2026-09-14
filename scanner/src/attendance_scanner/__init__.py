@@ -327,6 +327,10 @@ from attendance_scanner.quadrilateral_candidates import (
     RejectedQuadrilateralCandidate,
     build_quadrilateral_candidates,
 )
+from attendance_scanner.quick_scan import (
+    QUICK_SCAN_SUPPORTED_EXTENSIONS,
+    execute_quick_scan,
+)
 from attendance_scanner.segmentation import (
     OnnxSegmentationAdapter,
     SegmentationAdapterError,
@@ -597,6 +601,8 @@ __all__ = [
     "QuadrilateralCandidateSet",
     "RejectedQuadrilateralCandidate",
     "build_quadrilateral_candidates",
+    "QUICK_SCAN_SUPPORTED_EXTENSIONS",
+    "execute_quick_scan",
     "OnnxSegmentationAdapter",
     "SegmentationAdapterError",
     "SegmentationConfig",

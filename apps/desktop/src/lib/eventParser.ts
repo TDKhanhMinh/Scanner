@@ -12,9 +12,11 @@ import {
   PROTOCOL_VERSION,
   QuickScanCompletedEvent,
   ScannerEvent,
+  isQuickScanCompletedEvent,
   VALID_SCANNER_ERROR_CODES,
   VALID_DETECTOR_MODES,
 } from "@/types/scanner";
+import type { QuickScanResult } from "@/types/workflow";
 
 const VALID_EVENT_TYPES = new Set([
   "scan_plan",
@@ -568,6 +570,27 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
  * Parses multiple lines of JSONL text into an array of valid events.
  * Invalid or empty lines are silently skipped.
  */
+export function parseQuickScanEvent(value: unknown): QuickScanResult | null {
+  const line = typeof value === "string" ? value : JSON.stringify(value);
+  if (typeof line !== "string") return null;
+  const event = parseScannerEvent(line);
+  if (!event || !isQuickScanCompletedEvent(event)) return null;
+  return {
+    success: event.success,
+    inputPath: event.inputPath,
+    tempPdfPath: event.tempPdfPath,
+    savedPdfPath: null,
+    isSaved: false,
+    documentDetected: event.documentDetected,
+    durationMs: event.durationMs,
+    detectionPreview: event.detectionPreview,
+    processedPreviewDataUrl: event.processedPreviewDataUrl,
+    errorCode: event.errorCode,
+    message: event.message,
+    warning: event.warning,
+  };
+}
+
 export function parseScannerEvents(lines: string[]): ScannerEvent[] {
   const results: ScannerEvent[] = [];
   for (const line of lines) {
