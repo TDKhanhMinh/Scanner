@@ -5,7 +5,8 @@ in-memory functions on OpenCV images (without filesystem I/O), it applies contra
 enhancement, noise reduction, and binarization according to the selected ScanMode:
 1. Gray (default): Grayscale + CLAHE + edge-preserving bilateral denoise + mild unsharp mask.
    Preserves faint pen strokes and table grid lines.
-2. B&W (Magic Pro): CamScanner-style background flattening + deep black text + colored ink preservation.
+2. B&W (Magic Pro): CamScanner-style background flattening + deep black text
+   plus colored ink preservation.
    Crisp white paper, dark text, and vibrant signatures/stamps without shadow casts.
 3. Color Enhanced: LAB color-space CLAHE strictly on Luminance (L) + unsharp mask.
    Preserves stamps and colored signatures without color cast distortion.
@@ -207,7 +208,7 @@ def enhance_bw(
         config = EnhancementConfig()
 
     bgr = _extract_bgr_array(image)
-    is_2d = (bgr.ndim == 2)
+    is_2d = bgr.ndim == 2
     if is_2d:
         img_bgr = cv2.cvtColor(bgr, cv2.COLOR_GRAY2BGR)
     else:
@@ -270,13 +271,17 @@ def enhance_bw(
         np.where(v_curved > 230.0, 0.0, s_c * 0.5),
     )
 
-    hsv_new = cv2.merge([h_c, np.clip(s_new, 0.0, 255.0), np.clip(v_curved, 0.0, 255.0)]).astype(np.uint8)
+    hsv_new = cv2.merge([h_c, np.clip(s_new, 0.0, 255.0), np.clip(v_curved, 0.0, 255.0)]).astype(
+        np.uint8
+    )
     res_bgr = cv2.cvtColor(hsv_new, cv2.COLOR_HSV2BGR)
 
     # 5. Crisp edge sharpening (Unsharp Mask)
     if config.bw_magic_sharpen > 0.0:
         blurred = cv2.GaussianBlur(res_bgr, (0, 0), sigmaX=1.0)
-        res_bgr = cv2.addWeighted(res_bgr, 1.0 + config.bw_magic_sharpen, blurred, -config.bw_magic_sharpen, 0)
+        res_bgr = cv2.addWeighted(
+            res_bgr, 1.0 + config.bw_magic_sharpen, blurred, -config.bw_magic_sharpen, 0
+        )
         res_bgr = np.clip(res_bgr, 0, 255).astype(np.uint8)
 
     if is_2d:

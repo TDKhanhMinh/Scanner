@@ -257,4 +257,3 @@ def test_enhance_bw_adaptive_faint_ink():
     # Faint text should be darkened significantly (< 100) while background is white (> 240)
     assert np.min(gray_adaptive) < 100
     assert np.max(gray_adaptive) >= 240
-
