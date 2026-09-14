@@ -64,6 +64,7 @@ async function enterInputPath(path = "C:/Attendance Input") {
 
 describe("App scan plan states", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     vi.useFakeTimers();
     vi.clearAllMocks();
   });
@@ -123,14 +124,31 @@ describe("App scan plan states", () => {
     });
   });
 
-  it("replans with Smart Document when the scan mode changes", async () => {
+  it("marks plan stale when scan mode changes and replans when synchronizing", async () => {
     vi.mocked(planScan).mockResolvedValue(validPlan);
     render(<App />);
 
     await enterInputPath();
+    expect(planScan).toHaveBeenCalledTimes(1);
+
+    // Changing scan mode updates settings without immediate planScan or results reset
     fireEvent.click(screen.getByRole("button", { name: /Smart Document/i }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
+    });
+
+    // planScan was NOT called again immediately
+    expect(planScan).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Thiết lập đã thay đổi/i)).toBeInTheDocument();
+
+    // Scan button now says "Đồng bộ & Quét"
+    const syncScanButton = screen.getByRole("button", { name: /Đồng bộ & Quét/i });
+    expect(syncScanButton).toBeInTheDocument();
+
+    // Clicking "Đồng bộ & Quét" triggers plan refresh with new settings
+    fireEvent.click(syncScanButton);
+    await act(async () => {
+      await Promise.resolve();
     });
 
     expect(planScan).toHaveBeenLastCalledWith({
@@ -181,7 +199,7 @@ describe("App scan plan states", () => {
     expect(screen.getByRole("button", { name: /Mở thư mục kết quả PDF/i })).toBeEnabled();
   });
 
-  it("shows editable period/export options and sends the selected values to planning", async () => {
+  it("shows editable period/export options and sends the selected values to planning on sync", async () => {
     vi.mocked(planScan).mockResolvedValue(validPlan);
     render(<App />);
     await enterInputPath();
@@ -195,8 +213,15 @@ describe("App scan plan states", () => {
     fireEvent.change(month, { target: { value: "8" } });
     fireEvent.change(year, { target: { value: "2025" } });
     fireEvent.click(screen.getByRole("radio", { name: /Nhiều ảnh → một PDF/i }));
+
+    // Verify amber banner is shown
+    expect(screen.getByText(/Thiết lập đã thay đổi/i)).toBeInTheDocument();
+
+    // Click "Đồng bộ" button in banner
+    const syncButton = screen.getByRole("button", { name: /^Đồng bộ$/i });
+    fireEvent.click(syncButton);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
     });
 
     expect(planScan).toHaveBeenLastCalledWith({
@@ -225,16 +250,26 @@ describe("App scan plan states", () => {
     await enterInputPath();
 
     fireEvent.click(screen.getByRole("radio", { name: /Nhiều ảnh → một PDF/i }));
+
+    // User clicks "Đồng bộ & Quét" to synchronize with GROUPED mode
+    const syncScanButton = screen.getByRole("button", { name: /Đồng bộ & Quét/i });
+    fireEvent.click(syncScanButton);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
     });
 
-    const scanButton = screen.getByRole("button", { name: /Quét các file mới \(4\)/i });
+    // Scan was halted before startScan because ambiguousGroup needs review
+    expect(startScan).not.toHaveBeenCalled();
     expect(screen.getByText(/Cần xác nhận thứ tự page/i)).toBeInTheDocument();
+
+    const scanButton = screen.getByRole("button", { name: /Quét các file mới \(4\)/i });
     expect(scanButton).toBeDisabled();
 
+    // User resolves the review group
     fireEvent.click(screen.getByRole("button", { name: /Xác nhận thứ tự page/i }));
     expect(scanButton).toBeEnabled();
+
+    // User clicks scan now that group is resolved
     fireEvent.click(scanButton);
     await act(async () => {
       await Promise.resolve();
@@ -248,5 +283,35 @@ describe("App scan plan states", () => {
         },
       }),
     );
+  });
+
+  it("drops stale plan response when settings change while plan request is in flight", async () => {
+    let resolveFirstPlan: ((value: typeof validPlan) => void) | undefined;
+    vi.mocked(planScan).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirstPlan = resolve;
+        }),
+    );
+    render(<App />);
+
+    // Start first plan request
+    const input = screen.getByPlaceholderText(/Nhập hoặc chọn đường dẫn thư mục/i);
+    fireEvent.change(input, { target: { value: "C:/Attendance Input" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    // While request is in flight, change scan mode
+    fireEvent.click(screen.getByRole("button", { name: /Smart Document/i }));
+
+    // Now resolve the first plan request (which had mode: "gray")
+    await act(async () => {
+      resolveFirstPlan?.(validPlan);
+      await Promise.resolve();
+    });
+
+    // Verify stale plan response was dropped: plan is NOT marked ready with stale fingerprint
+    expect(screen.getByRole("button", { name: /Quét các file mới/i })).toBeDisabled();
   });
 });

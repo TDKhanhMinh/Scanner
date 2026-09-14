@@ -43,6 +43,7 @@ export interface ScanPlanSummaryCardProps {
   isPlanning?: boolean;
   isScanning?: boolean;
   canScan?: boolean;
+  isPlanStale?: boolean;
   period?: BatchPeriod;
   exportMode?: ExportMode;
   onRefreshPlan: () => void;
@@ -54,6 +55,7 @@ export function ScanPlanSummaryCard({
   isPlanning = false,
   isScanning = false,
   canScan = false,
+  isPlanStale = false,
   period,
   exportMode = "PER_IMAGE",
   onRefreshPlan,
@@ -99,6 +101,23 @@ export function ScanPlanSummaryCard({
         </CardHeader>
 
         <CardContent className="space-y-3 pt-1">
+          {isPlanStale && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs font-medium text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2">
+              <span>Thiết lập đã thay đổi — kế hoạch sẽ được đồng bộ trước khi quét.</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onRefreshPlan}
+                disabled={isPlanning || isScanning}
+                className="h-7 px-2 text-xs border-amber-500/40 text-amber-800 dark:text-amber-200 hover:bg-amber-500/20 shrink-0"
+              >
+                <RefreshCw className={`w-3 h-3 mr-1 ${isPlanning ? "animate-spin" : ""}`} />
+                Đồng bộ
+              </Button>
+            </div>
+          )}
+
           {/* Employee Count */}
           <div className="flex items-center justify-between py-2 border-b border-border/40 text-xs">
             <span className="text-muted-foreground flex items-center gap-1.5">
@@ -262,7 +281,7 @@ export function ScanPlanSummaryCard({
           ) : (
             <>
               <Scan className="w-4 h-4 mr-2" />
-              Quét các file mới ({filesToProcess})
+              {isPlanStale ? `Đồng bộ & Quét (${filesToProcess})` : `Quét các file mới (${filesToProcess})`}
             </>
           )}
         </Button>

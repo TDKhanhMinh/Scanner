@@ -23,7 +23,11 @@ import {
   scannerErrorMessage,
   startScan,
 } from "@/lib/scannerBridge";
-import { loadDetectorPreferences, saveDetectorPreferences } from "@/lib/detectorSettings";
+import {
+  loadUserPreferences,
+  saveUserPreferences,
+  createPlanFingerprint,
+} from "@/lib/userPreferences";
 import type {
   BatchPeriod,
   ProductDetectorMode,
@@ -77,15 +81,15 @@ export function App() {
   const [inputPath, setInputPath] = useState<string>("");
   const [outputPath, setOutputPath] = useState<string>("");
   const [settings, setSettings] = useState<ScannerSettings>(() => {
-    const preferences = loadDetectorPreferences();
+    const preferences = loadUserPreferences();
     return {
-      mode: "gray",
+      mode: preferences.mode,
       detectorMode: preferences.detectorMode,
       debugDiagnostics: preferences.debugDiagnostics,
       reprocess: false,
       workers: null,
       period: defaultBatchPeriod(),
-      exportMode: "PER_IMAGE",
+      exportMode: preferences.exportMode,
     };
   });
   const [activeTab, setActiveTab] = useState<string>("config");
@@ -98,6 +102,12 @@ export function App() {
   >({});
   const [skippedReviewGroups, setSkippedReviewGroups] = useState<string[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<FileResultItem | null>(null);
+
+  // Plan state and fingerprint lifecycle
+  const [currentPlan, setCurrentPlan] = useState<ScanPlanEvent | null>(null);
+  const latestPlanRef = useRef<ScanPlanEvent | null>(null);
+  const [activePlanFingerprint, setActivePlanFingerprint] = useState<string | null>(null);
+  const scanStartInFlight = useRef<boolean>(false);
 
   // Incremental scan plan state loaded from the Tauri scanner bridge.
   const [planStats, setPlanStats] = useState<ScanPlanStats>({
@@ -136,12 +146,26 @@ export function App() {
   const warningCount = execution.warning;
   const failedCount = execution.failed;
 
+  const currentFingerprint = inputPath.trim()
+    ? createPlanFingerprint(inputPath, outputPath || `${inputPath.trim()}_pdf`, settings)
+    : null;
+  const currentFingerprintRef = useRef<string | null>(currentFingerprint);
+  currentFingerprintRef.current = currentFingerprint;
+
+  const isPlanStale = Boolean(
+    isPlanReady &&
+      currentPlan &&
+      (!activePlanFingerprint || currentFingerprint !== activePlanFingerprint),
+  );
+
   useEffect(() => {
-    saveDetectorPreferences({
+    saveUserPreferences({
+      mode: settings.mode,
       detectorMode: settings.detectorMode,
+      exportMode: settings.exportMode,
       debugDiagnostics: settings.debugDiagnostics,
     });
-  }, [settings.detectorMode, settings.debugDiagnostics]);
+  }, [settings.mode, settings.detectorMode, settings.exportMode, settings.debugDiagnostics]);
 
   useEffect(() => {
     return () => {
@@ -152,65 +176,84 @@ export function App() {
     };
   }, []);
 
-  const requestPlan = (
+  const requestPlan = async (
     path: string,
     nextOutputPath: string,
     requestSettings: ScannerSettings = settings,
-  ) => {
+  ): Promise<ScanPlanEvent | null> => {
     const requestId = ++planRequestId.current;
+    const requestFingerprint = createPlanFingerprint(path, nextOutputPath, requestSettings);
     setIsPlanning(true);
     setErrorMessage("");
     setHasPlanError(false);
-    setIsPlanReady(false);
 
-    void planScan({
-      inputRoot: path,
-      outputRoot: nextOutputPath,
-      mode: requestSettings.mode,
-      detectorMode: requestSettings.detectorMode,
-      debugDiagnostics: requestSettings.debugDiagnostics,
-      reprocess: requestSettings.reprocess,
-      period: requestSettings.period,
-      exportMode: requestSettings.exportMode,
-    })
-      .then((plan) => {
-        if (requestId === planRequestId.current) {
-          setPlanStats(toPlanStats(plan));
-          setInputPath(plan.inputRoot);
-          setOutputPath(plan.outputRoot);
-          setReviewGroups(plan.reviewGroups ?? []);
-          setResolvedReviewGroups({});
-          setManualOrderOverrides({});
-          setSkippedReviewGroups([]);
-          setIsPlanReady(true);
-        }
-      })
-      .catch((error: unknown) => {
-        if (requestId === planRequestId.current) {
-          setPlanStats({
-            totalEmployees: 0,
-            totalImages: 0,
-            newFiles: 0,
-            modifiedFiles: 0,
-            unchangedFiles: 0,
-            rebuildFiles: 0,
-            unsupportedFiles: 0,
-            needsReprocess: 0,
-          });
-          setErrorMessage(scannerErrorMessage(error));
-          setReviewGroups([]);
-          setResolvedReviewGroups({});
-          setManualOrderOverrides({});
-          setSkippedReviewGroups([]);
-          setHasPlanError(true);
-          setIsPlanReady(false);
-        }
-      })
-      .finally(() => {
-        if (requestId === planRequestId.current) {
-          setIsPlanning(false);
-        }
+    try {
+      const plan = await planScan({
+        inputRoot: path,
+        outputRoot: nextOutputPath,
+        mode: requestSettings.mode,
+        detectorMode: requestSettings.detectorMode,
+        debugDiagnostics: requestSettings.debugDiagnostics,
+        reprocess: requestSettings.reprocess,
+        period: requestSettings.period,
+        exportMode: requestSettings.exportMode,
       });
+
+      // Contract 1: Invalidate if requestId or fingerprint changed
+      if (
+        requestId !== planRequestId.current ||
+        requestFingerprint !== currentFingerprintRef.current
+      ) {
+        return null;
+      }
+
+      setCurrentPlan(plan);
+      latestPlanRef.current = plan;
+      setActivePlanFingerprint(requestFingerprint);
+      setPlanStats(toPlanStats(plan));
+      setInputPath(plan.inputRoot);
+      setOutputPath(plan.outputRoot);
+      setReviewGroups(plan.reviewGroups ?? []);
+      setResolvedReviewGroups({});
+      setManualOrderOverrides({});
+      setSkippedReviewGroups([]);
+      setIsPlanReady(true);
+      return plan;
+    } catch (error: unknown) {
+      if (
+        requestId === planRequestId.current &&
+        requestFingerprint === currentFingerprintRef.current
+      ) {
+        setActivePlanFingerprint(null);
+        setCurrentPlan(null);
+        latestPlanRef.current = null;
+        setPlanStats({
+          totalEmployees: 0,
+          totalImages: 0,
+          newFiles: 0,
+          modifiedFiles: 0,
+          unchangedFiles: 0,
+          rebuildFiles: 0,
+          unsupportedFiles: 0,
+          needsReprocess: 0,
+        });
+        setErrorMessage(scannerErrorMessage(error));
+        setReviewGroups([]);
+        setResolvedReviewGroups({});
+        setManualOrderOverrides({});
+        setSkippedReviewGroups([]);
+        setHasPlanError(true);
+        setIsPlanReady(false);
+      }
+      return null;
+    } finally {
+      if (
+        requestId === planRequestId.current &&
+        requestFingerprint === currentFingerprintRef.current
+      ) {
+        setIsPlanning(false);
+      }
+    }
   };
 
   const schedulePlan = (
@@ -223,7 +266,7 @@ export function App() {
     }
     planDebounceTimer.current = setTimeout(() => {
       planDebounceTimer.current = undefined;
-      requestPlan(path, nextOutputPath, requestSettings);
+      void requestPlan(path, nextOutputPath, requestSettings);
     }, 250);
   };
 
@@ -231,6 +274,9 @@ export function App() {
   const handleInputChange = (path: string) => {
     setInputPath(path);
     dispatchExecution({ type: "reset" });
+    setActivePlanFingerprint(null);
+    setCurrentPlan(null);
+    latestPlanRef.current = null;
     setReviewGroups([]);
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
@@ -243,7 +289,7 @@ export function App() {
     setOutputPath(nextOutputPath);
 
     if (trimmed) {
-      schedulePlan(trimmed, nextOutputPath);
+      schedulePlan(trimmed, nextOutputPath, settings);
     } else {
       if (planDebounceTimer.current !== undefined) {
         clearTimeout(planDebounceTimer.current);
@@ -274,78 +320,28 @@ export function App() {
   };
 
   const handlePeriodChange = (period: BatchPeriod) => {
-    const nextSettings = { ...settings, period };
-    setSettings(nextSettings);
-    dispatchExecution({ type: "reset" });
-    setReviewGroups([]);
-    setResolvedReviewGroups({});
-    setManualOrderOverrides({});
-    setSkippedReviewGroups([]);
-    setSelectedPreview(null);
     planRequestId.current += 1;
-    setIsPlanReady(false);
-    if (inputPath.trim()) {
-      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
-    }
+    setSettings((previous) => ({ ...previous, period }));
   };
 
   const handleExportModeChange = (exportMode: ExportMode) => {
-    const nextSettings = { ...settings, exportMode };
-    setSettings(nextSettings);
-    dispatchExecution({ type: "reset" });
-    setReviewGroups([]);
-    setResolvedReviewGroups({});
-    setManualOrderOverrides({});
-    setSkippedReviewGroups([]);
-    setSelectedPreview(null);
     planRequestId.current += 1;
-    setIsPlanReady(false);
-    if (inputPath.trim()) {
-      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
-    }
+    setSettings((previous) => ({ ...previous, exportMode }));
   };
 
   const handleScanModeChange = (mode: ScanFilterMode) => {
-    const nextSettings = { ...settings, mode };
-    setSettings(nextSettings);
-    dispatchExecution({ type: "reset" });
-    setReviewGroups([]);
-    setResolvedReviewGroups({});
-    setManualOrderOverrides({});
-    setSkippedReviewGroups([]);
-    setSelectedPreview(null);
     planRequestId.current += 1;
-    setIsPlanReady(false);
-    if (inputPath.trim()) {
-      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
-    }
+    setSettings((previous) => ({ ...previous, mode }));
   };
 
   const handleDetectorModeChange = (detectorMode: ProductDetectorMode) => {
-    const nextSettings = { ...settings, detectorMode };
-    setSettings(nextSettings);
-    dispatchExecution({ type: "reset" });
-    setReviewGroups([]);
-    setResolvedReviewGroups({});
-    setManualOrderOverrides({});
-    setSkippedReviewGroups([]);
-    setSelectedPreview(null);
     planRequestId.current += 1;
-    setIsPlanReady(false);
-    if (inputPath.trim()) {
-      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
-    }
+    setSettings((previous) => ({ ...previous, detectorMode }));
   };
 
   const handleReprocessChange = (reprocess: boolean) => {
-    const nextSettings = { ...settings, reprocess };
-    setSettings(nextSettings);
-    dispatchExecution({ type: "reset" });
     planRequestId.current += 1;
-    setIsPlanReady(false);
-    if (inputPath.trim()) {
-      schedulePlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, nextSettings);
-    }
+    setSettings((previous) => ({ ...previous, reprocess }));
   };
 
   const chooseDirectory = async (title: string): Promise<string | null> => {
@@ -374,6 +370,9 @@ export function App() {
     const input = inputPath.trim();
     const nextOutputPath = path.trim() || (input ? `${input}_pdf` : "");
     dispatchExecution({ type: "reset" });
+    setActivePlanFingerprint(null);
+    setCurrentPlan(null);
+    latestPlanRef.current = null;
     setReviewGroups([]);
     setResolvedReviewGroups({});
     setManualOrderOverrides({});
@@ -383,7 +382,7 @@ export function App() {
     setHasPlanError(false);
     setOutputPath(nextOutputPath);
     if (input) {
-      schedulePlan(input, nextOutputPath);
+      schedulePlan(input, nextOutputPath, settings);
     }
   };
 
@@ -401,12 +400,12 @@ export function App() {
   };
 
   const handleRefreshPlan = () => {
-    if (!inputPath) return;
+    if (!inputPath.trim()) return;
     if (planDebounceTimer.current !== undefined) {
       clearTimeout(planDebounceTimer.current);
       planDebounceTimer.current = undefined;
     }
-    requestPlan(inputPath, outputPath || `${inputPath}_pdf`);
+    void requestPlan(inputPath.trim(), outputPath || `${inputPath.trim()}_pdf`, settings);
   };
 
   const handleScannerEvent = (event: ScannerEvent) => {
@@ -443,51 +442,92 @@ export function App() {
   };
 
   const handleStartScan = () => {
-    if (!inputPath || isScanning) return;
-
-    if (planDebounceTimer.current !== undefined) {
-      clearTimeout(planDebounceTimer.current);
-      planDebounceTimer.current = undefined;
+    if (!inputPath.trim() || isScanning || isPlanning || scanStartInFlight.current) {
+      return;
     }
-    const requestId = ++scanRequestId.current;
-    dispatchExecution({
-      type: "scan_started",
-      totalToProcess: planStats.newFiles + planStats.modifiedFiles + (planStats.rebuildFiles ?? 0),
-    });
+
+    scanStartInFlight.current = true;
     setErrorMessage("");
 
     void (async () => {
-      let unlistenEvents: (() => void) | undefined;
-      let unlistenDiagnostics: (() => void) | undefined;
       try {
-        unlistenEvents = await listenScannerEvents(handleScannerEvent);
-        unlistenDiagnostics = await listenScannerDiagnostics((diagnostic) => {
-          if (requestId === scanRequestId.current) {
-            setErrorMessage(scannerDiagnosticMessage(diagnostic));
+        let effectivePlan = latestPlanRef.current;
+        const targetInput = inputPath.trim();
+        const targetOutput = outputPath || `${targetInput}_pdf`;
+
+        // If plan is stale, missing, or not ready, refresh plan first
+        if (!effectivePlan || isPlanStale || !isPlanReady) {
+          if (planDebounceTimer.current !== undefined) {
+            clearTimeout(planDebounceTimer.current);
+            planDebounceTimer.current = undefined;
           }
+          const freshPlan = await requestPlan(targetInput, targetOutput, settings);
+          if (!freshPlan) {
+            // Plan request failed or was cancelled due to new input/settings.
+            // Do NOT reset progress or start scan!
+            return;
+          }
+          effectivePlan = freshPlan;
+        }
+
+        // Grouped review gate: must resolve or skip all review groups
+        if (settings.exportMode === "GROUPED") {
+          const groups = effectivePlan.reviewGroups ?? [];
+          const hasUnresolvedReview = groups.some((group) => {
+            const groupKey = `${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`;
+            return !resolvedReviewGroups[groupKey];
+          });
+          if (hasUnresolvedReview) {
+            // Groups need user review before scanning. Do NOT reset progress!
+            return;
+          }
+        }
+
+        // Fresh plan is valid and approved. Now and only now dispatch scan_started
+        const stats = toPlanStats(effectivePlan);
+        const totalToProcess =
+          stats.newFiles + stats.modifiedFiles + (stats.rebuildFiles ?? 0);
+        const requestId = ++scanRequestId.current;
+
+        dispatchExecution({
+          type: "scan_started",
+          totalToProcess,
         });
-        await startScan({
-          inputRoot: inputPath,
-          outputRoot: outputPath || `${inputPath}_pdf`,
-          mode: scanMode,
-          detectorMode: settings.detectorMode,
-          debugDiagnostics: settings.debugDiagnostics,
-          reprocess: settings.reprocess,
-          workers: settings.workers,
-          period: settings.period,
-          exportMode: settings.exportMode,
-          manualOrder: manualOrderOverrides,
-          skipGroups: skippedReviewGroups,
-        });
-      } catch (error: unknown) {
-        if (requestId === scanRequestId.current) {
-          const message = scannerErrorMessage(error);
-          dispatchExecution({ type: "scan_error", message });
-          setErrorMessage(message);
+
+        let unlistenEvents: (() => void) | undefined;
+        let unlistenDiagnostics: (() => void) | undefined;
+        try {
+          unlistenEvents = await listenScannerEvents(handleScannerEvent);
+          unlistenDiagnostics = await listenScannerDiagnostics((diagnostic) => {
+            if (requestId === scanRequestId.current) {
+              setErrorMessage(scannerDiagnosticMessage(diagnostic));
+            }
+          });
+          await startScan({
+            inputRoot: effectivePlan.inputRoot,
+            outputRoot: effectivePlan.outputRoot,
+            mode: scanMode,
+            detectorMode: settings.detectorMode,
+            debugDiagnostics: settings.debugDiagnostics,
+            reprocess: settings.reprocess,
+            workers: settings.workers,
+            period: settings.period,
+            exportMode: settings.exportMode,
+            manualOrder: manualOrderOverrides,
+            skipGroups: skippedReviewGroups,
+          });
+        } catch (error: unknown) {
+          if (requestId === scanRequestId.current) {
+            const message = scannerErrorMessage(error);
+            dispatchExecution({ type: "scan_error", message });
+            setErrorMessage(message);
+          }
+        } finally {
+          unlistenEvents?.();
+          unlistenDiagnostics?.();
         }
       } finally {
-        unlistenEvents?.();
-        unlistenDiagnostics?.();
+        scanStartInFlight.current = false;
       }
     })();
   };
@@ -667,9 +707,10 @@ export function App() {
                   debugDiagnostics={settings.debugDiagnostics}
                   reprocess={settings.reprocess}
                   needsReprocess={planStats.needsReprocess ?? 0}
-                  onDebugDiagnosticsChange={(debugDiagnostics) =>
-                    setSettings((previous) => ({ ...previous, debugDiagnostics }))
-                  }
+                  onDebugDiagnosticsChange={(debugDiagnostics) => {
+                    planRequestId.current += 1;
+                    setSettings((previous) => ({ ...previous, debugDiagnostics }));
+                  }}
                   onReprocessChange={handleReprocessChange}
                   disabled={isScanning}
                 />
@@ -691,14 +732,21 @@ export function App() {
                   stats={planStats}
                   isPlanning={isPlanning}
                   isScanning={isScanning}
+                  isPlanStale={isPlanStale}
                   period={settings.period}
                   exportMode={settings.exportMode}
                   canScan={
                     Boolean(inputPath.trim()) &&
                     isPlanReady &&
                     !hasPlanError &&
-                    (settings.exportMode !== "GROUPED" ||
-                      reviewGroups.every((group) => resolvedReviewGroups[`${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`]))
+                    (isPlanStale ||
+                      settings.exportMode !== "GROUPED" ||
+                      (reviewGroups.length > 0 &&
+                        reviewGroups.every((group) => {
+                          const key = `${group.key.employeeRelativeDir}:${group.key.year}-${String(group.key.month).padStart(2, "0")}`;
+                          return Boolean(resolvedReviewGroups[key]);
+                        })) ||
+                      reviewGroups.length === 0)
                   }
                   onRefreshPlan={handleRefreshPlan}
                   onStartScan={handleStartScan}

@@ -34,6 +34,14 @@ export interface BatchPeriod {
 export type ExportMode = "PER_IMAGE" | "GROUPED";
 export const VALID_EXPORT_MODES = ["PER_IMAGE", "GROUPED"] as const;
 
+export interface PlanSettings {
+  mode: ScanMode;
+  detectorMode: ProductDetectorMode;
+  period: BatchPeriod;
+  exportMode: ExportMode;
+  reprocess: boolean;
+}
+
 export type PageType = "FIRST_HALF" | "SECOND_HALF" | "UNKNOWN";
 export const VALID_PAGE_TYPES = ["FIRST_HALF", "SECOND_HALF", "UNKNOWN"] as const;
 
