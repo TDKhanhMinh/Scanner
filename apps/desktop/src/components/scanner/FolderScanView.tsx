@@ -313,15 +313,6 @@ export function FolderScanView() {
                 Đang xử lý: <span className="font-mono">{stats.currentFile}</span>
               </p>
             )}
-            <button
-              type="button"
-              onClick={() => void handleStartScan()}
-              disabled={!inputRoot.trim() || isBusy}
-              className="mt-5 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ScanLine className="h-4 w-4" />
-              {isProcessing ? "Đang quét..." : "Bắt đầu quét thư mục"}
-            </button>
           </div>
 
           {errorMessage && (
@@ -404,6 +395,26 @@ export function FolderScanView() {
           </button>
           </aside>
         </div>
+
+        <section className="rounded-2xl border border-primary/20 bg-primary/5 p-5" aria-label="Bắt đầu quét">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold">Đã cấu hình xong?</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Kiểm tra lại các tùy chọn phía trên, sau đó bắt đầu xử lý thư mục ảnh.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleStartScan()}
+              disabled={!inputRoot.trim() || isBusy}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ScanLine className="h-4 w-4" />
+              {isProcessing ? "Đang quét..." : "Bắt đầu quét thư mục"}
+            </button>
+          </div>
+        </section>
       </section>
     </main>
   );

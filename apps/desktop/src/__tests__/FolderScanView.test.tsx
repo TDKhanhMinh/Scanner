@@ -135,4 +135,20 @@ describe("FolderScanView", () => {
       workers: 1,
     }));
   });
+
+  it("places the start action after all folder configuration controls", () => {
+    render(<AppShell />);
+    fireEvent.click(screen.getByRole("tab", { name: "Thư mục tự do" }));
+
+    const detectorHeading = screen.getByRole("heading", { name: "Chế độ nhận diện tài liệu" });
+    const orientation = screen.getByRole("combobox", { name: "Chiều tài liệu" });
+    const workers = screen.getByRole("combobox", { name: "Số worker" });
+    const startButton = screen.getByRole("button", { name: "Bắt đầu quét thư mục" });
+    const follows = (element: Element) =>
+      Boolean(element.compareDocumentPosition(startButton) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+    expect(follows(detectorHeading)).toBe(true);
+    expect(follows(orientation)).toBe(true);
+    expect(follows(workers)).toBe(true);
+  });
 });
