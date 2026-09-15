@@ -313,6 +313,14 @@ fn normalize_orientation(value: &str) -> Option<&'static str> {
     }
 }
 
+fn normalize_flat_export_mode(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+        "per-image" => Some("per-image"),
+        "merged" => Some("merged"),
+        _ => None,
+    }
+}
+
 fn quick_scan_temp_root<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Result<PathBuf, ScannerBridgeError> {
@@ -352,11 +360,7 @@ fn sweep_quick_scan_temp<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let Ok(modified) = metadata.modified() else {
             continue;
         };
-        if now
-            .duration_since(modified)
-            .unwrap_or_default()
-            > Duration::from_secs(60 * 60)
-        {
+        if now.duration_since(modified).unwrap_or_default() > Duration::from_secs(60 * 60) {
             let _ = fs::remove_file(path);
         }
     }
@@ -501,6 +505,34 @@ fn build_quick_scan_args(
         args.push("--debug-diagnostics".to_string());
     }
     args
+}
+
+fn build_flat_scan_args(
+    input_root: &str,
+    output_root: &str,
+    export_mode: &str,
+    mode: &str,
+    detector_mode: &str,
+    orientation: &str,
+    workers: u32,
+) -> Vec<String> {
+    vec![
+        "scan-flat".to_string(),
+        "--input".to_string(),
+        input_root.to_string(),
+        "--output".to_string(),
+        output_root.to_string(),
+        "--export-mode".to_string(),
+        export_mode.to_string(),
+        "--mode".to_string(),
+        mode.to_string(),
+        "--detector-mode".to_string(),
+        detector_mode.to_string(),
+        "--orientation".to_string(),
+        orientation.to_string(),
+        "--workers".to_string(),
+        workers.to_string(),
+    ]
 }
 
 fn validate_wire_event(value: &Value) -> Result<(), ScannerBridgeError> {
@@ -962,6 +994,67 @@ async fn quick_scan(
     }
 }
 
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn scan_flat_folder(
+    app: tauri::AppHandle,
+    state: State<'_, ScannerState>,
+    input_root: String,
+    output_root: Option<String>,
+    export_mode: String,
+    mode: Option<String>,
+    detector_mode: Option<String>,
+    orientation: Option<String>,
+    workers: Option<u32>,
+) -> Result<ScanRunOutcome, ScannerBridgeError> {
+    validate_request(
+        input_root.as_str(),
+        output_root.as_deref(),
+        mode.as_deref(),
+        workers,
+        None,
+        None,
+        None,
+        detector_mode.as_deref(),
+        None,
+        None,
+    )?;
+    let export_mode = normalize_flat_export_mode(&export_mode).ok_or_else(|| {
+        ScannerBridgeError::InvalidRequest {
+            message: format!("Unsupported flat export mode: {export_mode}"),
+        }
+    })?;
+    let orientation = orientation.as_deref().unwrap_or("auto");
+    if normalize_orientation(orientation).is_none() {
+        return Err(ScannerBridgeError::InvalidRequest {
+            message: format!("Unsupported orientation: {orientation}"),
+        });
+    }
+    let output_root = output_root.ok_or_else(|| ScannerBridgeError::InvalidRequest {
+        message: "outputRoot is required for flat folder scans".to_string(),
+    })?;
+    let args = build_flat_scan_args(
+        input_root.as_str(),
+        output_root.as_str(),
+        export_mode,
+        mode.as_deref().unwrap_or("gray"),
+        detector_mode.as_deref().unwrap_or("ai_enhanced"),
+        orientation,
+        workers.unwrap_or(3),
+    );
+    let scanner_state = state.inner().clone();
+    scanner_state.begin()?;
+    let stream_result = stream_sidecar(app, scanner_state.clone(), args).await;
+    scanner_state.finish();
+    match stream_result {
+        Ok(capture) if matches!(capture.exit_code, 0 | 2) => Ok(ScanRunOutcome {
+            exit_code: capture.exit_code,
+        }),
+        Ok(capture) => Err(sidecar_exit_error(&capture)),
+        Err(error) => Err(error),
+    }
+}
+
 fn reject_reparse_point(path: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path).map_err(|error| error.to_string())?;
     if metadata.file_type().is_symlink() {
@@ -1183,6 +1276,7 @@ pub fn run() {
             plan_scan,
             start_scan,
             quick_scan,
+            scan_flat_folder,
             save_quick_scan_pdf,
             open_output_folder
         ])

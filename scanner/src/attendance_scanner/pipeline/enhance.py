@@ -14,7 +14,7 @@ enhancement, noise reduction, and binarization according to the selected ScanMod
    Targets clean CamScanner-style output while preserving colored handwriting and stamps.
 """
 
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, cast
 
 import cv2
 import numpy as np
@@ -448,7 +448,7 @@ def enhance_smart_document(
             0,
         )
 
-    return np.clip(enhanced_bgr, 0, 255).astype(np.uint8)
+    return cast(np.ndarray, np.clip(enhanced_bgr, 0, 255).astype(np.uint8))
 
 
 def enhance_image(

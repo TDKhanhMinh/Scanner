@@ -358,6 +358,17 @@ export interface FlatScanPlanEvent extends BaseEvent {
   filesToProcess: number;
   unchangedFiles: number;
   expectedArtifacts: number;
+  unsupportedCount: number;
+}
+
+export interface FlatScanProgressEvent extends BaseEvent {
+  type: "flat_scan_progress";
+  relativePath: string;
+  completedSources: number;
+  totalSources: number;
+  status: "success" | "warning" | "failed";
+  message: string | null;
+  durationMs: number;
 }
 
 export interface FlatFileCompletedEvent extends BaseEvent {
@@ -383,8 +394,13 @@ export interface FlatScanCompletedEvent extends BaseEvent {
   warning: number;
   failed: number;
   skipped: number;
+  unsupportedCount: number;
   durationMs: number;
   exitCode: number;
+  artifactStatus: "not_required" | "committed" | "not_committed";
+  artifactRelativePath: string | null;
+  artifactErrorCode: ScannerErrorCode | null;
+  artifactMessage: string | null;
 }
 
 export type ScannerEvent =
@@ -395,6 +411,7 @@ export type ScannerEvent =
   | ScanCompletedEvent
   | QuickScanCompletedEvent
   | FlatScanPlanEvent
+  | FlatScanProgressEvent
   | FlatFileCompletedEvent
   | FlatScanCompletedEvent;
 
@@ -429,6 +446,12 @@ export function isQuickScanCompletedEvent(
 
 export function isFlatScanPlanEvent(event: ScannerEvent): event is FlatScanPlanEvent {
   return event.type === "flat_scan_plan";
+}
+
+export function isFlatScanProgressEvent(
+  event: ScannerEvent,
+): event is FlatScanProgressEvent {
+  return event.type === "flat_scan_progress";
 }
 
 export function isFlatFileCompletedEvent(

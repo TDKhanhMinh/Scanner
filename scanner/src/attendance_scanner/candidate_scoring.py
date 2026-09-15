@@ -274,7 +274,7 @@ def _resolve_ambiguity(
     # Build a lookup from candidate_id -> original QuadrilateralCandidate
     cand_map = {c.candidate_id: c for c in candidate_list}
 
-    def _get_metrics(cs: CandidateScore) -> tuple:
+    def _get_metrics(cs: CandidateScore) -> tuple[float, float, float]:
         """Return (coverage, iou, geometry) for a candidate."""
         orig = cand_map.get(cs.candidate_id)
         if orig is None:

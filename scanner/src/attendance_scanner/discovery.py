@@ -19,6 +19,8 @@ from attendance_scanner.contracts import (
     ExportMode,
     FileClassification,
     FileProcessingStatus,
+    FlatDiscoveredFile,
+    FlatDiscoveryResult,
     InvalidInputRootError,
     PageIdentity,
     PageType,
@@ -329,6 +331,78 @@ def discover_employee_folders(input_root: Union[str, Path]) -> DiscoveryResult:
         image_count=len(discovered_files),
         unsupported_count=unsupported_count,
         collisions=all_collisions,
+    )
+
+
+def discover_flat_folder(
+    input_root: Union[str, Path],
+    output_root: Optional[Union[str, Path]] = None,
+) -> FlatDiscoveryResult:
+    """Discover supported image files directly under one flat input folder.
+
+    The inventory is deliberately non-recursive and computes a SHA-256 content
+    fingerprint for every source so incremental flat scans remain correct even
+    when size and mtime are unchanged.
+    """
+    raw_root = Path(input_root)
+    try:
+        resolved_root = raw_root.resolve()
+    except Exception as exc:
+        raise InvalidInputRootError(str(input_root), f"Cannot resolve path: {exc}") from exc
+    if not resolved_root.exists():
+        raise InvalidInputRootError(str(input_root), "Path does not exist")
+    if not resolved_root.is_dir():
+        raise InvalidInputRootError(str(input_root), "Path is not a directory")
+
+    resolved_output = Path(output_root).resolve() if output_root else Path(f"{resolved_root}_pdf")
+    valid_images: List[Path] = []
+    unsupported_count = 0
+    for child in resolved_root.iterdir():
+        if is_hidden_or_system(child) or not child.is_file():
+            continue
+        if child.suffix.lower() in SUPPORTED_EXTENSIONS:
+            valid_images.append(child)
+        else:
+            unsupported_count += 1
+
+    valid_images.sort(key=lambda path: (natural_sort_key(path.name), path.name))
+    stem_groups: Dict[str, List[Path]] = defaultdict(list)
+    for image_path in valid_images:
+        stem_groups[image_path.stem.casefold()].append(image_path)
+    collision_stems = {stem for stem, paths in stem_groups.items() if len(paths) > 1}
+    collisions = sorted(
+        collision_stems,
+        key=lambda value: (natural_sort_key(value), value),
+    )
+
+    files: List[FlatDiscoveredFile] = []
+    for image_path in valid_images:
+        stat_result = image_path.stat()
+        stem_key = image_path.stem.casefold()
+        target_name = (
+            f"{image_path.stem}__{image_path.suffix.lstrip('.').lower()}.pdf"
+            if stem_key in collision_stems
+            else f"{image_path.stem}.pdf"
+        )
+        files.append(
+            FlatDiscoveredFile(
+                file_name=image_path.name,
+                relative_path=image_path.name,
+                absolute_path=str(image_path),
+                size=stat_result.st_size,
+                mtime_ns=stat_result.st_mtime_ns,
+                content_fingerprint=compute_sha256(image_path),
+                target_relative_pdf=target_name,
+            )
+        )
+
+    return FlatDiscoveryResult(
+        input_root=str(resolved_root),
+        output_root=str(resolved_output),
+        files=files,
+        image_count=len(files),
+        unsupported_count=unsupported_count,
+        collisions=collisions,
     )
 
 

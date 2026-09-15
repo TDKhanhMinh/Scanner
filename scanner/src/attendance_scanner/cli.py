@@ -11,6 +11,7 @@ from attendance_scanner.contracts import (
     BatchPeriod,
     DiscoveryResult,
     ExportMode,
+    FlatExportMode,
     OutputNotWritableError,
     ReviewGroup,
     ScanMode,
@@ -42,6 +43,7 @@ from attendance_scanner.events import (
     ScanPlanEvent,
     serialize_event,
 )
+from attendance_scanner.flat_batch import run_flat_scan
 from attendance_scanner.quick_scan import execute_quick_scan
 from attendance_scanner.state import Manifest, ManifestStore, get_default_state_dir
 
@@ -405,6 +407,35 @@ def create_parser() -> argparse.ArgumentParser:
         help="Include additional safe detector diagnostics",
     )
 
+    flat_parser = subparsers.add_parser(
+        "scan-flat",
+        help="Process images directly inside one folder (JSONL)",
+    )
+    flat_parser.add_argument("--input", "-i", required=True, type=str)
+    flat_parser.add_argument("--output", "-o", required=False, type=str, default=None)
+    flat_parser.add_argument(
+        "--export-mode",
+        choices=["per-image", "merged"],
+        default="per-image",
+        help="Flat output strategy (default: per-image)",
+    )
+    flat_parser.add_argument(
+        "--mode",
+        choices=["gray", "bw", "color", "smart_document"],
+        default="gray",
+    )
+    flat_parser.add_argument(
+        "--detector-mode",
+        choices=list(ALL_DETECTOR_MODES),
+        default=DEFAULT_DETECTOR_MODE,
+    )
+    flat_parser.add_argument(
+        "--orientation",
+        choices=["auto", "landscape", "portrait"],
+        default="auto",
+    )
+    flat_parser.add_argument("--workers", "-w", type=int, default=3)
+
     # scan-batch subcommand
     scan_parser = subparsers.add_parser(
         "scan-batch",
@@ -597,6 +628,25 @@ def handle_scan_one(args: argparse.Namespace) -> int:
     return 0 if event.success else 1
 
 
+def handle_scan_flat(args: argparse.Namespace) -> int:
+    """Execute a flat-folder scan and stream its typed JSONL events."""
+    try:
+        export_mode = FlatExportMode(str(args.export_mode).replace("-", "_").upper())
+        result = run_flat_scan(
+            args.input,
+            args.output,
+            export_mode=export_mode,
+            mode=args.mode,
+            detector_mode=args.detector_mode,
+            orientation=args.orientation,
+            workers=args.workers,
+            emit=emit_jsonl_event,
+        )
+        return result.exit_code
+    except Exception as exc:
+        return _report_cli_error(exc, operation="request")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Main CLI entrypoint."""
     configure_stdio()
@@ -615,6 +665,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return handle_plan(args)
     elif args.command == "scan-one":
         return handle_scan_one(args)
+    elif args.command == "scan-flat":
+        return handle_scan_flat(args)
     elif args.command == "scan-batch":
         return handle_scan_batch(args)
     else:

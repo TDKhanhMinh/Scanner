@@ -16,6 +16,7 @@ import {
   isScanCompletedEvent,
   isQuickScanCompletedEvent,
   isFlatScanPlanEvent,
+  isFlatScanProgressEvent,
   isFlatFileCompletedEvent,
   isFlatScanCompletedEvent,
 } from "@/types/scanner";
@@ -338,11 +339,27 @@ describe("eventParser", () => {
         orientation: "auto",
         totalFiles: 5,
         filesToProcess: 5,
-        unchangedFiles: 0,
-        expectedArtifacts: 1,
+         unchangedFiles: 0,
+         expectedArtifacts: 1,
+         unsupportedCount: 0,
       }),
     );
     expect(flatPlan && isFlatScanPlanEvent(flatPlan)).toBe(true);
+
+    const flatProgress = parseScannerEvent(
+      JSON.stringify({
+        protocolVersion: 1,
+        type: "flat_scan_progress",
+        timestamp: "2026-09-14T00:00:00.500Z",
+        relativePath: "page.jpg",
+        completedSources: 1,
+        totalSources: 5,
+        status: "success",
+        message: null,
+        durationMs: 1000,
+      }),
+    );
+    expect(flatProgress && isFlatScanProgressEvent(flatProgress)).toBe(true);
 
     const flatFile = parseScannerEvent(
       JSON.stringify({
@@ -374,9 +391,14 @@ describe("eventParser", () => {
         success: 5,
         warning: 0,
         failed: 0,
-        skipped: 0,
-        durationMs: 5000,
-        exitCode: 0,
+         skipped: 0,
+         unsupportedCount: 0,
+         durationMs: 5000,
+         exitCode: 0,
+         artifactStatus: "committed",
+         artifactRelativePath: "input_merged.pdf",
+         artifactErrorCode: null,
+         artifactMessage: null,
       }),
     );
     expect(flatCompleted && isFlatScanCompletedEvent(flatCompleted)).toBe(true);

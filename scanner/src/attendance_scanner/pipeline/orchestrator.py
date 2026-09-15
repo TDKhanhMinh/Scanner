@@ -598,6 +598,12 @@ def scan_one(
         detector_name = v2_detection.detector_version
         detector_mode_value = normalized_detector_mode
         detector_model_version = v2_detection.model_version
+        model_checksum = v2_detection.evidence.model_specific.get("modelSha256")
+        detector_model_checksum = (
+            model_checksum
+            if isinstance(model_checksum, str) and len(model_checksum) == 64
+            else None
+        )
         detector_fallback_used = v2_detection.fallback_used or not document_detected
         detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = {
             "confidence": detection_confidence,
@@ -618,6 +624,7 @@ def scan_one(
         detector_name = "v1_cv"
         detector_mode_value = normalized_detector_mode or scan_mode.value
         detector_model_version = "opencv-classical"
+        detector_model_checksum = None
         detector_fallback_used = not document_detected
         detection_quality_summary = {
             "confidence": detection_confidence,
@@ -654,7 +661,7 @@ def scan_one(
         detector_name=detector_name,
         detector_mode=detector_mode_value,
         detector_model_version=detector_model_version,
-        detector_model_checksum=None,
+        detector_model_checksum=detector_model_checksum,
         detection_fallback_used=detector_fallback_used,
         detection_quality_summary=detection_quality_summary,
         detection_reason=detection_summary.primary_reason,

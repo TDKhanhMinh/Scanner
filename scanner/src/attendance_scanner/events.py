@@ -14,6 +14,7 @@ from attendance_scanner.contracts import (
     DetectionPreview,
     ExportMode,
     FileProcessingStatus,
+    FlatArtifactStatus,
     FlatExportMode,
     ReviewGroup,
     ScannerErrorCode,
@@ -343,6 +344,19 @@ class FlatScanPlanEvent(BaseEvent):
     files_to_process: int = Field(default=0, ge=0)
     unchanged_files: int = Field(default=0, ge=0)
     expected_artifacts: int = Field(default=0, ge=0)
+    unsupported_count: int = Field(default=0, ge=0)
+
+
+class FlatScanProgressEvent(BaseEvent):
+    """Source-processing progress, distinct from committed output results."""
+
+    type: Literal["flat_scan_progress"] = "flat_scan_progress"
+    relative_path: str = Field(min_length=1)
+    completed_sources: int = Field(ge=0)
+    total_sources: int = Field(ge=1)
+    status: Literal["success", "warning", "failed"]
+    message: Optional[str] = None
+    duration_ms: int = Field(default=0, ge=0)
 
 
 class FlatFileCompletedEvent(BaseEvent):
@@ -372,8 +386,13 @@ class FlatScanCompletedEvent(BaseEvent):
     warning: int = Field(default=0, ge=0)
     failed: int = Field(default=0, ge=0)
     skipped: int = Field(default=0, ge=0)
+    unsupported_count: int = Field(default=0, ge=0)
     duration_ms: int = Field(default=0, ge=0)
     exit_code: int = Field(default=0, ge=0)
+    artifact_status: FlatArtifactStatus = FlatArtifactStatus.NOT_REQUIRED
+    artifact_relative_path: Optional[str] = None
+    artifact_error_code: Optional[ScannerErrorCode] = None
+    artifact_message: Optional[str] = None
 
 
 ScannerEvent = Annotated[
@@ -385,6 +404,7 @@ ScannerEvent = Annotated[
         ScanCompletedEvent,
         QuickScanCompletedEvent,
         FlatScanPlanEvent,
+        FlatScanProgressEvent,
         FlatFileCompletedEvent,
         FlatScanCompletedEvent,
     ],

@@ -87,7 +87,7 @@ def _original_edge_line(
     direction /= max(length, 1e-9)
     normal = np.asarray((-direction[1], direction[0]), dtype=np.float64)
     return FittedDocumentLine(
-        label=label,  # type: ignore[arg-type]
+        label=label,
         anchor=start,
         direction=(float(direction[0]), float(direction[1])),
         normal_a=float(normal[0]),

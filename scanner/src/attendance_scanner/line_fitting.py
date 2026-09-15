@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Dict, List, Literal, Optional, Sequence, Tuple, cast
 
 import numpy as np
 from pydantic import Field, model_validator
@@ -79,7 +79,7 @@ def _angle_distance(first: float, second: float) -> float:
 
 def _line_residual(points: np.ndarray, anchor: np.ndarray, direction: np.ndarray) -> np.ndarray:
     offsets = points - anchor
-    return np.abs(offsets[:, 0] * direction[1] - offsets[:, 1] * direction[0])
+    return cast(np.ndarray, np.abs(offsets[:, 0] * direction[1] - offsets[:, 1] * direction[0]))
 
 
 def _fit_direction(points: np.ndarray) -> np.ndarray:
@@ -89,7 +89,7 @@ def _fit_direction(points: np.ndarray) -> np.ndarray:
     direction = direction / max(float(np.linalg.norm(direction)), 1e-9)
     if direction[0] < 0.0 or (abs(direction[0]) < 1e-9 and direction[1] < 0.0):
         direction = -direction
-    return direction
+    return cast(np.ndarray, direction)
 
 
 def _line_coefficients(anchor: np.ndarray, direction: np.ndarray) -> Tuple[float, float, float]:

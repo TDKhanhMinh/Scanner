@@ -39,6 +39,22 @@ class FlatExportMode(str, Enum):
     MERGED = "MERGED"
 
 
+class FlatArtifactStatus(str, Enum):
+    """Commit state of the flat-folder output artifact."""
+
+    NOT_REQUIRED = "not_required"
+    COMMITTED = "committed"
+    NOT_COMMITTED = "not_committed"
+
+
+class DocumentOrientation(str, Enum):
+    """Output orientation policy shared by generic document workflows."""
+
+    AUTO = "auto"
+    LANDSCAPE = "landscape"
+    PORTRAIT = "portrait"
+
+
 class PageType(str, Enum):
     """Known page roles for the current attendance template."""
 
@@ -588,3 +604,26 @@ class DiscoveryResult(BaseContract):
             reprocess_reasons=dict(self.reprocess_reasons),
             collisions=list(self.collisions),
         )
+
+
+class FlatDiscoveredFile(BaseContract):
+    """One image discovered directly inside a flat input folder."""
+
+    file_name: str = Field(min_length=1)
+    relative_path: str = Field(min_length=1)
+    absolute_path: str = Field(min_length=1)
+    size: int = Field(ge=0)
+    mtime_ns: int = Field(ge=0)
+    content_fingerprint: str = Field(min_length=64, max_length=64)
+    target_relative_pdf: str = Field(min_length=1)
+
+
+class FlatDiscoveryResult(BaseContract):
+    """Deterministic inventory for a non-recursive flat-folder workflow."""
+
+    input_root: str = Field(min_length=1)
+    output_root: str = Field(min_length=1)
+    files: List[FlatDiscoveredFile] = Field(default_factory=list)
+    image_count: int = Field(default=0, ge=0)
+    unsupported_count: int = Field(default=0, ge=0)
+    collisions: List[str] = Field(default_factory=list)

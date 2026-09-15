@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Literal, Optional, Sequence, Tuple, Union, cast
 
 import cv2
 import numpy as np
@@ -276,7 +276,7 @@ def _spatial_channels(
                     f"{array.shape}; configure output_layout",
                 )
         if layout == "nchw":
-            return body
+            return cast(np.ndarray, body)
         if layout == "nhwc":
             return np.transpose(body, (2, 0, 1))
         raise SegmentationAdapterError(
@@ -390,7 +390,7 @@ def decode_segmentation_output(
                 f"Unsupported activation {config.activation!r}",
             )
         probability = probability_channels[config.document_class_index]
-    return np.clip(probability, 0.0, 1.0).astype(np.float32, copy=False)
+    return cast(np.ndarray, np.clip(probability, 0.0, 1.0).astype(np.float32, copy=False))
 
 
 def _write_debug_artifacts(

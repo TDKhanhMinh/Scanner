@@ -7,6 +7,7 @@ import {
   DocumentOrientation,
   FlatExportMode,
   FlatFileCompletedEvent,
+  FlatScanProgressEvent,
   FlatScanCompletedEvent,
   FlatScanPlanEvent,
   PROTOCOL_VERSION,
@@ -26,6 +27,7 @@ const VALID_EVENT_TYPES = new Set([
   "scan_completed",
   "quick_scan_completed",
   "flat_scan_plan",
+  "flat_scan_progress",
   "flat_file_completed",
   "flat_scan_completed",
 ]);
@@ -501,12 +503,31 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         !VALID_ORIENTATIONS.includes(raw.orientation as DocumentOrientation) ||
         !isNonNegativeNumber(raw.totalFiles) ||
         !isNonNegativeNumber(raw.filesToProcess) ||
-        !isNonNegativeNumber(raw.unchangedFiles) ||
-        !isNonNegativeNumber(raw.expectedArtifacts)
+         !isNonNegativeNumber(raw.unchangedFiles) ||
+         !isNonNegativeNumber(raw.expectedArtifacts) ||
+         (raw.unsupportedCount !== undefined && !isNonNegativeNumber(raw.unsupportedCount))
       ) {
         return null;
       }
+      raw.unsupportedCount = raw.unsupportedCount ?? 0;
       return raw as unknown as FlatScanPlanEvent;
+    }
+
+    case "flat_scan_progress": {
+      if (
+        typeof raw.relativePath !== "string" ||
+        raw.relativePath.trim().length === 0 ||
+        !isNonNegativeNumber(raw.completedSources) ||
+        typeof raw.totalSources !== "number" ||
+        raw.totalSources < 1 ||
+        raw.completedSources > raw.totalSources ||
+        !["success", "warning", "failed"].includes(raw.status as string) ||
+        !isOptionalString(raw.message) ||
+        !isNonNegativeNumber(raw.durationMs)
+      ) {
+        return null;
+      }
+      return raw as unknown as FlatScanProgressEvent;
     }
 
     case "flat_file_completed": {
@@ -551,13 +572,31 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
         !isNonNegativeNumber(raw.totalProcessed) ||
         !isNonNegativeNumber(raw.success) ||
         !isNonNegativeNumber(raw.warning) ||
-        !isNonNegativeNumber(raw.failed) ||
-        !isNonNegativeNumber(raw.skipped) ||
-        !isNonNegativeNumber(raw.durationMs) ||
-        !isNonNegativeNumber(raw.exitCode)
+         !isNonNegativeNumber(raw.failed) ||
+         !isNonNegativeNumber(raw.skipped) ||
+         (raw.unsupportedCount !== undefined && !isNonNegativeNumber(raw.unsupportedCount)) ||
+         !isNonNegativeNumber(raw.durationMs) ||
+         !isNonNegativeNumber(raw.exitCode) ||
+         (raw.artifactStatus !== undefined &&
+           !["not_required", "committed", "not_committed"].includes(raw.artifactStatus as string)) ||
+         !isOptionalString(raw.artifactRelativePath) ||
+         !isOptionalString(raw.artifactErrorCode) ||
+         !isOptionalString(raw.artifactMessage)
       ) {
         return null;
       }
+      if (
+        raw.artifactErrorCode !== undefined &&
+        raw.artifactErrorCode !== null &&
+        !VALID_SCANNER_ERROR_CODES.has(raw.artifactErrorCode)
+      ) {
+        return null;
+      }
+      raw.unsupportedCount = raw.unsupportedCount ?? 0;
+      raw.artifactRelativePath = raw.artifactRelativePath ?? null;
+      raw.artifactErrorCode = raw.artifactErrorCode ?? null;
+      raw.artifactMessage = raw.artifactMessage ?? null;
+      raw.artifactStatus = raw.artifactStatus ?? "not_required";
       return raw as unknown as FlatScanCompletedEvent;
     }
 

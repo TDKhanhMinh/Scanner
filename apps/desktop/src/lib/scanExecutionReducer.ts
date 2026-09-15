@@ -58,6 +58,8 @@ function eventKey(event: ScannerEvent): string {
       return `quick:${event.inputPath}:${event.timestamp}`;
     case "flat_scan_plan":
       return `flat_plan:${event.inputRoot}:${event.timestamp}`;
+    case "flat_scan_progress":
+      return `flat_progress:${event.relativePath}:${event.completedSources}:${event.timestamp}`;
     case "flat_file_completed":
       return `flat_file:${event.relativePath}:${event.timestamp}`;
     case "flat_scan_completed":
@@ -124,9 +126,14 @@ export function scanExecutionReducer(
       if (
         event.type === "quick_scan_completed" ||
         event.type === "flat_scan_plan" ||
+        event.type === "flat_scan_progress" ||
         event.type === "flat_file_completed" ||
         event.type === "flat_scan_completed"
       ) {
+        // FolderScanView owns the flat workflow state because its manifest,
+        // artifact and source-progress fields differ from attendance results.
+        // AppShell still routes these events centrally; this reducer is scoped
+        // to the attendance workflow and must not consume foreign events.
         return state;
       }
       const nextState = withSeenEvent(state, eventKey(event));

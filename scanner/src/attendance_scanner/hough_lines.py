@@ -228,7 +228,7 @@ def _cluster_segments(
                 mean_angle_deg=mean_angle,
                 mean_distance_px=mean_distance,
                 support=float(np.mean([segment.support for segment in cluster])),
-                orientation=orientation,  # type: ignore[arg-type]
+                orientation=orientation,
             )
         )
         for segment in cluster:

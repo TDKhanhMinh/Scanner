@@ -87,7 +87,46 @@ fn quick_scan_completed_event_is_parsed_and_validated() {
     let parsed = parse_quick_scan(&value).expect("quick scan event should be valid");
     assert_eq!(parsed.event_type, "quick_scan_completed");
     assert!(parsed.success);
-    assert_eq!(parsed.temp_pdf_path.as_deref(), Some("C:\\Temp\\quick_scan\\page.pdf"));
+    assert_eq!(
+        parsed.temp_pdf_path.as_deref(),
+        Some("C:\\Temp\\quick_scan\\page.pdf")
+    );
+}
+
+#[test]
+fn flat_scan_args_forward_export_mode_orientation_and_workers() {
+    let args = build_flat_scan_args(
+        r"D:\Flat Input",
+        r"D:\Flat Output",
+        "merged",
+        "gray",
+        "classic",
+        "auto",
+        2,
+    );
+    assert_eq!(
+        args,
+        vec![
+            "scan-flat",
+            "--input",
+            r"D:\Flat Input",
+            "--output",
+            r"D:\Flat Output",
+            "--export-mode",
+            "merged",
+            "--mode",
+            "gray",
+            "--detector-mode",
+            "classic",
+            "--orientation",
+            "auto",
+            "--workers",
+            "2",
+        ]
+    );
+    assert_eq!(normalize_flat_export_mode("MERGED"), Some("merged"));
+    assert_eq!(normalize_flat_export_mode("per-image"), Some("per-image"));
+    assert_eq!(normalize_flat_export_mode("grouped"), None);
 }
 
 #[test]
