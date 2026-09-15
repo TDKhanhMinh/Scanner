@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/scanner/AppShell";
-import { invokeFlatScan, listenScannerEvents } from "@/lib/scannerBridge";
+import { invokeFlatScan, listenScannerEvents, openOutputFolder } from "@/lib/scannerBridge";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ScannerEvent } from "@/types/scanner";
 
@@ -21,6 +21,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@/lib/scannerBridge", () => ({
   invokeFlatScan: vi.fn(),
+  openOutputFolder: vi.fn(),
   listenScannerEvents: vi.fn().mockResolvedValue(() => undefined),
   listenScannerDiagnostics: vi.fn().mockResolvedValue(() => undefined),
   planScan: vi.fn(),
@@ -37,11 +38,59 @@ describe("FolderScanView", () => {
     vi.clearAllMocks();
     vi.mocked(open).mockResolvedValue("D:/input");
     vi.mocked(invokeFlatScan).mockResolvedValue({ exitCode: 0 });
+    vi.mocked(openOutputFolder).mockResolvedValue(undefined);
     eventHandler = undefined;
     vi.mocked(listenScannerEvents).mockImplementation(async (callback) => {
       eventHandler = callback as (event: ScannerEvent) => void;
       return () => undefined;
     });
+  });
+
+  it("opens the completed output directory through the Tauri command", async () => {
+    render(<AppShell />);
+    fireEvent.click(screen.getByRole("tab", { name: "Thư mục tự do" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chọn thư mục" }));
+
+    await waitFor(() => expect(screen.getByDisplayValue("D:/input")).toBeInTheDocument());
+    act(() => {
+      eventHandler?.({
+        protocolVersion: 1,
+        type: "flat_scan_plan",
+        timestamp: "2026-09-14T00:00:00Z",
+        inputRoot: "D:/input",
+        outputRoot: "D:/input_pdf",
+        exportMode: "PER_IMAGE",
+        orientation: "auto",
+        totalFiles: 1,
+        filesToProcess: 1,
+        unchangedFiles: 0,
+        expectedArtifacts: 1,
+        unsupportedCount: 0,
+      });
+      eventHandler?.({
+        protocolVersion: 1,
+        type: "flat_scan_completed",
+        timestamp: "2026-09-14T00:00:01Z",
+        inputRoot: "D:/input",
+        outputRoot: "D:/input_pdf",
+        exportMode: "PER_IMAGE",
+        totalProcessed: 1,
+        success: 1,
+        warning: 0,
+        failed: 0,
+        skipped: 0,
+        unsupportedCount: 0,
+        durationMs: 100,
+        exitCode: 0,
+        artifactStatus: "committed",
+        artifactRelativePath: "page.pdf",
+        artifactErrorCode: null,
+        artifactMessage: null,
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mở thư mục xuất" }));
+    await waitFor(() => expect(openOutputFolder).toHaveBeenCalledWith("D:/input_pdf"));
   });
 
   it("starts a flat scan with selected export, orientation, and worker settings", async () => {

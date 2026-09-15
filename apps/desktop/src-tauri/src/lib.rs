@@ -1238,7 +1238,11 @@ fn hide_helper_windows() {
 fn open_output_folder(path: String) -> Result<(), String> {
     let folder_path = std::path::Path::new(&path);
     if !folder_path.exists() {
-        let _ = std::fs::create_dir_all(folder_path);
+        std::fs::create_dir_all(folder_path)
+            .map_err(|error| format!("Unable to create output folder: {error}"))?;
+    }
+    if !folder_path.is_dir() {
+        return Err("Output path is not a directory".to_string());
     }
     #[cfg(target_os = "windows")]
     {

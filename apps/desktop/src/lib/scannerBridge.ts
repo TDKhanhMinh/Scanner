@@ -102,8 +102,12 @@ export async function saveQuickScanPdf(
 ): Promise<void> {
   await invoke("save_quick_scan_pdf", {
     tempPath,
-    destinationPath,
+    targetPath: destinationPath,
   });
+}
+
+export async function openOutputFolder(path: string): Promise<void> {
+  await invoke("open_output_folder", { path });
 }
 
 export async function invokeFlatScan(request: FlatScanRequest): Promise<FlatScanRunOutcome> {

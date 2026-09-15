@@ -3,6 +3,7 @@
 import re
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 
 import attendance_scanner.flat_batch as flat_batch_module
@@ -12,10 +13,17 @@ from attendance_scanner.contracts import (
     FlatExportMode,
     ScannerError,
     ScannerErrorCode,
+    StateError,
 )
 from attendance_scanner.discovery import discover_flat_folder
 from attendance_scanner.flat_batch import run_flat_scan
 from attendance_scanner.flat_state import FLAT_MANIFEST_FILENAME, FlatManifestStore
+
+
+@pytest.fixture(autouse=True)
+def isolate_flat_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Keep internal flat manifests out of the developer's real AppData."""
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
 
 
 def _write_image(path: Path, *, color: tuple[int, int, int] = (245, 245, 245)) -> Path:
@@ -81,7 +89,9 @@ def test_flat_per_image_scan_is_incremental_and_manifest_isolated(tmp_path: Path
     assert (output / "page1.pdf").is_file()
     assert (output / "page2.pdf").is_file()
     manifest = FlatManifestStore(output).load(root)
-    assert (output / FLAT_MANIFEST_FILENAME).is_file()
+    state_path = FlatManifestStore(output).get_manifest_path(root)
+    assert state_path.is_file()
+    assert not (output / FLAT_MANIFEST_FILENAME).exists()
     assert set(manifest.entries) == {"page1.jpg", "page2.jpg"}
     assert all(entry.output_fingerprint for entry in manifest.entries.values())
 
@@ -95,6 +105,35 @@ def test_flat_per_image_scan_is_incremental_and_manifest_isolated(tmp_path: Path
     )
     assert changed_run.total_processed == 1
     assert changed_run.skipped == 1
+
+
+def test_flat_manifest_migrates_legacy_output_state_to_appdata(tmp_path: Path):
+    root = tmp_path / "input"
+    output = tmp_path / "output"
+    store = FlatManifestStore(output)
+    legacy = store.empty_manifest(root)
+    output.mkdir()
+    (output / FLAT_MANIFEST_FILENAME).write_text(
+        legacy.model_dump_json(by_alias=True),
+        encoding="utf-8",
+    )
+
+    loaded = store.load(root)
+
+    assert loaded.input_root == str(root.resolve())
+    assert store.get_manifest_path(root).is_file()
+    assert not (output / FLAT_MANIFEST_FILENAME).exists()
+
+
+def test_flat_manifest_save_maps_state_root_conflict_to_typed_error(tmp_path: Path):
+    state_root = tmp_path / "state-root"
+    state_root.write_text("conflicting file", encoding="utf-8")
+    store = FlatManifestStore(tmp_path / "output", state_root=state_root)
+
+    with pytest.raises(StateError) as error:
+        store.save(store.empty_manifest(tmp_path / "input"))
+
+    assert error.value.code == ScannerErrorCode.STATE_WRITE_FAILED
 
 
 def test_flat_manifest_persists_detector_provenance_and_reprocesses_model_change(

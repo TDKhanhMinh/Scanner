@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   listenScannerEvents,
   invokeQuickScan,
+  openOutputFolder,
   planScan,
   saveQuickScanPdf,
   scannerDiagnosticMessage,
@@ -66,7 +67,7 @@ describe("scannerBridge", () => {
     });
     expect(invoke).toHaveBeenNthCalledWith(2, "save_quick_scan_pdf", {
       tempPath: "C:/Temp/quick_scan/page.pdf",
-      destinationPath: "D:/output/page.pdf",
+      targetPath: "D:/output/page.pdf",
     });
   });
 
@@ -125,6 +126,12 @@ describe("scannerBridge", () => {
       manualOrder: null,
       skipGroups: null,
     });
+  });
+
+  it("opens an output directory through the native Tauri command", async () => {
+    await openOutputFolder("D:/output");
+
+    expect(invoke).toHaveBeenCalledWith("open_output_folder", { path: "D:/output" });
   });
 
   it("passes the selected period and export mode to both bridge commands", async () => {

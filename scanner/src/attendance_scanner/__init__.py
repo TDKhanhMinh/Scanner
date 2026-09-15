@@ -228,6 +228,7 @@ from attendance_scanner.flat_state import (
     FlatManifest,
     FlatManifestEntry,
     FlatManifestStore,
+    flat_manifest_id,
 )
 from attendance_scanner.geometry_validator import (
     GEOMETRY_VALIDATOR_VERSION,
@@ -601,6 +602,7 @@ __all__ = [
     "FlatManifest",
     "FlatManifestEntry",
     "FlatManifestStore",
+    "flat_manifest_id",
     "FileFingerprint",
     "compute_root_id",
     "get_default_state_dir",

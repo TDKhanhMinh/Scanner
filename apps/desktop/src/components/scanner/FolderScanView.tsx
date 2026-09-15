@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { openPath } from "@tauri-apps/plugin-opener";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, ScanLine } from "lucide-react";
 import { DetectorModeSelector } from "@/components/scanner/DetectorModeSelector";
 import { ScanModeSelector } from "@/components/scanner/ScanModeSelector";
 import { useExecutionCoordinator } from "@/components/scanner/executionCoordinator";
-import { invokeFlatScan, scannerErrorMessage } from "@/lib/scannerBridge";
+import { invokeFlatScan, openOutputFolder, scannerErrorMessage } from "@/lib/scannerBridge";
 import { loadUserPreferences, saveUserPreferences } from "@/lib/userPreferences";
 import type {
   DocumentOrientation,
@@ -200,6 +199,16 @@ export function FolderScanView() {
     }
   };
 
+  const handleOpenOutputFolder = async () => {
+    const target = outputRoot.trim();
+    if (!target || isBusy || !stats.completed) return;
+    try {
+      await openOutputFolder(target);
+    } catch (error: unknown) {
+      setErrorMessage(scannerErrorMessage(error));
+    }
+  };
+
   const progress = stats.filesToProcess > 0
     ? Math.min(100, Math.round((Math.max(stats.processed, stats.sourceProcessed) / stats.filesToProcess) * 100))
     : stats.completed ? 100 : 0;
@@ -386,7 +395,7 @@ export function FolderScanView() {
           </label>
           <button
             type="button"
-            onClick={() => void openPath(outputRoot)}
+            onClick={() => void handleOpenOutputFolder()}
             disabled={!outputRoot || !stats.completed || isBusy}
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           >

@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { ScanLine, Upload, FileDown, ExternalLink, RefreshCw } from "lucide-react";
+import { ScanLine, Upload, FileDown, ExternalLink, RefreshCw, FolderOpen } from "lucide-react";
 import { DetectorModeSelector } from "@/components/scanner/DetectorModeSelector";
 import { ScanModeSelector } from "@/components/scanner/ScanModeSelector";
 import { useExecutionCoordinator } from "@/components/scanner/executionCoordinator";
 import {
   invokeQuickScan,
+  openOutputFolder,
   saveQuickScanPdf,
   scannerErrorMessage,
 } from "@/lib/scannerBridge";
@@ -39,6 +40,18 @@ function polygonPoints(
 
 function sourceName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+export function parentDirectory(path: string): string {
+  const normalized = path.replace(/[\\/]+$/, "");
+  const separator = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
+  if (separator < 0) {
+    return /^[A-Za-z]:/.test(normalized) ? `${normalized.slice(0, 2)}.` : ".";
+  }
+  if (separator === 2 && /^[A-Za-z]:[\\/]$/.test(normalized.slice(0, 3))) {
+    return normalized.slice(0, 3);
+  }
+  return separator > 0 ? normalized.slice(0, separator) : normalized;
 }
 
 export function QuickScanView() {
@@ -160,6 +173,21 @@ export function QuickScanView() {
     void openPath(result.savedPdfPath).catch(() => {
       setErrorMessage("Không thể mở file PDF đã lưu.");
     });
+  };
+
+  const handleOpenOutputFolder = async () => {
+    if (!result?.isSaved || !result.savedPdfPath || isBusy) return;
+    setErrorMessage("");
+    if (!beginExecution("quick_scan")) return;
+    setIsProcessing(true);
+    try {
+      await openOutputFolder(parentDirectory(result.savedPdfPath));
+    } catch (error: unknown) {
+      setErrorMessage(scannerErrorMessage(error));
+    } finally {
+      setIsProcessing(false);
+      endExecution("quick_scan");
+    }
   };
 
   const preview = result?.detectionPreview;
@@ -293,7 +321,7 @@ export function QuickScanView() {
             Bật diagnostics
           </label>
           <div className="rounded-xl border border-border/80 bg-card p-4 md:col-span-2 xl:col-span-2">
-            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
+            <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-1">
               <button
                 type="button"
                 onClick={() => void handleSavePdf()}
@@ -311,6 +339,15 @@ export function QuickScanView() {
               >
                 <ExternalLink className="h-4 w-4" />
                 Mở PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleOpenOutputFolder()}
+                disabled={!result?.isSaved || !result.savedPdfPath || isBusy}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FolderOpen className="h-4 w-4" />
+                Mở thư mục
               </button>
               <button
                 type="button"

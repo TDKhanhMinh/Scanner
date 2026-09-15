@@ -3,7 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listen } from "@tauri-apps/api/event";
 import { AppShell } from "@/components/scanner/AppShell";
-import { invokeQuickScan, saveQuickScanPdf } from "@/lib/scannerBridge";
+import { parentDirectory } from "@/components/scanner/QuickScanView";
+import { invokeQuickScan, openOutputFolder, saveQuickScanPdf } from "@/lib/scannerBridge";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -22,6 +23,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@/lib/scannerBridge", () => ({
   invokeQuickScan: vi.fn(),
+  openOutputFolder: vi.fn(),
   saveQuickScanPdf: vi.fn(),
   listenScannerEvents: vi.fn().mockResolvedValue(() => undefined),
   listenScannerDiagnostics: vi.fn().mockResolvedValue(() => undefined),
@@ -74,6 +76,7 @@ describe("QuickScanView", () => {
     vi.mocked(invokeQuickScan).mockResolvedValue(quickResult);
     vi.mocked(save).mockResolvedValue("D:/output/page.pdf");
     vi.mocked(saveQuickScanPdf).mockResolvedValue(undefined);
+    vi.mocked(openOutputFolder).mockResolvedValue(undefined);
     dragDropHandler = undefined;
     vi.mocked(listen).mockImplementation(async (channel, callback) => {
       if (channel === "tauri://drag-drop") {
@@ -81,6 +84,12 @@ describe("QuickScanView", () => {
       }
       return () => undefined;
     });
+  });
+
+  it("resolves relative saved PDF paths to their containing directories", () => {
+    expect(parentDirectory("page.pdf")).toBe(".");
+    expect(parentDirectory("C:page.pdf")).toBe("C:.");
+    expect(parentDirectory("C:\\page.pdf")).toBe("C:\\");
   });
 
   it("ignores native drag-drop while Quick Scan is hidden", () => {
@@ -127,6 +136,9 @@ describe("QuickScanView", () => {
       "D:/output/page.pdf",
     ));
     expect(screen.getByRole("button", { name: "Mở PDF" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mở thư mục" }));
+    await waitFor(() => expect(openOutputFolder).toHaveBeenCalledWith("D:/output"));
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Mở PDF" }));
