@@ -551,3 +551,61 @@ fn unstructured_stderr_uses_safe_fallback_message() {
         "Scanner sidecar emitted an unstructured diagnostic."
     );
 }
+
+#[test]
+fn save_quick_scan_pdf_with_root_copies_and_commits_cleanly() {
+    let base = std::env::temp_dir().join(format!(
+        "attendance-scanner-quick-save-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos()
+    ));
+    let temp_root = base.join("temp_root");
+    let dest_dir = base.join(r"Thư Mục Xuất\Nhân Viên");
+    fs::create_dir_all(&temp_root).expect("temp_root should be created");
+    fs::create_dir_all(&dest_dir).expect("dest_dir should be created");
+
+    let temp_pdf = temp_root.join("quick_test_page.pdf");
+    fs::write(&temp_pdf, b"%PDF-1.4 test content").expect("temp pdf should be written");
+
+    let dest_pdf = dest_dir.join("ket_qua.pdf");
+    let result = save_quick_scan_pdf_with_root(
+        &temp_root,
+        temp_pdf.to_string_lossy().to_string(),
+        dest_pdf.to_string_lossy().to_string(),
+        true,
+    );
+
+    assert!(result.is_ok(), "save_quick_scan_pdf_with_root failed: {:?}", result);
+    let saved_path = result.unwrap();
+    assert!(!saved_path.starts_with(r"\\?\"), "saved path should not have verbatim prefix: {}", saved_path);
+    assert!(Path::new(&saved_path).is_file(), "saved file should exist at {}", saved_path);
+    assert_eq!(
+        fs::read(&saved_path).expect("saved file should be readable"),
+        b"%PDF-1.4 test content"
+    );
+    assert!(!temp_pdf.exists(), "temp file should have been cleaned up after save");
+
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn strip_verbatim_prefix_normalizes_windows_paths() {
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"\\?\C:\Users\test.pdf")),
+            PathBuf::from(r"C:\Users\test.pdf")
+        );
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"\\?\UNC\server\share\test.pdf")),
+            PathBuf::from(r"\\server\share\test.pdf")
+        );
+    }
+    assert_eq!(
+        strip_verbatim_prefix(Path::new(r"D:\folder\test.pdf")),
+        PathBuf::from(r"D:\folder\test.pdf")
+    );
+}
+

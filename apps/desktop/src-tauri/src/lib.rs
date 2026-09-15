@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1167,20 +1167,33 @@ fn resolve_non_overwriting_target(target: &Path) -> Result<PathBuf, String> {
     Err("Unable to find an unused PDF destination name".to_string())
 }
 
+fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let path_str = path.to_string_lossy();
+        if let Some(stripped) = path_str.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{stripped}"));
+        }
+        if let Some(stripped) = path_str.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
 fn canonicalize_pdf_destination_parent(target_parent: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(target_parent).map_err(|error| error.to_string())?;
     fs::canonicalize(target_parent).map_err(|error| error.to_string())
 }
 
-fn save_quick_scan_pdf_to_target(
-    app: &tauri::AppHandle,
+fn save_quick_scan_pdf_with_root(
+    temp_root: &Path,
     temp_path: String,
     target_path: String,
     avoid_overwrite: bool,
 ) -> Result<String, String> {
-    let temp_root = quick_scan_temp_root(app).map_err(|error| format!("{error:?}"))?;
-    reject_reparse_components(&temp_root)?;
-    let canonical_root = fs::canonicalize(&temp_root).map_err(|error| error.to_string())?;
+    reject_reparse_components(temp_root)?;
+    let canonical_root = fs::canonicalize(temp_root).map_err(|error| error.to_string())?;
     let requested_temp = PathBuf::from(temp_path);
     reject_reparse_components(&requested_temp)?;
     reject_reparse_point(&requested_temp)?;
@@ -1257,7 +1270,10 @@ fn save_quick_scan_pdf_to_target(
         .join(format!(".{target_name}.tmp.{nonce}"));
     fs::copy(&canonical_temp, &staging).map_err(|error| error.to_string())?;
     let copy_result = (|| -> Result<(), String> {
-        let file = File::open(&staging).map_err(|error| error.to_string())?;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&staging)
+            .map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
         // Close the staging handle before MoveFileExW/rename. Windows may
         // reject the commit while this handle still owns the file.
@@ -1292,7 +1308,18 @@ fn save_quick_scan_pdf_to_target(
     }
     let _ = fs::remove_file(&staging);
     let _ = fs::remove_file(&canonical_temp);
-    Ok(target.to_string_lossy().to_string())
+    let final_target = strip_verbatim_prefix(&target);
+    Ok(final_target.to_string_lossy().to_string())
+}
+
+fn save_quick_scan_pdf_to_target(
+    app: &tauri::AppHandle,
+    temp_path: String,
+    target_path: String,
+    avoid_overwrite: bool,
+) -> Result<String, String> {
+    let temp_root = quick_scan_temp_root(app).map_err(|error| format!("{error:?}"))?;
+    save_quick_scan_pdf_with_root(&temp_root, temp_path, target_path, avoid_overwrite)
 }
 
 #[tauri::command]
@@ -1365,9 +1392,9 @@ fn hide_helper_windows() {
 
 #[tauri::command]
 fn open_output_folder(path: String) -> Result<(), String> {
-    let folder_path = std::path::Path::new(&path);
+    let folder_path = strip_verbatim_prefix(std::path::Path::new(&path));
     if !folder_path.exists() {
-        std::fs::create_dir_all(folder_path)
+        std::fs::create_dir_all(&folder_path)
             .map_err(|error| format!("Unable to create output folder: {error}"))?;
     }
     if !folder_path.is_dir() {
@@ -1376,7 +1403,7 @@ fn open_output_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
-            .arg(folder_path)
+            .arg(&folder_path)
             .spawn()
             .map_err(|e| format!("Unable to open folder in explorer: {e}"))?;
     }
