@@ -144,6 +144,49 @@ fn no_replace_move_never_overwrites_an_existing_target() {
     fs::remove_dir_all(root).expect("test directory should be removed");
 }
 
+#[cfg(windows)]
+#[test]
+fn destination_allows_reparse_backed_folder_but_temp_guard_rejects_it() {
+    let root = std::env::temp_dir().join(format!(
+        "attendance-scanner-reparse-boundary-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos()
+    ));
+    let real = root.join("real");
+    let junction = root.join("junction");
+    let exports = real.join("exports");
+    fs::create_dir_all(&exports).expect("real directory should be created");
+
+    let output = std::process::Command::new("cmd")
+        .args(["/D", "/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&real)
+        .output()
+        .expect("mklink should be available on Windows");
+    assert!(
+        output.status.success(),
+        "mklink /J failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let destination = junction.join("exports");
+    let resolved = canonicalize_pdf_destination_parent(&destination)
+        .expect("destination resolver should allow a reparse-backed parent");
+    assert_eq!(
+        resolved,
+        fs::canonicalize(&exports).expect("real path should canonicalize")
+    );
+    assert!(
+        reject_reparse_components(&junction).is_err(),
+        "the internal temp guard must still reject the junction"
+    );
+
+    fs::remove_dir(&junction).expect("junction should be removed without deleting its target");
+    fs::remove_dir_all(root).expect("test directory should be removed");
+}
+
 #[test]
 fn flat_scan_args_forward_export_mode_orientation_and_workers() {
     let args = build_flat_scan_args(

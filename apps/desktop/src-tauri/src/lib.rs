@@ -1167,6 +1167,11 @@ fn resolve_non_overwriting_target(target: &Path) -> Result<PathBuf, String> {
     Err("Unable to find an unused PDF destination name".to_string())
 }
 
+fn canonicalize_pdf_destination_parent(target_parent: &Path) -> Result<PathBuf, String> {
+    fs::create_dir_all(target_parent).map_err(|error| error.to_string())?;
+    fs::canonicalize(target_parent).map_err(|error| error.to_string())
+}
+
 fn save_quick_scan_pdf_to_target(
     app: &tauri::AppHandle,
     temp_path: String,
@@ -1216,11 +1221,11 @@ fn save_quick_scan_pdf_to_target(
         .parent()
         .ok_or_else(|| "PDF destination has no parent directory".to_string())?
         .to_path_buf();
-    reject_reparse_components(&target_parent)?;
-    fs::create_dir_all(&target_parent).map_err(|error| error.to_string())?;
-    reject_reparse_components(&target_parent)?;
-    let canonical_target_parent =
-        fs::canonicalize(&target_parent).map_err(|error| error.to_string())?;
+    // The destination is explicitly selected by the user (or is the source
+    // image's parent for Quick Scan). Allow normal Windows reparse-backed
+    // folders such as OneDrive, while keeping the strict reparse checks for
+    // the internal temporary PDF below.
+    let canonical_target_parent = canonicalize_pdf_destination_parent(&target_parent)?;
     let target = canonical_target_parent.join(
         target
             .file_name()
