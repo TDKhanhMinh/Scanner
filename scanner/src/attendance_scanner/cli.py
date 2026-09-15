@@ -399,7 +399,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--orientation",
         choices=["auto", "landscape", "portrait"],
         default="auto",
-        help="Output orientation (default: auto)",
+        help="Output orientation (default: auto, normalized to landscape)",
     )
     quick_parser.add_argument(
         "--debug-diagnostics",
@@ -433,6 +433,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--orientation",
         choices=["auto", "landscape", "portrait"],
         default="auto",
+        help="Output orientation (default: auto, normalized to landscape)",
     )
     flat_parser.add_argument("--workers", "-w", type=int, default=3)
 

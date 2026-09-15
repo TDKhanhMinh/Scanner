@@ -1127,7 +1127,11 @@ fn save_quick_scan_pdf(
     if !canonical_temp.starts_with(&canonical_root) || canonical_temp == canonical_root {
         return Err("quick-scan temp path is outside the allowed directory".to_string());
     }
-    if canonical_temp.extension().and_then(|value| value.to_str()) != Some("pdf") {
+    if !canonical_temp
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("pdf"))
+    {
         return Err("quick-scan temp path must be a PDF file".to_string());
     }
     if !canonical_temp.is_file() {
@@ -1145,7 +1149,11 @@ fn save_quick_scan_pdf(
             .map_err(|error| error.to_string())?
             .join(target)
     };
-    if target.extension().and_then(|value| value.to_str()) != Some("pdf") {
+    if !target
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("pdf"))
+    {
         return Err("PDF destination must use the .pdf extension".to_string());
     }
     let target_parent = target

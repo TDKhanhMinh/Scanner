@@ -100,10 +100,24 @@ export async function saveQuickScanPdf(
   tempPath: string,
   destinationPath: string,
 ): Promise<void> {
-  await invoke("save_quick_scan_pdf", {
-    tempPath,
-    targetPath: destinationPath,
-  });
+  try {
+    await invoke("save_quick_scan_pdf", {
+      tempPath,
+      targetPath: destinationPath,
+    });
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      ("kind" in error || "errorCode" in error)
+    ) {
+      throw error;
+    }
+    throw {
+      kind: "pdfWriteFailed",
+      message: typeof error === "string" ? error : "Quick Scan PDF save failed",
+    } satisfies ScannerBridgeError;
+  }
 }
 
 export async function openOutputFolder(path: string): Promise<void> {
@@ -180,6 +194,7 @@ const BRIDGE_ERROR_CODES: Record<string, string> = {
   missingPlan: "MISSING_SCAN_PLAN",
   sidecarExited: "SIDECAR_EXITED",
   internal: "SCANNER_INTERNAL_ERROR",
+  pdfWriteFailed: "PDF_WRITE_FAILED",
 };
 
 function hasOwnMessage(code: string): boolean {

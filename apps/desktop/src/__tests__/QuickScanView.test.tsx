@@ -92,6 +92,24 @@ describe("QuickScanView", () => {
     expect(parentDirectory("C:\\page.pdf")).toBe("C:\\");
   });
 
+  it("adds the PDF extension when the save dialog returns a path without one", async () => {
+    vi.mocked(save).mockResolvedValue("D:/output/page");
+    render(<AppShell />);
+    fireEvent.click(screen.getByRole("tab", { name: "Quét nhanh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chọn file ảnh" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Lưu PDF" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Lưu PDF" }));
+
+    await waitFor(() => expect(saveQuickScanPdf).toHaveBeenCalledWith(
+      "C:/Temp/quick_scan/quick-page.pdf",
+      "D:/output/page.pdf",
+    ));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Đã lưu file PDF thành công tại: D:/output/page.pdf",
+    );
+  });
+
   it("ignores native drag-drop while Quick Scan is hidden", () => {
     render(<AppShell />);
 
@@ -135,6 +153,9 @@ describe("QuickScanView", () => {
       "C:/Temp/quick_scan/quick-page.pdf",
       "D:/output/page.pdf",
     ));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Đã lưu file PDF thành công tại: D:/output/page.pdf",
+    );
     expect(screen.getByRole("button", { name: "Mở PDF" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Mở thư mục" }));

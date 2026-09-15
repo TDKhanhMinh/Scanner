@@ -368,7 +368,7 @@ export function FolderScanView() {
               disabled={isBusy}
               className="mt-2 min-h-11 w-full rounded-lg border border-border bg-background px-3"
             >
-              <option value="auto">Tự động</option>
+              <option value="auto">Tự động (chuẩn hóa ngang)</option>
               <option value="landscape">Khổ ngang</option>
               <option value="portrait">Khổ dọc</option>
             </select>

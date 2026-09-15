@@ -307,6 +307,10 @@ def test_flat_manifest_rebuilds_when_orientation_changes(tmp_path: Path):
     _write_image(root / "page.jpg")
 
     run_flat_scan(root, output, detector_mode="classic", orientation="auto", workers=1)
+    assert (
+        FlatManifestStore(output).load(root).entries["page.jpg"].preferred_orientation
+        == "landscape"
+    )
     changed = run_flat_scan(
         root,
         output,

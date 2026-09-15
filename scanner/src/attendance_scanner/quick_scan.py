@@ -76,7 +76,7 @@ def _encode_processed_preview(image: np.ndarray) -> str:
 def _orientation_for_pipeline(
     orientation: QuickScanOrientation,
 ) -> Literal["natural", "landscape", "portrait"]:
-    return "natural" if orientation == "auto" else orientation
+    return "landscape" if orientation == "auto" else orientation
 
 
 def _pdf_orientation(image: np.ndarray) -> Literal["LANDSCAPE", "PORTRAIT"]:

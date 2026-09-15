@@ -134,6 +134,18 @@ describe("scannerBridge", () => {
     expect(invoke).toHaveBeenCalledWith("open_output_folder", { path: "D:/output" });
   });
 
+  it("maps raw Tauri save errors to a PDF write bridge error", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce("PDF destination is not writable");
+
+    await expect(saveQuickScanPdf("C:/Temp/quick_scan/page.pdf", "D:/output/page.pdf"))
+      .rejects.toMatchObject({
+        kind: "pdfWriteFailed",
+        message: "PDF destination is not writable",
+      });
+
+    expect(scannerErrorMessage({ kind: "pdfWriteFailed" })).toContain("PDF_WRITE_FAILED");
+  });
+
   it("passes the selected period and export mode to both bridge commands", async () => {
     vi.mocked(invoke).mockResolvedValue({
       protocolVersion: 1,

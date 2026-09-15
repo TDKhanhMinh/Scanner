@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { ScanLine, Upload, FileDown, ExternalLink, RefreshCw, FolderOpen } from "lucide-react";
+import { ScanLine, Upload, FileDown, ExternalLink, RefreshCw, FolderOpen, CheckCircle2 } from "lucide-react";
 import { DetectorModeSelector } from "@/components/scanner/DetectorModeSelector";
 import { ScanModeSelector } from "@/components/scanner/ScanModeSelector";
 import { useExecutionCoordinator } from "@/components/scanner/executionCoordinator";
@@ -42,6 +42,10 @@ function sourceName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
+function ensurePdfExtension(path: string): string {
+  return /\.pdf$/i.test(path) ? path : `${path}.pdf`;
+}
+
 export function parentDirectory(path: string): string {
   const normalized = path.replace(/[\\/]+$/, "");
   const separator = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
@@ -65,6 +69,7 @@ export function QuickScanView() {
   const [debugDiagnostics, setDebugDiagnostics] = useState(preferences.debugDiagnostics);
   const [result, setResult] = useState<QuickScanResult | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const {
     activeWorkflow,
@@ -90,6 +95,7 @@ export function QuickScanView() {
       setInputPath(trimmed);
       setResult(null);
       setErrorMessage("");
+      setSaveSuccessMessage("");
       setIsProcessing(true);
       try {
         const nextResult = await invokeQuickScan({
@@ -149,22 +155,31 @@ export function QuickScanView() {
 
   const handleSavePdf = async () => {
     if (!result?.success || !result.tempPdfPath || result.isSaved || isBusy) return;
-    const selected = await save({
-      defaultPath: `${sourceName(result.inputPath).replace(/\.[^.]+$/, "")}.pdf`,
-      filters: [{ name: "PDF", extensions: ["pdf"] }],
-    });
-    if (typeof selected !== "string") return;
-    setErrorMessage("");
-    if (!beginExecution("quick_scan")) return;
-    setIsProcessing(true);
     try {
-      await saveQuickScanPdf(result.tempPdfPath, selected);
-      setResult({ ...result, savedPdfPath: selected, isSaved: true, tempPdfPath: null });
+      const selected = await save({
+        defaultPath: `${sourceName(result.inputPath).replace(/\.[^.]+$/, "")}.pdf`,
+        filters: [{ name: "PDF", extensions: ["pdf"] }],
+      });
+      if (typeof selected !== "string") return;
+      const selectedPath = selected.trim();
+      if (!selectedPath) return;
+      const targetPath = ensurePdfExtension(selectedPath);
+      setErrorMessage("");
+      setSaveSuccessMessage("");
+      if (!beginExecution("quick_scan")) return;
+      setIsProcessing(true);
+      try {
+        await saveQuickScanPdf(result.tempPdfPath, targetPath);
+        setResult({ ...result, savedPdfPath: targetPath, isSaved: true, tempPdfPath: null });
+        setSaveSuccessMessage(`Đã lưu file PDF thành công tại: ${targetPath}`);
+      } catch (error: unknown) {
+        setErrorMessage(scannerErrorMessage(error));
+      } finally {
+        setIsProcessing(false);
+        endExecution("quick_scan");
+      }
     } catch (error: unknown) {
       setErrorMessage(scannerErrorMessage(error));
-    } finally {
-      setIsProcessing(false);
-      endExecution("quick_scan");
     }
   };
 
@@ -289,6 +304,16 @@ export function QuickScanView() {
               {result.warning}
             </div>
           )}
+          {saveSuccessMessage && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm font-medium text-emerald-800 dark:text-emerald-300"
+            >
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <span className="flex-1 break-all">{saveSuccessMessage}</span>
+            </div>
+          )}
         </div>
 
         <section className="space-y-4" aria-label="Thiết lập xử lý ảnh">
@@ -305,7 +330,7 @@ export function QuickScanView() {
               disabled={isBusy}
               className="mt-2 min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm"
             >
-              <option value="auto">Tự động (khuyến nghị)</option>
+              <option value="auto">Tự động (chuẩn hóa ngang)</option>
               <option value="landscape">Khổ ngang</option>
               <option value="portrait">Khổ dọc</option>
             </select>
@@ -360,7 +385,13 @@ export function QuickScanView() {
               </button>
             </div>
             {result?.isSaved && result.savedPdfPath && (
-              <p className="mt-3 break-all text-xs text-muted-foreground">Đã lưu: {result.savedPdfPath}</p>
+              <div className="mt-3 flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5 text-xs text-emerald-800 dark:text-emerald-300">
+                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <div className="min-w-0 flex-1">
+                  <span className="font-semibold">Đã lưu:</span>{" "}
+                  <span className="break-all font-mono">{result.savedPdfPath}</span>
+                </div>
+              </div>
             )}
           </div>
         </section>

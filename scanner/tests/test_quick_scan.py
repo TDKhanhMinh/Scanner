@@ -45,6 +45,27 @@ def test_execute_quick_scan_returns_bounded_preview_and_temporary_pdf(tmp_path: 
     assert len(result.processed_preview_data_url) <= 2_000_000
 
 
+def test_execute_quick_scan_auto_normalizes_to_landscape(tmp_path: Path, monkeypatch):
+    source = _write_document(tmp_path / "document.png")
+    captured = {}
+    original_scan_one = quick_scan_module.scan_one
+
+    def capture_orientation(*args, **kwargs):
+        captured["preferred_orientation"] = kwargs.get("preferred_orientation")
+        return original_scan_one(*args, **kwargs)
+
+    monkeypatch.setattr(quick_scan_module, "scan_one", capture_orientation)
+
+    execute_quick_scan(
+        source,
+        tmp_path / "quick-temp",
+        detector_mode="classic",
+        orientation="auto",
+    )
+
+    assert captured["preferred_orientation"] == "landscape"
+
+
 def test_execute_quick_scan_returns_structured_failure_for_unsupported_input(tmp_path: Path):
     source = tmp_path / "document.txt"
     source.write_text("not an image", encoding="utf-8")

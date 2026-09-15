@@ -86,7 +86,7 @@ def _orientation_value(orientation: Union[DocumentOrientation, str]) -> FlatPipe
     value = orientation.value if isinstance(orientation, DocumentOrientation) else str(orientation)
     if value not in {"auto", "landscape", "portrait", "natural"}:
         raise ValueError(f"Unsupported flat-folder orientation: {orientation}")
-    return cast(FlatPipelineOrientation, "natural" if value == "auto" else value)
+    return cast(FlatPipelineOrientation, "landscape" if value == "auto" else value)
 
 
 def _pdf_config(result: SingleScanResult) -> PdfExportConfig:
