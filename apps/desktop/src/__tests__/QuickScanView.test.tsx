@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listen } from "@tauri-apps/api/event";
 import { AppShell } from "@/components/scanner/AppShell";
 import { parentDirectory } from "@/components/scanner/QuickScanView";
-import { invokeQuickScan, openOutputFolder, saveQuickScanPdf } from "@/lib/scannerBridge";
+import {
+  autoSaveQuickScanPdf,
+  invokeQuickScan,
+  openOutputFolder,
+  saveQuickScanPdf,
+} from "@/lib/scannerBridge";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -23,6 +28,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@/lib/scannerBridge", () => ({
   invokeQuickScan: vi.fn(),
+  autoSaveQuickScanPdf: vi.fn(),
   openOutputFolder: vi.fn(),
   saveQuickScanPdf: vi.fn(),
   listenScannerEvents: vi.fn().mockResolvedValue(() => undefined),
@@ -74,6 +80,7 @@ describe("QuickScanView", () => {
     vi.clearAllMocks();
     vi.mocked(open).mockResolvedValue("D:/input/page.jpg");
     vi.mocked(invokeQuickScan).mockResolvedValue(quickResult);
+    vi.mocked(autoSaveQuickScanPdf).mockResolvedValue("D:/input/page.pdf");
     vi.mocked(save).mockResolvedValue("D:/output/page.pdf");
     vi.mocked(saveQuickScanPdf).mockResolvedValue(undefined);
     vi.mocked(openOutputFolder).mockResolvedValue(undefined);
@@ -93,6 +100,7 @@ describe("QuickScanView", () => {
   });
 
   it("adds the PDF extension when the save dialog returns a path without one", async () => {
+    vi.mocked(autoSaveQuickScanPdf).mockRejectedValueOnce({ kind: "pdfWriteFailed" });
     vi.mocked(save).mockResolvedValue("D:/output/page");
     render(<AppShell />);
     fireEvent.click(screen.getByRole("tab", { name: "Quét nhanh" }));
@@ -130,7 +138,7 @@ describe("QuickScanView", () => {
     expect(invokeQuickScan).not.toHaveBeenCalled();
   });
 
-  it("processes one picked image, renders both previews, and saves then opens the PDF", async () => {
+  it("auto-saves one picked image beside the source and opens the result", async () => {
     render(<AppShell />);
     fireEvent.click(screen.getByRole("tab", { name: "Quét nhanh" }));
     fireEvent.click(screen.getByRole("button", { name: "Chọn file ảnh" }));
@@ -144,26 +152,24 @@ describe("QuickScanView", () => {
         debugDiagnostics: false,
       }),
     ));
+    await waitFor(() => expect(autoSaveQuickScanPdf).toHaveBeenCalledWith(
+      "C:/Temp/quick_scan/quick-page.pdf",
+      "D:/input/page.jpg",
+    ));
     expect(screen.getByAltText("Ảnh gốc Quick Scan")).toBeInTheDocument();
     expect(screen.getByAltText("Ảnh đã xử lý Quick Scan")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Mở PDF" })).toBeDisabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Lưu PDF" }));
-    await waitFor(() => expect(saveQuickScanPdf).toHaveBeenCalledWith(
-      "C:/Temp/quick_scan/quick-page.pdf",
-      "D:/output/page.pdf",
-    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mở PDF" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Lưu PDF" })).toBeDisabled();
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Đã lưu file PDF thành công tại: D:/output/page.pdf",
+      "Đã tự động lưu PDF tại: D:/input/page.pdf",
     );
-    expect(screen.getByRole("button", { name: "Mở PDF" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Mở thư mục" }));
-    await waitFor(() => expect(openOutputFolder).toHaveBeenCalledWith("D:/output"));
+    await waitFor(() => expect(openOutputFolder).toHaveBeenCalledWith("D:/input"));
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Mở PDF" }));
     });
-    expect(openPath).toHaveBeenCalledWith("D:/output/page.pdf");
+    expect(openPath).toHaveBeenCalledWith("D:/input/page.pdf");
   });
 });

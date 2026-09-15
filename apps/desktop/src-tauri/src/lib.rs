@@ -1111,13 +1111,69 @@ fn replace_file_same_volume(source: &Path, target: &Path) -> io::Result<()> {
     fs::rename(source, target)
 }
 
-#[tauri::command]
-fn save_quick_scan_pdf(
-    app: tauri::AppHandle,
+#[cfg(windows)]
+fn move_file_without_replace(source: &Path, target: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
+    let source_wide: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let target_wide: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    let moved = unsafe {
+        MoveFileExW(
+            source_wide.as_ptr(),
+            target_wide.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn move_file_without_replace(source: &Path, target: &Path) -> io::Result<()> {
+    // hard_link fails atomically with AlreadyExists and the staging file can
+    // then be removed, leaving the destination fully materialized.
+    fs::hard_link(source, target)
+}
+
+fn is_existing_target_error(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::AlreadyExists || matches!(error.raw_os_error(), Some(80 | 183))
+}
+
+fn resolve_non_overwriting_target(target: &Path) -> Result<PathBuf, String> {
+    if !target.exists() {
+        return Ok(target.to_path_buf());
+    }
+    reject_reparse_point(target)?;
+    if target.is_dir() {
+        return Err("PDF destination is a directory".to_string());
+    }
+    let parent = target
+        .parent()
+        .ok_or_else(|| "PDF destination has no parent directory".to_string())?;
+    let stem = target
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "PDF destination filename is invalid".to_string())?;
+    for counter in 1..=10_000u32 {
+        let candidate = parent.join(format!("{stem}_{counter}.pdf"));
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+        reject_reparse_point(&candidate)?;
+    }
+    Err("Unable to find an unused PDF destination name".to_string())
+}
+
+fn save_quick_scan_pdf_to_target(
+    app: &tauri::AppHandle,
     temp_path: String,
     target_path: String,
-) -> Result<(), String> {
-    let temp_root = quick_scan_temp_root(&app).map_err(|error| format!("{error:?}"))?;
+    avoid_overwrite: bool,
+) -> Result<String, String> {
+    let temp_root = quick_scan_temp_root(app).map_err(|error| format!("{error:?}"))?;
     reject_reparse_components(&temp_root)?;
     let canonical_root = fs::canonicalize(&temp_root).map_err(|error| error.to_string())?;
     let requested_temp = PathBuf::from(temp_path);
@@ -1170,12 +1226,17 @@ fn save_quick_scan_pdf(
             .file_name()
             .ok_or_else(|| "PDF destination has no filename".to_string())?,
     );
-    if target.exists() {
-        reject_reparse_point(&target)?;
-        if target.is_dir() {
-            return Err("PDF destination is a directory".to_string());
+    let mut target = if avoid_overwrite {
+        resolve_non_overwriting_target(&target)?
+    } else {
+        if target.exists() {
+            reject_reparse_point(&target)?;
+            if target.is_dir() {
+                return Err("PDF destination is a directory".to_string());
+            }
         }
-    }
+        target
+    };
 
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1202,14 +1263,66 @@ fn save_quick_scan_pdf(
         if source_size != staging_size {
             return Err("temporary PDF copy failed size verification".to_string());
         }
-        replace_file_same_volume(&staging, &target).map_err(|error| error.to_string())
+        if avoid_overwrite {
+            loop {
+                match move_file_without_replace(&staging, &target) {
+                    Ok(()) => break,
+                    Err(error) if is_existing_target_error(&error) => {
+                        target = resolve_non_overwriting_target(&target)?;
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+            Ok(())
+        } else {
+            replace_file_same_volume(&staging, &target).map_err(|error| error.to_string())
+        }
     })();
-    if copy_result.is_err() {
+    if let Err(error) = copy_result {
         let _ = fs::remove_file(&staging);
-        return copy_result;
+        return Err(error);
     }
+    let _ = fs::remove_file(&staging);
     let _ = fs::remove_file(&canonical_temp);
-    Ok(())
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn save_quick_scan_pdf(
+    app: tauri::AppHandle,
+    temp_path: String,
+    target_path: String,
+) -> Result<(), String> {
+    save_quick_scan_pdf_to_target(&app, temp_path, target_path, false).map(|_| ())
+}
+
+#[tauri::command]
+fn auto_save_quick_scan_pdf(
+    app: tauri::AppHandle,
+    temp_path: String,
+    source_path: String,
+) -> Result<String, String> {
+    let source = PathBuf::from(source_path);
+    let source = if source.is_absolute() {
+        source
+    } else {
+        std::env::current_dir()
+            .map_err(|error| error.to_string())?
+            .join(source)
+    };
+    if !source.is_file() {
+        return Err("Original image is no longer available".to_string());
+    }
+    let parent = source
+        .parent()
+        .ok_or_else(|| "Original image has no parent directory".to_string())?;
+    let stem = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Original image filename is invalid".to_string())?;
+    let target = parent.join(format!("{stem}.pdf"));
+    save_quick_scan_pdf_to_target(&app, temp_path, target.to_string_lossy().to_string(), true)
 }
 
 #[cfg(target_os = "windows")]
@@ -1290,6 +1403,7 @@ pub fn run() {
             quick_scan,
             scan_flat_folder,
             save_quick_scan_pdf,
+            auto_save_quick_scan_pdf,
             open_output_folder
         ])
         .setup(|app| {

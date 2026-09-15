@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   listenScannerEvents,
+  autoSaveQuickScanPdf,
   invokeQuickScan,
   openOutputFolder,
   planScan,
@@ -132,6 +133,21 @@ describe("scannerBridge", () => {
     await openOutputFolder("D:/output");
 
     expect(invoke).toHaveBeenCalledWith("open_output_folder", { path: "D:/output" });
+  });
+
+  it("forwards automatic Quick Scan save requests beside the source image", async () => {
+    vi.mocked(invoke).mockResolvedValue("D:/input/page.pdf");
+
+    const savedPath = await autoSaveQuickScanPdf(
+      "C:/Temp/quick_scan/page.pdf",
+      "D:/input/page.jpg",
+    );
+
+    expect(savedPath).toBe("D:/input/page.pdf");
+    expect(invoke).toHaveBeenCalledWith("auto_save_quick_scan_pdf", {
+      tempPath: "C:/Temp/quick_scan/page.pdf",
+      sourcePath: "D:/input/page.jpg",
+    });
   });
 
   it("maps raw Tauri save errors to a PDF write bridge error", async () => {

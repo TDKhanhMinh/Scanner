@@ -8,6 +8,7 @@ import { ScanModeSelector } from "@/components/scanner/ScanModeSelector";
 import { useExecutionCoordinator } from "@/components/scanner/executionCoordinator";
 import {
   invokeQuickScan,
+  autoSaveQuickScanPdf,
   openOutputFolder,
   saveQuickScanPdf,
   scannerErrorMessage,
@@ -108,6 +109,23 @@ export function QuickScanView() {
         setResult(nextResult);
         if (!nextResult.success) {
           setErrorMessage(nextResult.message ?? "Không thể xử lý ảnh.");
+        } else if (nextResult.tempPdfPath) {
+          try {
+            const savedPath = await autoSaveQuickScanPdf(
+              nextResult.tempPdfPath,
+              nextResult.inputPath,
+            );
+            setResult({
+              ...nextResult,
+              savedPdfPath: savedPath,
+              isSaved: true,
+              tempPdfPath: null,
+            });
+            setSaveSuccessMessage(`Đã tự động lưu PDF tại: ${savedPath}`);
+          } catch (error: unknown) {
+            // Keep the temp PDF so the manual Save PDF fallback remains available.
+            setErrorMessage(scannerErrorMessage(error));
+          }
         }
       } catch (error: unknown) {
         setErrorMessage(scannerErrorMessage(error));

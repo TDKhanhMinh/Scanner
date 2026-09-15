@@ -120,6 +120,30 @@ export async function saveQuickScanPdf(
   }
 }
 
+export async function autoSaveQuickScanPdf(
+  tempPath: string,
+  sourcePath: string,
+): Promise<string> {
+  try {
+    return await invoke<string>("auto_save_quick_scan_pdf", {
+      tempPath,
+      sourcePath,
+    });
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      ("kind" in error || "errorCode" in error)
+    ) {
+      throw error;
+    }
+    throw {
+      kind: "pdfWriteFailed",
+      message: typeof error === "string" ? error : "Quick Scan PDF auto-save failed",
+    } satisfies ScannerBridgeError;
+  }
+}
+
 export async function openOutputFolder(path: string): Promise<void> {
   await invoke("open_output_folder", { path });
 }

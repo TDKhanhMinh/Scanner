@@ -20,6 +20,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@/lib/scannerBridge", () => ({
   invokeQuickScan: vi.fn(),
+  autoSaveQuickScanPdf: vi.fn().mockResolvedValue("D:/input/page.pdf"),
   listenScannerEvents: vi.fn().mockResolvedValue(() => undefined),
   listenScannerDiagnostics: vi.fn().mockResolvedValue(() => undefined),
   planScan: vi.fn(),

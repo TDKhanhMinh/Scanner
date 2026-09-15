@@ -94,6 +94,57 @@ fn quick_scan_completed_event_is_parsed_and_validated() {
 }
 
 #[test]
+fn automatic_pdf_target_uses_a_unique_suffix_without_overwriting() {
+    let root = std::env::temp_dir().join(format!(
+        "attendance-scanner-auto-save-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("test directory should be created");
+    let target = root.join("page.pdf");
+    fs::write(&target, b"existing").expect("existing PDF should be created");
+
+    let first_candidate = resolve_non_overwriting_target(&target).expect("suffix is available");
+    assert_eq!(first_candidate, root.join("page_1.pdf"));
+    fs::write(&first_candidate, b"existing").expect("first suffix should be created");
+
+    let second_candidate =
+        resolve_non_overwriting_target(&target).expect("second suffix is available");
+    assert_eq!(second_candidate, root.join("page_2.pdf"));
+
+    fs::remove_dir_all(root).expect("test directory should be removed");
+}
+
+#[test]
+fn no_replace_move_never_overwrites_an_existing_target() {
+    let root = std::env::temp_dir().join(format!(
+        "attendance-scanner-no-replace-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be valid")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).expect("test directory should be created");
+    let staging = root.join("staging.pdf");
+    let target = root.join("page.pdf");
+    fs::write(&staging, b"new").expect("staging PDF should be created");
+    fs::write(&target, b"old").expect("existing PDF should be created");
+
+    let error = move_file_without_replace(&staging, &target)
+        .expect_err("no-replace move must reject an existing target");
+
+    assert!(is_existing_target_error(&error));
+    assert_eq!(
+        fs::read(&target).expect("target should remain readable"),
+        b"old"
+    );
+    assert!(staging.is_file());
+    fs::remove_dir_all(root).expect("test directory should be removed");
+}
+
+#[test]
 fn flat_scan_args_forward_export_mode_orientation_and_workers() {
     let args = build_flat_scan_args(
         r"D:\Flat Input",
