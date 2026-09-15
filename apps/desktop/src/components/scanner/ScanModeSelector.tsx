@@ -85,7 +85,7 @@ export function ScanModeSelector({
       </CardHeader>
 
       <CardContent>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {MODES.map((item) => {
             const isSelected = mode === item.id;
             const Icon = item.icon;
@@ -139,5 +139,5 @@ export function ScanModeSelector({
 // --- Hybrid Responsive Summary ---
 // mobile  (default / sm):  grid-cols-1, các card chế độ xếp dọc, touch target thoải mái
 // tablet  (md):            grid-cols-2 để nội dung mô tả vẫn dễ đọc
-// desktop (lg / xl):       grid-cols-4, hover variant rõ rệt, chiều cao thẻ đồng đều
+// desktop (xl / 2xl):      grid-cols-4, hover variant rõ rệt, chiều cao thẻ đồng đều
 // Interaction:             touch target >= 44px, nút tương tác phản hồi tức thời

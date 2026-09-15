@@ -205,7 +205,7 @@ export function FolderScanView() {
     : stats.completed ? 100 : 0;
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
+    <main className="mx-auto max-w-[1440px] space-y-6 p-4 sm:p-6 lg:p-8">
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -256,8 +256,14 @@ export function FolderScanView() {
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
+      <section className="space-y-6">
+        <section className="space-y-4" aria-label="Thiết lập xử lý ảnh">
+          <ScanModeSelector mode={mode} onSelectMode={setMode} disabled={isBusy} />
+          <DetectorModeSelector mode={detectorMode} onSelectMode={setDetectorMode} disabled={isBusy} />
+        </section>
+
+        <div className="grid items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="min-w-0 space-y-4">
           <div className="rounded-2xl border border-border/80 bg-card p-5">
             <fieldset>
               <legend className="text-sm font-semibold">Cách xuất PDF</legend>
@@ -335,8 +341,8 @@ export function FolderScanView() {
             ) : (
               <ul className="mt-3 divide-y divide-border/60 text-xs">
                 {results.map((item) => (
-                   <li key={item.relativePath} className="flex items-center justify-between gap-3 py-2">
-                     <span className="min-w-0 truncate font-mono">
+                   <li key={item.relativePath} className="flex items-start justify-between gap-3 py-2">
+                     <span className="min-w-0 flex-1 break-words font-mono">
                        {item.relativePath}
                        {item.outputRelativePath && (
                          <span className="ml-2 text-muted-foreground">→ {item.outputRelativePath}</span>
@@ -351,11 +357,9 @@ export function FolderScanView() {
               </ul>
             )}
           </div>
-        </div>
+          </div>
 
-        <aside className="space-y-4">
-          <ScanModeSelector mode={mode} onSelectMode={setMode} disabled={isBusy} />
-          <DetectorModeSelector mode={detectorMode} onSelectMode={setDetectorMode} disabled={isBusy} />
+          <aside className="min-w-0 space-y-4 2xl:sticky 2xl:top-24 2xl:self-start">
           <label className="block rounded-xl border border-border/80 bg-card p-4 text-sm">
             <span className="font-semibold">Chiều tài liệu</span>
             <select
@@ -389,7 +393,8 @@ export function FolderScanView() {
             <FolderOpen className="h-4 w-4" />
             Mở thư mục xuất
           </button>
-        </aside>
+          </aside>
+        </div>
       </section>
     </main>
   );

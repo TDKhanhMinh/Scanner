@@ -167,7 +167,7 @@ export function QuickScanView() {
   const finalCorners = preview?.finalCorners;
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
+    <main className="mx-auto max-w-[1440px] space-y-6 p-4 sm:p-6 lg:p-8">
       <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -192,19 +192,25 @@ export function QuickScanView() {
 
         <div className="mt-5 rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 p-8 text-center text-sm text-muted-foreground">
           <p>Thả một file ảnh vào cửa sổ ứng dụng để bắt đầu Quick Scan.</p>
-          {inputPath && <p className="mt-2 truncate font-mono text-xs text-foreground">{inputPath}</p>}
+          {inputPath && <p className="mt-2 break-all font-mono text-xs text-foreground">{inputPath}</p>}
           {isProcessing && <p className="mt-2 text-primary">Đang xử lý ảnh...</p>}
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-border/80 bg-card p-4">
+      <section className="space-y-6">
+        <div className="space-y-4">
+          <div className="grid min-w-0 gap-6 lg:grid-cols-2">
+            <div className="min-w-0 rounded-2xl border border-border/80 bg-card p-4">
               <h2 className="mb-3 text-sm font-semibold">Ảnh gốc và góc nhận diện</h2>
               {originalPreview ? (
                 <div className="relative overflow-hidden rounded-xl bg-secondary/40">
-                  <img src={originalPreview} alt="Ảnh gốc Quick Scan" className="block h-auto w-full" />
+                  <img
+                    src={originalPreview}
+                    alt="Ảnh gốc Quick Scan"
+                    width={preview?.sourceWidth}
+                    height={preview?.sourceHeight}
+                    className="block h-auto w-full"
+                  />
                   {finalCorners && preview && (
                     <svg
                       viewBox={`0 0 ${preview.sourceWidth} ${preview.sourceHeight}`}
@@ -228,13 +234,14 @@ export function QuickScanView() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-border/80 bg-card p-4">
+            <div className="min-w-0 rounded-2xl border border-border/80 bg-card p-4">
               <h2 className="mb-3 text-sm font-semibold">Ảnh đã nắn phẳng và làm sạch</h2>
               {result?.processedPreviewDataUrl ? (
                 <img
                   src={result.processedPreviewDataUrl}
                   alt="Ảnh đã xử lý Quick Scan"
                   className="block h-auto w-full rounded-xl bg-secondary/40"
+                  loading="lazy"
                 />
               ) : (
                 <div className="flex min-h-48 items-center justify-center rounded-xl bg-secondary/40 p-4 text-center text-xs text-muted-foreground">
@@ -256,9 +263,12 @@ export function QuickScanView() {
           )}
         </div>
 
-        <aside className="space-y-4">
+        <section className="space-y-4" aria-label="Thiết lập xử lý ảnh">
           <ScanModeSelector mode={mode} onSelectMode={setMode} disabled={isBusy} />
           <DetectorModeSelector mode={detectorMode} onSelectMode={setDetectorMode} disabled={isBusy} />
+        </section>
+
+        <section className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="Tùy chọn và thao tác">
           <label className="block rounded-xl border border-border/80 bg-card p-4 text-sm">
             <span className="font-semibold">Chiều tài liệu</span>
             <select
@@ -282,7 +292,7 @@ export function QuickScanView() {
             />
             Bật diagnostics
           </label>
-          <div className="rounded-xl border border-border/80 bg-card p-4">
+          <div className="rounded-xl border border-border/80 bg-card p-4 md:col-span-2 xl:col-span-2">
             <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
               <button
                 type="button"
@@ -316,7 +326,7 @@ export function QuickScanView() {
               <p className="mt-3 break-all text-xs text-muted-foreground">Đã lưu: {result.savedPdfPath}</p>
             )}
           </div>
-        </aside>
+        </section>
       </section>
     </main>
   );
