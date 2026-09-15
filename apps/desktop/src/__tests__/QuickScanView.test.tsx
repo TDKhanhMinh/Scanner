@@ -91,6 +91,18 @@ describe("QuickScanView", () => {
     expect(invokeQuickScan).not.toHaveBeenCalled();
   });
 
+  it("rejects unsupported native drag-drop files with a safe message", async () => {
+    render(<AppShell />);
+    fireEvent.click(screen.getByRole("tab", { name: "Quét nhanh" }));
+
+    dragDropHandler?.({ payload: { paths: ["D:/input/notes.txt"] } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Quick Scan chỉ hỗ trợ JPG, JPEG, PNG hoặc WebP.",
+    );
+    expect(invokeQuickScan).not.toHaveBeenCalled();
+  });
+
   it("processes one picked image, renders both previews, and saves then opens the PDF", async () => {
     render(<AppShell />);
     fireEvent.click(screen.getByRole("tab", { name: "Quét nhanh" }));

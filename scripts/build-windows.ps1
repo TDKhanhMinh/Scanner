@@ -79,8 +79,10 @@ foreach ($icon in @($tauriConfig.bundle.icon)) {
 $npmCommand = (Get-Command npm -ErrorAction Stop).Source
 if ([string]::IsNullOrWhiteSpace($SmokeTestInputRoot)) {
     $smokeInput = ""
+    $sidecarSmokeVerified = $false
 } else {
     $smokeInput = (Resolve-Path $SmokeTestInputRoot).Path
+    $sidecarSmokeVerified = $false
 }
 
 $psCommand = (Get-Command pwsh -ErrorAction SilentlyContinue)
@@ -108,6 +110,7 @@ if (-not [string]::IsNullOrWhiteSpace($smokeInput)) {
         "-NoProfile", "-File", $smokeScript, "-InputRoot", $smokeInput,
         "-SidecarPath", $sidecarPath
     ) "[3/4] Running packaged sidecar smoke/relaunch test"
+    $sidecarSmokeVerified = $true
 } else {
     Write-Host "[3/4] Packaged sidecar smoke test skipped (pass -SmokeTestInputRoot to run it)." -ForegroundColor Yellow
 }
@@ -161,6 +164,7 @@ $manifest = [ordered]@{
         modelArtifact = $null
         productionReady = $false
         packagedStartupVerified = $false
+        sidecarSmokeVerified = $sidecarSmokeVerified
         note = "Set modelArtifact only after approved model checksum and clean packaged validation."
     }
     generatedAtUtc = [DateTime]::UtcNow.ToString("O")

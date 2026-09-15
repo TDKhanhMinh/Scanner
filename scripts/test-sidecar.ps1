@@ -32,6 +32,15 @@ if ($ownsOutputRoot) {
         "attendance-scanner-sidecar-smoke-output-" + [Guid]::NewGuid().ToString("N")
     )
 }
+$flatInputRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
+    "attendance-scanner-flat-smoke-input-" + [Guid]::NewGuid().ToString("N")
+)
+$flatOutputRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
+    "attendance-scanner-flat-smoke-output-" + [Guid]::NewGuid().ToString("N")
+)
+$quickTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
+    "attendance-scanner-quick-smoke-temp-" + [Guid]::NewGuid().ToString("N")
+)
 
 if (-not (Test-Path -LiteralPath $SidecarPath -PathType Leaf)) {
     throw "Packaged sidecar not found at '$SidecarPath'. Run scripts\build-sidecar.ps1 first."
@@ -50,6 +59,18 @@ foreach ($requiredExtension in $requiredExtensions) {
     if ($foundExtensions -notcontains $requiredExtension) {
         throw "Smoke input must contain at least one $requiredExtension file."
     }
+}
+$smokeImages = @(
+    Get-ChildItem -LiteralPath $InputRoot -Recurse -File |
+        Where-Object { $_.Extension.ToLowerInvariant() -in $requiredExtensions } |
+        Select-Object -First 3
+)
+if ($smokeImages.Count -lt 3) {
+    throw "Smoke input must contain at least three supported image files."
+}
+New-Item -ItemType Directory -Force -Path $flatInputRoot | Out-Null
+foreach ($smokeImage in $smokeImages) {
+    Copy-Item -LiteralPath $smokeImage.FullName -Destination (Join-Path $flatInputRoot $smokeImage.Name)
 }
 
 function Invoke-Sidecar {
@@ -187,6 +208,54 @@ try {
     if ($pdfCount -lt 3) {
         throw "Packaged scan-batch produced $pdfCount PDFs; expected at least 3 representative outputs."
     }
+    $scanCompleted = @($scanEvents | Where-Object { $_.type -eq "scan_completed" }) | Select-Object -Last 1
+    if ($null -eq $scanCompleted -or [int]$scanCompleted.failed -ne 0) {
+        throw "Packaged scan-batch reported failed files; smoke verification is not clean."
+    }
+
+    $quick = Invoke-Sidecar -Arguments @(
+        "scan-one", "--input", $smokeImages[0].FullName, "--temp-root", $quickTempRoot,
+        "--detector-mode", "classic", "--orientation", "auto"
+    ) -AppDataPath $smokeAppData -TimeoutMilliseconds $timeoutMilliseconds
+    if ($quick.ExitCode -notin @(0, 2)) {
+        throw "Packaged scan-one smoke test failed with exit code $($quick.ExitCode): $($quick.Stderr)"
+    }
+    $quickEvents = @(Read-Events $quick.Stdout)
+    if ($quickEvents.Count -ne 1 -or $quickEvents[0].type -ne "quick_scan_completed" -or -not $quickEvents[0].success) {
+        throw "Packaged scan-one did not emit a successful quick_scan_completed event."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$quickEvents[0].tempPdfPath) -or
+        -not (Test-Path -LiteralPath ([string]$quickEvents[0].tempPdfPath) -PathType Leaf)) {
+        throw "Packaged scan-one did not create its temporary PDF artifact."
+    }
+
+    $flat = Invoke-Sidecar -Arguments @(
+        "scan-flat", "--input", $flatInputRoot, "--output", $flatOutputRoot,
+        "--export-mode", "per-image", "--detector-mode", "classic", "--workers", "1"
+    ) -AppDataPath $smokeAppData -TimeoutMilliseconds $timeoutMilliseconds
+    if ($flat.ExitCode -notin @(0, 2)) {
+        throw "Packaged scan-flat smoke test failed with exit code $($flat.ExitCode): $($flat.Stderr)"
+    }
+    $flatEvents = @(Read-Events $flat.Stdout)
+    $flatEventTypes = @($flatEvents | Select-Object -ExpandProperty type)
+    foreach ($requiredType in @("flat_scan_plan", "flat_file_completed", "flat_scan_completed")) {
+        if ($flatEventTypes -notcontains $requiredType) {
+            throw "Packaged scan-flat is missing the $requiredType event."
+        }
+    }
+    $flatPdfCount = @(Get-ChildItem -LiteralPath $flatOutputRoot -Filter "*.pdf" -File).Count
+    if ($flatPdfCount -lt 3) {
+        throw "Packaged scan-flat produced $flatPdfCount PDFs; expected at least 3 outputs."
+    }
+    $flatCompleted = @($flatEvents | Where-Object { $_.type -eq "flat_scan_completed" }) | Select-Object -Last 1
+    $flatFileEvents = @($flatEvents | Where-Object { $_.type -eq "flat_file_completed" })
+    if ($null -eq $flatCompleted -or
+        [int]$flatCompleted.failed -ne 0 -or
+        [string]$flatCompleted.artifactStatus -ne "committed" -or
+        $flatFileEvents.Count -ne $smokeImages.Count -or
+        @($flatFileEvents | Where-Object { [string]$_.status -eq "failed" }).Count -ne 0) {
+        throw "Packaged scan-flat did not produce a clean committed artifact for every file."
+    }
 
     $relaunchPlan = Invoke-Sidecar -Arguments @(
         "plan", "--input", $InputRoot, "--output", $OutputRoot
@@ -201,10 +270,12 @@ try {
     if ($relaunchEvents[0].filesToProcess -ne 0 -or $relaunchEvents[0].unchanged -lt 3) {
         throw "Packaged relaunch did not preserve unchanged manifest state."
     }
-    Write-Host "Packaged sidecar smoke test passed: version/help/plan/scan-batch and $pdfCount PDF outputs." -ForegroundColor Green
+    Write-Host "Packaged sidecar smoke test passed: version/help/plan/scan-batch/scan-one/scan-flat and $pdfCount+$flatPdfCount PDF outputs." -ForegroundColor Green
 } finally {
-    if (Test-Path -LiteralPath $smokeAppData) {
-        Remove-Item -LiteralPath $smokeAppData -Recurse -Force
+    foreach ($cleanupPath in @($smokeAppData, $flatInputRoot, $flatOutputRoot, $quickTempRoot)) {
+        if (Test-Path -LiteralPath $cleanupPath) {
+            Remove-Item -LiteralPath $cleanupPath -Recurse -Force
+        }
     }
     if ($ownsOutputRoot -and (Test-Path -LiteralPath $OutputRoot)) {
         Remove-Item -LiteralPath $OutputRoot -Recurse -Force

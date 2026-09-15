@@ -213,6 +213,7 @@ Quy trình đóng gói tạo ra file cài đặt độc lập, người dùng cu
 * ⚠️ [**V2_FAILURE_POLICY.md**](docs/V2_FAILURE_POLICY.md): Chính sách xử lý lỗi No-Silent-Failure và fallback an toàn.
 * 📐 [**V2_PERSPECTIVE_TRANSFORM.md**](docs/V2_PERSPECTIVE_TRANSFORM.md): Thuật toán nắn phẳng phối cảnh V2 không cưỡng bức khổ A4.
 * 📊 [**V2_PERFORMANCE_BENCHMARK.md**](docs/V2_PERFORMANCE_BENCHMARK.md): Phương pháp đo lường benchmark và tối ưu hóa tài nguyên RAM/CPU.
+* ⏱️ [**V4_WORKFLOW_SLA.md**](docs/V4_WORKFLOW_SLA.md): Đo SLA end-to-end và in-process trên fixture 12MP cố định.
 * 🧭 [**V2_DECISION_BENCHMARK.md**](docs/V2_DECISION_BENCHMARK.md): Harness so sánh detector và quyết định production dựa trên evidence.
 
 ---

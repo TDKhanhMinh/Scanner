@@ -373,6 +373,14 @@ from attendance_scanner.state import (
     set_manual_group_order,
     source_order_fingerprint,
 )
+from attendance_scanner.workflow_sla import (
+    SLA_BENCHMARK_VERSION,
+    SLA_THRESHOLDS,
+    SlaBoundaryResult,
+    SlaThreshold,
+    WorkflowSlaMeasurement,
+    evaluate_sla,
+)
 
 __version__ = "0.1.0"
 
@@ -582,6 +590,12 @@ __all__ = [
     "FLAT_PIPELINE_VERSION",
     "FlatScanRunResult",
     "run_flat_scan",
+    "SLA_BENCHMARK_VERSION",
+    "SLA_THRESHOLDS",
+    "SlaBoundaryResult",
+    "SlaThreshold",
+    "WorkflowSlaMeasurement",
+    "evaluate_sla",
     "FLAT_MANIFEST_FILENAME",
     "FLAT_MANIFEST_SCHEMA_VERSION",
     "FlatManifest",
