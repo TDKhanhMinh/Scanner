@@ -1259,6 +1259,9 @@ fn save_quick_scan_pdf_to_target(
     let copy_result = (|| -> Result<(), String> {
         let file = File::open(&staging).map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
+        // Close the staging handle before MoveFileExW/rename. Windows may
+        // reject the commit while this handle still owns the file.
+        drop(file);
         let source_size = fs::metadata(&canonical_temp)
             .map_err(|error| error.to_string())?
             .len();
