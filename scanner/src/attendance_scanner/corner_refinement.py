@@ -12,7 +12,7 @@ from pydantic import Field
 from attendance_scanner.contracts import BaseContract
 from attendance_scanner.detector import CanonicalCorners, DetectorPoint
 from attendance_scanner.geometry_validator import GeometryValidationConfig, validate_quadrilateral
-from attendance_scanner.line_fitting import FittedDocumentLine, FittedLineSet
+from attendance_scanner.line_fitting import EdgeLabel, FittedDocumentLine, FittedLineSet
 
 CORNER_REFINEMENT_VERSION = "1.0"
 
@@ -78,7 +78,7 @@ def _line_intersection(
 
 
 def _original_edge_line(
-    label: str,
+    label: EdgeLabel,
     start: DetectorPoint,
     end: DetectorPoint,
 ) -> FittedDocumentLine:
@@ -128,7 +128,7 @@ def refine_document_corners(
     width, height = image_size
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive dimensions")
-    labels = ("top", "right", "bottom", "left")
+    labels: Tuple[EdgeLabel, ...] = ("top", "right", "bottom", "left")
     original_points = before.as_list()
     original_lines = [
         _original_edge_line(labels[index], original_points[index], original_points[(index + 1) % 4])

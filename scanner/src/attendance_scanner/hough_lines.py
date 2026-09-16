@@ -217,8 +217,13 @@ def _cluster_segments(
         mean_distance = sum(item.distance_px for item in cluster_geometries) / len(
             cluster_geometries
         )
-        orientation = max(
-            ("horizontal", "vertical", "diagonal"),
+        orientation_candidates: Tuple[LineOrientation, ...] = (
+            "horizontal",
+            "vertical",
+            "diagonal",
+        )
+        orientation: LineOrientation = max(
+            orientation_candidates,
             key=lambda candidate: sum(segment.orientation == candidate for segment in cluster),
         )
         results.append(
