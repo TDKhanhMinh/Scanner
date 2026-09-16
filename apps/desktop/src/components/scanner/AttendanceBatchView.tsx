@@ -880,6 +880,7 @@ export function AttendanceBatchView() {
                     }
                     successCount={successCount}
                     warningCount={warningCount}
+                    occlusionRiskCount={execution.occlusionRiskCount}
                     failedCount={failedCount}
                     skippedCount={execution.skipped}
                     isScanning={isScanning}

@@ -37,6 +37,8 @@ const WARNING_MESSAGE_MAP: Record<string, string> = {
   IMAGE_DOWNSCALED: "Ảnh kích thước lớn — đã hạ tỷ lệ",
   SEGMENTATION_FALLBACK: "AI không khả dụng hoặc chưa đủ tin cậy — đã dùng fallback",
   DETECTION_AMBIGUOUS: "Nhiều khả năng nhận diện gần nhau — không tự cắt để tránh mất nội dung",
+  OCCLUSION_RISK:
+    "Có dấu hiệu tài liệu bị che khuất/chồng lên nhau — cần kiểm tra trước khi lưu PDF",
 };
 
 const DETECTION_REASON_MESSAGE_MAP: Record<string, string> = {

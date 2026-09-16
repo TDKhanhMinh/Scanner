@@ -292,3 +292,86 @@ def test_occlusion_penalty_not_applied_without_verified_cues():
     assert score.final_score == legacy
     assert score.breakdown["occlusion_penalty"].contribution == 0.0
     assert score.breakdown["occlusion_alignment"].contribution == 0.0
+
+
+def test_ambiguity_margin_defaults_to_three_percent():
+    assert CandidateScoringConfig().ambiguity_margin == 0.03
+
+
+def test_occlusion_tiebreaker_prefers_candidate_with_fewer_enclosed_ridges():
+    safe = _candidate(1, "mask_fit", mask_iou=0.8, geometry=0.8, edge=0.8)
+    risky = _candidate(2, "mask_fit", mask_iou=0.8, geometry=0.8, edge=0.8).model_copy(
+        update={
+            "evidence": {
+                "has_overlapping_cues": True,
+                "enclosed_occlusion_ridges": 1,
+                "aligns_with_occlusion_ridge": False,
+            }
+        }
+    )
+
+    result = rank_candidate_pool(
+        [safe, risky],
+        config=CandidateScoringConfig(minimum_final_score=0.0),
+    )
+
+    assert result.status == "selected"
+    assert result.selected_candidate_id == safe.candidate_id
+    assert result.top_score is not None
+    assert result.second_score is not None
+    assert result.top_score - result.second_score <= 0.03
+
+
+def test_occlusion_tiebreaker_prefers_aligned_candidate_when_ridge_count_matches():
+    unaligned = _candidate(1, "mask_fit", mask_iou=0.8, geometry=0.8, edge=0.8).model_copy(
+        update={
+            "evidence": {
+                "has_overlapping_cues": True,
+                "enclosed_occlusion_ridges": 0,
+                "aligns_with_occlusion_ridge": False,
+            }
+        }
+    )
+    aligned = _candidate(2, "mask_fit", mask_iou=0.8, geometry=0.8, edge=0.8).model_copy(
+        update={
+            "evidence": {
+                "has_overlapping_cues": True,
+                "enclosed_occlusion_ridges": 0,
+                "aligns_with_occlusion_ridge": True,
+            }
+        }
+    )
+
+    result = rank_candidate_pool(
+        [unaligned, aligned],
+        config=CandidateScoringConfig(minimum_final_score=0.0),
+    )
+
+    assert result.status == "selected"
+    assert result.selected_candidate_id == aligned.candidate_id
+
+
+def test_occlusion_tiebreaker_does_not_override_a_clear_score_winner():
+    risky_high_score = _candidate(
+        1, "mask_fit", mask_iou=0.99, geometry=0.95, edge=0.95
+    ).model_copy(
+        update={
+            "evidence": {
+                "has_overlapping_cues": True,
+                "enclosed_occlusion_ridges": 1,
+                "aligns_with_occlusion_ridge": False,
+            }
+        }
+    )
+    safe_low_score = _candidate(2, "mask_fit", mask_iou=0.55, geometry=0.55, edge=0.55)
+
+    result = rank_candidate_pool(
+        [risky_high_score, safe_low_score],
+        config=CandidateScoringConfig(minimum_final_score=0.0),
+    )
+
+    assert result.status == "selected"
+    assert result.selected_candidate_id == risky_high_score.candidate_id
+    assert result.top_score is not None
+    assert result.second_score is not None
+    assert result.top_score - result.second_score > 0.03

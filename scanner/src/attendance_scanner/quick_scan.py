@@ -143,6 +143,7 @@ def execute_quick_scan(
             error_code=None,
             message=None,
             warning=result.warning,
+            occlusion_risk=result.occlusion_risk,
         )
     except ScannerError as exc:
         if temporary_pdf is not None:
@@ -158,6 +159,7 @@ def execute_quick_scan(
             error_code=exc.code,
             message=_SAFE_ERROR_MESSAGES.get(exc.code, "Không thể hoàn tất Quick Scan."),
             warning=None,
+            occlusion_risk=False,
         )
     except Exception:  # noqa: BLE001 - quick scan must preserve a wire-safe error
         LOGGER.exception("Quick scan failed")
@@ -174,6 +176,7 @@ def execute_quick_scan(
             error_code=ScannerErrorCode.UNEXPECTED_ERROR,
             message="Quick Scan gặp lỗi nội bộ.",
             warning=None,
+            occlusion_risk=False,
         )
 
 

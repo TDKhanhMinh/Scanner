@@ -976,12 +976,18 @@ def run_batch(
         1 for result in file_results if result.status == FileProcessingStatus.WARNING
     )
     failed_count = sum(1 for result in file_results if result.status == FileProcessingStatus.FAILED)
+    occlusion_risk_count = sum(
+        1
+        for outcome in ordered_outcomes
+        if outcome.scan_result is not None and outcome.scan_result.occlusion_risk
+    )
     summary = BatchSummary(
         total_images=total,
         success=success_count,
         failed=failed_count,
         warning=warning_count,
         skipped=max(0, discovery.image_count - total),
+        occlusion_risk_count=occlusion_risk_count,
         duration_ms=int(round((time.perf_counter() - batch_started_at) * 1000.0)),
     )
     if scan_export_mode == ExportMode.PER_IMAGE:

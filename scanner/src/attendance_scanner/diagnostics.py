@@ -78,6 +78,13 @@ _DETECTION_USER_MESSAGES: Dict[DetectionFailureReason, str] = {
     ),
 }
 
+_DETECTION_WARNING_MESSAGES: Dict[str, str] = {
+    "OCCLUSION_RISK": (
+        "Có dấu hiệu tài liệu bị che khuất hoặc chồng lên nhau; PDF chưa được tự động lưu "
+        "để tránh lưu bản cắt sai."
+    ),
+}
+
 
 @dataclass(frozen=True)
 class ScannerErrorInfo:
@@ -140,6 +147,12 @@ def summarize_detection_failure(
         reason_codes=list(dict.fromkeys(reasons)),
         user_message=_DETECTION_USER_MESSAGES[primary],
     )
+
+
+def detection_warning_message(code: str) -> str:
+    """Return a user-safe message for a detection warning code."""
+    normalized = code.strip().upper()
+    return _DETECTION_WARNING_MESSAGES.get(normalized, normalized)
 
 
 def _technical_message(exc: BaseException) -> str:

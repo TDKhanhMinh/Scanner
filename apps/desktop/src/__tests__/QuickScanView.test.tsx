@@ -172,4 +172,36 @@ describe("QuickScanView", () => {
     });
     expect(openPath).toHaveBeenCalledWith("D:/input/page.pdf");
   });
+
+  it("blocks automatic save for occlusion risk but allows an explicit override", async () => {
+    vi.mocked(invokeQuickScan).mockResolvedValueOnce({
+      ...quickResult,
+      warning: "OCCLUSION_RISK",
+      occlusionRisk: true,
+    });
+
+    render(<AppShell />);
+    fireEvent.click(screen.getByRole("tab", { name: "Quét nhanh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chọn file ảnh" }));
+
+    expect(
+      await screen.findByText(
+        "Tự động lưu đã bị chặn để tránh lưu bản cắt sai. Bạn có thể xem lại preview rồi chọn “Lưu bất chấp”.",
+      ),
+    ).toBeInTheDocument();
+    expect(autoSaveQuickScanPdf).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Lưu bất chấp" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Lưu bất chấp" }));
+
+    await waitFor(() =>
+      expect(saveQuickScanPdf).toHaveBeenCalledWith(
+        "C:/Temp/quick_scan/quick-page.pdf",
+        "D:/output/page.pdf",
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Đã lưu file PDF thành công tại: D:/output/page.pdf",
+    );
+  });
 });

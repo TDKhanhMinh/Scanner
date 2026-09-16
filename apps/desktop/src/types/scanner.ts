@@ -138,13 +138,15 @@ export const VALID_SCANNER_WARNING_CODES = new Set<string>([
   "IMAGE_DOWNSCALED",
   "WARP_FALLBACK",
   "DOCUMENT_CLIPPED",
+  "OCCLUSION_RISK",
 ]);
 
 export type ScannerWarningCode =
   | "DOCUMENT_NOT_DETECTED"
   | "IMAGE_DOWNSCALED"
   | "WARP_FALLBACK"
-  | "DOCUMENT_CLIPPED";
+  | "DOCUMENT_CLIPPED"
+  | "OCCLUSION_RISK";
 
 export interface DiscoveredFile {
   employeeName: string;
@@ -215,6 +217,7 @@ export interface BatchSummary {
   failed: number;
   warning: number;
   skipped: number;
+  occlusionRiskCount?: number;
   durationMs?: number | null;
 }
 
@@ -339,6 +342,7 @@ export interface ScanCompletedEvent extends BaseEvent {
   failed: number;
   warning: number;
   skipped: number;
+  occlusionRiskCount?: number;
   durationMs: number;
 }
 
@@ -354,6 +358,7 @@ export interface QuickScanCompletedEvent extends BaseEvent {
   errorCode: ScannerErrorCode | null;
   message: string | null;
   warning: string | null;
+  occlusionRisk?: boolean;
 }
 
 export interface FlatScanPlanEvent extends BaseEvent {

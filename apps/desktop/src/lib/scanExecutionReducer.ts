@@ -16,6 +16,7 @@ export interface ScanExecutionState {
   failed: number;
   skipped: number;
   fallbackCount: number;
+  occlusionRiskCount: number;
   results: FileResultItem[];
   errorMessage: string;
   seenEventKeys: Set<string>;
@@ -38,6 +39,7 @@ export const initialScanExecutionState: ScanExecutionState = {
   failed: 0,
   skipped: 0,
   fallbackCount: 0,
+  occlusionRiskCount: 0,
   results: [],
   errorMessage: "",
   seenEventKeys: new Set<string>(),
@@ -87,6 +89,10 @@ function appendRecentResult(
   return [result, ...results].slice(0, MAX_RECENT_ACTIVITY);
 }
 
+function hasWarningCode(warning: string | null | undefined, code: string): boolean {
+  return warning?.split(",").some((item) => item.trim() === code) ?? false;
+}
+
 export function scanExecutionReducer(
   state: ScanExecutionState,
   action: ScanExecutionAction,
@@ -109,6 +115,7 @@ export function scanExecutionReducer(
         failed: 0,
         skipped: 0,
         fallbackCount: 0,
+        occlusionRiskCount: 0,
         results: [],
         errorMessage: "",
         seenEventKeys: new Set<string>(),
@@ -177,6 +184,9 @@ export function scanExecutionReducer(
             success: nextState.success + (isWarning ? 0 : 1),
             warning: nextState.warning + (isWarning ? 1 : 0),
             fallbackCount: nextState.fallbackCount + (event.documentDetected ? 0 : 1),
+            occlusionRiskCount:
+              nextState.occlusionRiskCount +
+              (hasWarningCode(event.warning, "OCCLUSION_RISK") ? 1 : 0),
             results: appendRecentResult(nextState.results, result),
           };
         }
@@ -210,6 +220,7 @@ export function scanExecutionReducer(
             warning: event.warning,
             failed: event.failed,
             skipped: event.skipped,
+            occlusionRiskCount: event.occlusionRiskCount ?? nextState.occlusionRiskCount,
             currentFile: "",
             currentEmployee: "",
           };

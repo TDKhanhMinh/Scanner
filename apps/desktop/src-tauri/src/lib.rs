@@ -134,6 +134,8 @@ pub struct QuickScanPayload {
     pub error_code: Option<String>,
     pub message: Option<String>,
     pub warning: Option<String>,
+    #[serde(default)]
+    pub occlusion_risk: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

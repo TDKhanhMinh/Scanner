@@ -158,6 +158,11 @@ class SingleScanResult:
             return None
         return ", ".join(self.warning_codes)
 
+    @property
+    def occlusion_risk(self) -> bool:
+        """Whether the selected document candidate carries an occlusion warning."""
+        return "OCCLUSION_RISK" in self.warning_codes
+
     def to_file_result(
         self,
         relative_path: str,
@@ -674,6 +679,9 @@ def scan_one(
             for k in ("selectedFitMethod", "baseFitMethod", "selectedSource"):
                 if k in v2_detection.metadata:
                     detection_quality_summary[k] = v2_detection.metadata[k]
+        detection_quality_summary["occlusionRisk"] = bool(
+            v2_detection.metadata.get("occlusionRisk", False)
+        )
         if debug_diagnostics and v2_detection.decision_trace is not None:
             detection_quality_summary.update(
                 {
@@ -692,6 +700,7 @@ def scan_one(
             "confidence": detection_confidence,
             "areaRatio": detection_area_ratio,
             "warningCount": len(unique_warnings),
+            "occlusionRisk": False,
         }
 
     detection_preview = None

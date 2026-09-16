@@ -15,7 +15,7 @@ from attendance_scanner.candidate_scoring import (
     CandidateScoringConfig,
     rank_candidate_pool,
 )
-from attendance_scanner.contracts import BaseContract
+from attendance_scanner.contracts import BaseContract, ScannerWarningCode
 from attendance_scanner.corner_refinement import (
     CornerRefinementConfig,
     refine_document_corners,
@@ -295,6 +295,7 @@ class HybridDocumentDetector:
             hough_evidence=hough_evidence,
             edge_map=edge_map,
         )
+        occlusion_risk = self._has_occlusion_risk(selected)
         refinement_metadata = self._refinement_wire_metadata(refinement_diagnostics)
         decision_path = self._decision_path(segmentation_state, ranking, selected)
         fallback_used = (
@@ -347,7 +348,7 @@ class HybridDocumentDetector:
                 ),
                 evidence=self._evidence(segmentation_output, selected),
                 fallback_used=False,
-                warnings=self._warnings(segmentation_state, ranking),
+                warnings=self._warnings(segmentation_state, ranking, selected),
                 timing=DetectionTiming(
                     segmentation_inference_ms=(
                         segmentation_output.detection.timing.segmentation_inference_ms
@@ -366,6 +367,7 @@ class HybridDocumentDetector:
                     "topCandidateScore": ranking.top_score,
                     "secondCandidateScore": ranking.second_score,
                     "candidateCount": len(scored_candidates.candidates),
+                    "occlusionRisk": occlusion_risk,
                     **refinement_metadata,
                 },
                 decision_trace=trace,
@@ -387,7 +389,7 @@ class HybridDocumentDetector:
             candidate_rankings=typed_candidate_rankings,
             evidence=self._evidence(segmentation_output, selected),
             fallback_used=fallback_used,
-            warnings=self._warnings(segmentation_state, ranking) + reason_codes,
+            warnings=self._warnings(segmentation_state, ranking, selected) + reason_codes,
             failure_code=failure_code,
             timing=DetectionTiming(total_detection_ms=total_ms),
             metadata={
@@ -397,6 +399,7 @@ class HybridDocumentDetector:
                 "topCandidateScore": ranking.top_score,
                 "secondCandidateScore": ranking.second_score,
                 "candidateCount": len(scored_candidates.candidates),
+                "occlusionRisk": occlusion_risk,
                 **refinement_metadata,
             },
             decision_trace=trace,
@@ -627,7 +630,11 @@ class HybridDocumentDetector:
         return "disagreement"
 
     @staticmethod
-    def _warnings(segmentation_state: str, ranking: CandidateRankingResult) -> List[str]:
+    def _warnings(
+        segmentation_state: str,
+        ranking: CandidateRankingResult,
+        selected: Optional[QuadrilateralCandidate] = None,
+    ) -> List[str]:
         warnings: List[str] = []
         if segmentation_state in {"failed", "ambiguous", "not_configured"}:
             warnings.append("SEGMENTATION_FALLBACK")
@@ -635,7 +642,17 @@ class HybridDocumentDetector:
             warnings.append("SEGMENTATION_LOW_CONFIDENCE")
         if ranking.status == "ambiguous":
             warnings.append("DETECTION_AMBIGUOUS")
+        if HybridDocumentDetector._has_occlusion_risk(selected):
+            warnings.append(ScannerWarningCode.OCCLUSION_RISK.value)
         return warnings
+
+    @staticmethod
+    def _has_occlusion_risk(candidate: Optional[QuadrilateralCandidate]) -> bool:
+        """Return true only for the selected candidate's verified enclosed ridge."""
+        if candidate is None or not bool(candidate.evidence.get("has_overlapping_cues", False)):
+            return False
+        count = candidate.evidence.get("enclosed_occlusion_ridges", 0)
+        return isinstance(count, int) and not isinstance(count, bool) and count > 0
 
     @staticmethod
     def _evidence(

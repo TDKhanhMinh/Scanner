@@ -22,6 +22,7 @@ export interface BatchProgressCardProps {
   totalCount: number;
   successCount: number;
   warningCount: number;
+  occlusionRiskCount?: number;
   failedCount: number;
   skippedCount: number;
   isScanning: boolean;
@@ -37,6 +38,7 @@ export function BatchProgressCard({
   totalCount,
   successCount,
   warningCount,
+  occlusionRiskCount = 0,
   failedCount,
   skippedCount,
   isScanning,
@@ -145,6 +147,17 @@ export function BatchProgressCard({
             </span>
           </div>
         </div>
+
+        {occlusionRiskCount > 0 && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="rounded-xl border border-orange-500/30 bg-orange-500/10 p-3 text-xs text-orange-800 dark:text-orange-200"
+          >
+            Có {occlusionRiskCount} file có nguy cơ tài liệu bị che khuất/chồng lên nhau. Hãy
+            kiểm tra các file cảnh báo trước khi sử dụng kết quả.
+          </div>
+        )}
 
         {/* Completion actions */}
         {isDone && outputReady && (

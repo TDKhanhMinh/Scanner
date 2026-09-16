@@ -327,6 +327,7 @@ describe("eventParser", () => {
     );
     expect(quick).not.toBeNull();
     expect(quick && isQuickScanCompletedEvent(quick)).toBe(true);
+    expect(quick && isQuickScanCompletedEvent(quick) && quick.occlusionRisk).toBe(false);
 
     const flatPlan = parseScannerEvent(
       JSON.stringify({

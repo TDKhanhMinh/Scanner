@@ -3,7 +3,7 @@
 import pytest
 
 from attendance_scanner.contracts import DetectionFailureReason, DetectionFailureSummary
-from attendance_scanner.diagnostics import summarize_detection_failure
+from attendance_scanner.diagnostics import detection_warning_message, summarize_detection_failure
 from attendance_scanner.events import FileCompletedEvent, deserialize_event, serialize_event
 from attendance_scanner.state import ManifestArtifact, ManifestEntry
 
@@ -23,6 +23,20 @@ def test_detection_failure_mapping_is_typed_and_user_safe():
     ]
     assert summary.user_message
     assert "CV_NO_CANDIDATE" not in summary.user_message
+
+
+def test_occlusion_risk_is_a_warning_not_a_detection_failure():
+    summary = summarize_detection_failure(
+        document_detected=True,
+        warning_codes=["OCCLUSION_RISK"],
+    )
+
+    assert summary.primary_reason is None
+    assert summary.reason_codes == []
+    assert summary.user_message is None
+    warning = detection_warning_message("occlusion_risk")
+    assert "chồng" in warning
+    assert "OCCLUSION_RISK" not in warning
 
 
 def test_detection_reason_event_fields_are_additive_and_v1_parser_round_trips():

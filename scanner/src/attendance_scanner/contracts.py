@@ -288,6 +288,7 @@ class ScannerWarningCode(str, Enum):
     IMAGE_DOWNSCALED = "IMAGE_DOWNSCALED"
     WARP_FALLBACK = "WARP_FALLBACK"
     DOCUMENT_CLIPPED = "DOCUMENT_CLIPPED"
+    OCCLUSION_RISK = "OCCLUSION_RISK"
 
 
 class DetectionFailureReason(str, Enum):
@@ -465,6 +466,7 @@ class BatchSummary(BaseContract):
     failed: int = 0
     warning: int = 0
     skipped: int = 0
+    occlusion_risk_count: int = Field(default=0, ge=0)
     duration_ms: Optional[int] = None
 
 

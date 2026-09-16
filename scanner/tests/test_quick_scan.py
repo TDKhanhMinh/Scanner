@@ -3,7 +3,9 @@
 import base64
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 import attendance_scanner.quick_scan as quick_scan_module
@@ -118,4 +120,29 @@ def test_scan_one_cli_emits_one_jsonl_event(tmp_path: Path, capsys):
     assert len(events) == 1
     assert events[0]["type"] == "quick_scan_completed"
     assert events[0]["success"] is True
+    assert events[0]["occlusionRisk"] is False
     assert events[0]["processedPreviewDataUrl"].startswith("data:image/jpeg;base64,")
+
+
+def test_execute_quick_scan_forwards_occlusion_risk_without_auto_save(tmp_path: Path, monkeypatch):
+    source = _write_document(tmp_path / "document.png")
+
+    monkeypatch.setattr(
+        quick_scan_module,
+        "scan_one",
+        lambda *args, **kwargs: SimpleNamespace(
+            image=np.full((80, 120), 220, dtype=np.uint8),
+            document_detected=True,
+            detection_preview=None,
+            warning="OCCLUSION_RISK",
+            occlusion_risk=True,
+        ),
+    )
+
+    result = execute_quick_scan(source, tmp_path / "quick-temp")
+
+    assert result.success is True
+    assert result.occlusion_risk is True
+    assert result.warning == "OCCLUSION_RISK"
+    assert result.temp_pdf_path is not None
+    assert Path(result.temp_pdf_path).is_file()

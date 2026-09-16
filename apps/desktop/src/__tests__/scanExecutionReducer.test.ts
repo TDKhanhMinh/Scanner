@@ -182,4 +182,46 @@ describe("scanExecutionReducer", () => {
       "OpenCV không tìm thấy ứng viên phù hợp; Đã giữ nguyên ảnh gốc để tránh cắt nhầm",
     );
   });
+
+  it("tracks occlusion risk independently from the warning total", () => {
+    let state = scanExecutionReducer(initialScanExecutionState, {
+      type: "scan_started",
+      totalToProcess: 1,
+    });
+    state = scanExecutionReducer(state, {
+      type: "scanner_event",
+      event: {
+        protocolVersion: 1,
+        type: "file_completed",
+        timestamp: "2026-09-08T00:00:12Z",
+        relativePath: "NV01/overlap.jpg",
+        employeeName: "NV01",
+        outputRelativePath: "NV01/overlap.pdf",
+        documentDetected: true,
+        warning: "OCCLUSION_RISK",
+        durationMs: 10,
+      },
+    });
+
+    expect(state.warning).toBe(1);
+    expect(state.occlusionRiskCount).toBe(1);
+
+    state = scanExecutionReducer(state, {
+      type: "scanner_event",
+      event: {
+        protocolVersion: 1,
+        type: "scan_completed",
+        timestamp: "2026-09-08T00:00:13Z",
+        totalProcessed: 1,
+        success: 0,
+        failed: 0,
+        warning: 1,
+        skipped: 0,
+        occlusionRiskCount: 1,
+        durationMs: 20,
+      },
+    });
+
+    expect(state.occlusionRiskCount).toBe(1);
+  });
 });

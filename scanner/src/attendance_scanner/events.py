@@ -281,6 +281,7 @@ class ScanCompletedEvent(BaseEvent):
     failed: int = Field(default=0, ge=0)
     warning: int = Field(default=0, ge=0)
     skipped: int = Field(default=0, ge=0)
+    occlusion_risk_count: int = Field(default=0, ge=0)
     duration_ms: int = Field(default=0, ge=0)
 
     @classmethod
@@ -295,6 +296,7 @@ class ScanCompletedEvent(BaseEvent):
                 failed=summary.failed,
                 warning=summary.warning,
                 skipped=summary.skipped,
+                occlusion_risk_count=summary.occlusion_risk_count,
                 duration_ms=summary.duration_ms or 0,
                 timestamp=timestamp,
             )
@@ -304,6 +306,7 @@ class ScanCompletedEvent(BaseEvent):
             failed=summary.failed,
             warning=summary.warning,
             skipped=summary.skipped,
+            occlusion_risk_count=summary.occlusion_risk_count,
             duration_ms=summary.duration_ms or 0,
         )
 
@@ -322,6 +325,7 @@ class QuickScanCompletedEvent(BaseEvent):
     error_code: Optional[ScannerErrorCode] = None
     message: Optional[str] = None
     warning: Optional[str] = None
+    occlusion_risk: bool = False
 
     @model_validator(mode="after")
     def validate_success_contract(self) -> "QuickScanCompletedEvent":

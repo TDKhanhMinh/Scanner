@@ -4,6 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { ScanLine, Upload, FileDown, ExternalLink, RefreshCw, FolderOpen, CheckCircle2 } from "lucide-react";
 import { DetectorModeSelector } from "@/components/scanner/DetectorModeSelector";
+import { formatWarningMessage } from "@/components/scanner/FileResultList";
 import { ScanModeSelector } from "@/components/scanner/ScanModeSelector";
 import { useExecutionCoordinator } from "@/components/scanner/executionCoordinator";
 import {
@@ -45,6 +46,13 @@ function sourceName(path: string): string {
 
 function ensurePdfExtension(path: string): string {
   return /\.pdf$/i.test(path) ? path : `${path}.pdf`;
+}
+
+function hasOcclusionRisk(result: Pick<QuickScanResult, "occlusionRisk" | "warning">): boolean {
+  return (
+    result.occlusionRisk === true ||
+    result.warning?.split(",").some((code) => code.trim() === "OCCLUSION_RISK") === true
+  );
 }
 
 export function parentDirectory(path: string): string {
@@ -109,7 +117,7 @@ export function QuickScanView() {
         setResult(nextResult);
         if (!nextResult.success) {
           setErrorMessage(nextResult.message ?? "Không thể xử lý ảnh.");
-        } else if (nextResult.tempPdfPath) {
+        } else if (nextResult.tempPdfPath && !hasOcclusionRisk(nextResult)) {
           try {
             const savedPath = await autoSaveQuickScanPdf(
               nextResult.tempPdfPath,
@@ -126,6 +134,10 @@ export function QuickScanView() {
             // Keep the temp PDF so the manual Save PDF fallback remains available.
             setErrorMessage(scannerErrorMessage(error));
           }
+        } else if (nextResult.tempPdfPath && hasOcclusionRisk(nextResult)) {
+          setSaveSuccessMessage(
+            "Đã tạo PDF tạm nhưng chưa tự động lưu. Hãy kiểm tra ảnh hoặc chọn Lưu bất chấp.",
+          );
         }
       } catch (error: unknown) {
         setErrorMessage(scannerErrorMessage(error));
@@ -226,6 +238,7 @@ export function QuickScanView() {
   const preview = result?.detectionPreview;
   const originalPreview = preview?.previewImageDataUrl;
   const finalCorners = preview?.finalCorners;
+  const resultHasOcclusionRisk = result ? hasOcclusionRisk(result) : false;
 
   return (
     <main className="mx-auto max-w-[1440px] space-y-6 p-4 sm:p-6 lg:p-8">
@@ -317,9 +330,23 @@ export function QuickScanView() {
               {errorMessage}
             </div>
           )}
-          {result?.warning && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
-              {result.warning}
+          {(result?.warning || resultHasOcclusionRisk) && (
+            <div
+              role={resultHasOcclusionRisk ? "alert" : undefined}
+              aria-live="polite"
+              className={`rounded-xl border p-3 text-sm ${
+                resultHasOcclusionRisk
+                  ? "border-orange-500/40 bg-orange-500/10 text-orange-900 dark:text-orange-200"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+              }`}
+            >
+              <p>{formatWarningMessage(result?.warning ?? "OCCLUSION_RISK")}</p>
+              {resultHasOcclusionRisk && (
+                <p className="mt-1 font-medium">
+                  Tự động lưu đã bị chặn để tránh lưu bản cắt sai. Bạn có thể xem lại preview rồi
+                  chọn “Lưu bất chấp”.
+                </p>
+              )}
             </div>
           )}
           {saveSuccessMessage && (
@@ -369,10 +396,11 @@ export function QuickScanView() {
                 type="button"
                 onClick={() => void handleSavePdf()}
                 disabled={!result?.success || !result.tempPdfPath || result.isSaved || isBusy}
+                title={resultHasOcclusionRisk ? "Lưu PDF dù đang có cảnh báo che khuất" : undefined}
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FileDown className="h-4 w-4" />
-                Lưu PDF
+                {resultHasOcclusionRisk ? "Lưu bất chấp" : "Lưu PDF"}
               </button>
               <button
                 type="button"

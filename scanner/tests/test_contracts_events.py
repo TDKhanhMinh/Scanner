@@ -87,9 +87,14 @@ def test_contracts_models_instantiation():
         failed=1,
         warning=0,
         skipped=0,
+        occlusion_risk_count=2,
         duration_ms=5400,
     )
     assert summary.total_images == 20
+    assert summary.occlusion_risk_count == 2
+
+    completed = ScanCompletedEvent.from_summary(summary)
+    assert completed.occlusion_risk_count == 2
 
 
 def test_serialize_event_single_line():

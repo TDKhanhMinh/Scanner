@@ -81,7 +81,8 @@ fn quick_scan_completed_event_is_parsed_and_validated() {
         "processedPreviewDataUrl": null,
         "errorCode": null,
         "message": null,
-        "warning": null
+        "warning": null,
+        "occlusionRisk": true
     });
 
     let parsed = parse_quick_scan(&value).expect("quick scan event should be valid");
@@ -91,6 +92,29 @@ fn quick_scan_completed_event_is_parsed_and_validated() {
         parsed.temp_pdf_path.as_deref(),
         Some("C:\\Temp\\quick_scan\\page.pdf")
     );
+    assert!(parsed.occlusion_risk);
+}
+
+#[test]
+fn legacy_quick_scan_event_defaults_occlusion_risk_to_false() {
+    let value = serde_json::json!({
+        "protocolVersion": 1,
+        "type": "quick_scan_completed",
+        "timestamp": "2026-09-14T00:00:00Z",
+        "success": true,
+        "inputPath": "D:\\Input\\page.jpg",
+        "tempPdfPath": null,
+        "documentDetected": true,
+        "durationMs": 1,
+        "detectionPreview": null,
+        "processedPreviewDataUrl": null,
+        "errorCode": null,
+        "message": null,
+        "warning": null
+    });
+
+    let parsed = parse_quick_scan(&value).expect("legacy quick scan event should be valid");
+    assert!(!parsed.occlusion_risk);
 }
 
 #[test]
@@ -577,15 +601,30 @@ fn save_quick_scan_pdf_with_root_copies_and_commits_cleanly() {
         true,
     );
 
-    assert!(result.is_ok(), "save_quick_scan_pdf_with_root failed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "save_quick_scan_pdf_with_root failed: {:?}",
+        result
+    );
     let saved_path = result.unwrap();
-    assert!(!saved_path.starts_with(r"\\?\"), "saved path should not have verbatim prefix: {}", saved_path);
-    assert!(Path::new(&saved_path).is_file(), "saved file should exist at {}", saved_path);
+    assert!(
+        !saved_path.starts_with(r"\\?\"),
+        "saved path should not have verbatim prefix: {}",
+        saved_path
+    );
+    assert!(
+        Path::new(&saved_path).is_file(),
+        "saved file should exist at {}",
+        saved_path
+    );
     assert_eq!(
         fs::read(&saved_path).expect("saved file should be readable"),
         b"%PDF-1.4 test content"
     );
-    assert!(!temp_pdf.exists(), "temp file should have been cleaned up after save");
+    assert!(
+        !temp_pdf.exists(),
+        "temp file should have been cleaned up after save"
+    );
 
     let _ = fs::remove_dir_all(base);
 }
@@ -608,4 +647,3 @@ fn strip_verbatim_prefix_normalizes_windows_paths() {
         PathBuf::from(r"D:\folder\test.pdf")
     );
 }
-

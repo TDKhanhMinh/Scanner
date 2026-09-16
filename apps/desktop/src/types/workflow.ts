@@ -30,6 +30,7 @@ export interface QuickScanResult {
   errorCode: ScannerErrorCode | null;
   message: string | null;
   warning: string | null;
+  occlusionRisk?: boolean;
 }
 
 export interface FlatScanRequest {

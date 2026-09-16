@@ -481,6 +481,15 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
       ) {
         return null;
       }
+      if (
+        raw.occlusionRiskCount !== undefined &&
+        (typeof raw.occlusionRiskCount !== "number" ||
+          !Number.isInteger(raw.occlusionRiskCount) ||
+          raw.occlusionRiskCount < 0)
+      ) {
+        return null;
+      }
+      raw.occlusionRiskCount = raw.occlusionRiskCount ?? 0;
       return raw as unknown as ScannerEvent;
     }
 
@@ -525,6 +534,10 @@ export function parseScannerEvent(line: string): ScannerEvent | null {
       ) {
         return null;
       }
+      if (raw.occlusionRisk !== undefined && typeof raw.occlusionRisk !== "boolean") {
+        return null;
+      }
+      raw.occlusionRisk = raw.occlusionRisk ?? false;
       return raw as unknown as QuickScanCompletedEvent;
     }
 
@@ -662,6 +675,7 @@ export function parseQuickScanEvent(value: unknown): QuickScanResult | null {
     errorCode: event.errorCode,
     message: event.message,
     warning: event.warning,
+    occlusionRisk: event.occlusionRisk === true,
   };
 }
 

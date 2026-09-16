@@ -50,7 +50,7 @@ class CandidateScoringConfig(BaseContract):
     neutral_aspect_score: float = Field(default=0.5, ge=0.0, le=1.0)
     border_touch_score: float = Field(default=0.8, ge=0.0, le=1.0)
     minimum_final_score: float = Field(default=0.55, ge=0.0, le=1.0)
-    ambiguity_margin: float = Field(default=0.01, ge=0.0, le=1.0)
+    ambiguity_margin: float = Field(default=0.03, ge=0.0, le=1.0)
     occlusion_penalty_weight: float = Field(default=0.25, ge=0.0, le=1.0)
     occlusion_alignment_bonus: float = Field(default=0.08, ge=0.0, le=1.0)
     occlusion_length_scale_ratio: float = Field(
@@ -334,8 +334,35 @@ def _resolve_ambiguity(
         geo = orig.geometry_quality
         return (float(coverage), float(iou), float(geo))
 
-    # Check if any contender has substantially higher coverage
     metrics = [(cs, _get_metrics(cs)) for cs in contenders]
+
+    def _occlusion_metrics(cs: CandidateScore) -> tuple[int, bool]:
+        """Return verified ridge count and alignment for ambiguity resolution."""
+        original = cand_map.get(cs.candidate_id)
+        if original is None or not bool(original.evidence.get("has_overlapping_cues", False)):
+            return (0, False)
+        ridge_count = original.evidence.get("enclosed_occlusion_ridges", 0)
+        if not isinstance(ridge_count, int) or isinstance(ridge_count, bool):
+            ridge_count = 0
+        return (
+            max(0, ridge_count),
+            bool(original.evidence.get("aligns_with_occlusion_ridge", False)),
+        )
+
+    # Occlusion evidence is a safety tiebreaker, not a global rank override.
+    # This function is called only for candidates inside the ambiguity window.
+    occlusion_metrics = [(cs, _occlusion_metrics(cs)) for cs in contenders]
+    minimum_ridges = min(metrics[1][0] for metrics in occlusion_metrics)
+    ridge_winners = [item for item in occlusion_metrics if item[1][0] == minimum_ridges]
+    if len(ridge_winners) == 1:
+        return ridge_winners[0][0].candidate_id
+
+    aligned = [item for item in ridge_winners if item[1][1]]
+    unaligned = [item for item in ridge_winners if not item[1][1]]
+    if len(aligned) == 1 and unaligned:
+        return aligned[0][0].candidate_id
+
+    # Check if any contender has substantially higher coverage
     coverages = [m[1][0] for m in metrics]
     max_cov = max(coverages)
     min_cov = min(coverages)
