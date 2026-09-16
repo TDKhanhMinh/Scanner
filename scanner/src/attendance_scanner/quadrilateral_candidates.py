@@ -317,6 +317,70 @@ def _preferred_mask_fit_candidate(
     return fallback
 
 
+def _extract_topmost_submask_candidates(
+    contour: np.ndarray,
+    image_width: int,
+    image_height: int,
+) -> List[Tuple[CanonicalCorners, CandidateSource, Dict[str, Any], Optional[float]]]:
+    """Detect convexity defects in overlapping mask and extract topmost document sub-quad."""
+    if len(contour) < 5:
+        return []
+    hull = cv2.convexHull(contour, returnPoints=False)
+    if hull is None or len(hull) < 3:
+        return []
+    defects = cv2.convexityDefects(contour, hull)
+    if defects is None or len(defects) == 0:
+        return []
+
+    min_defect_depth = max(10.0, 0.015 * min(image_width, image_height))
+    deep_defects: List[Tuple[int, float]] = []
+    for i in range(len(defects)):
+        row = defects[i, 0] if defects.ndim == 3 else defects[i]
+        f = int(row[2])
+        depth = float(row[3]) / 256.0
+        if depth >= min_defect_depth:
+            deep_defects.append((f, depth))
+
+    if not deep_defects:
+        return []
+
+    candidates: List[Tuple[CanonicalCorners, CandidateSource, Dict[str, Any], Optional[float]]] = []
+    if len(deep_defects) >= 2:
+        deep_defects.sort(key=lambda d: -d[1])
+        idx1, idx2 = sorted([deep_defects[0][0], deep_defects[1][0]])
+        seg1 = contour[idx1 : idx2 + 1]
+        seg2 = np.concatenate([contour[idx2:], contour[: idx1 + 1]], axis=0)
+        area1 = abs(float(cv2.contourArea(seg1))) if len(seg1) >= 3 else 0.0
+        area2 = abs(float(cv2.contourArea(seg2))) if len(seg2) >= 3 else 0.0
+        main_seg = seg1 if area1 >= area2 else seg2
+        if len(main_seg) >= 4:
+            rect = cv2.minAreaRect(main_seg)
+            (cx, cy), (w, h), angle = rect
+            box = cv2.boxPoints(((cx, cy), (w, h), angle))
+            clipped_box = [
+                (
+                    max(0.0, min(float(image_width - 1), float(p[0]))),
+                    max(0.0, min(float(image_height - 1), float(p[1]))),
+                )
+                for p in box
+            ]
+            canonical = _order_points(clipped_box)
+            if canonical is not None:
+                candidates.append(
+                    (
+                        canonical,
+                        "mask_fit",
+                        {
+                            "fitMethod": "topmost_submask",
+                            "defectCount": len(deep_defects),
+                            "maxDefectDepth": round(deep_defects[0][1], 2),
+                        },
+                        None,
+                    )
+                )
+    return candidates
+
+
 def build_quadrilateral_candidates(
     *,
     image_size: Tuple[int, int],
@@ -442,15 +506,34 @@ def build_quadrilateral_candidates(
                     mask_reference = canonical
                 raw_candidates.append((canonical, "mask_fit", {"fitMethod": "min_area_rect"}, None))
 
+            # Topmost submask from convexity defects (overlapping documents)
+            submask_candidates = _extract_topmost_submask_candidates(
+                contour, image_width=image_width, image_height=image_height
+            )
+            raw_candidates.extend(submask_candidates)
+
     if cv_candidates is not None:
+        mask_area = float(source_mask.sum()) if source_mask is not None else 0.0
         for candidate in cv_candidates.candidates:
             canonical = _order_points(candidate.corners.points)
             if canonical is not None:
+                fit_method = "contour"
+                if source_mask is not None and mask_area > 0:
+                    cand_poly = np.asarray(canonical.as_list(), dtype=np.float32)
+                    cand_area = abs(float(cv2.contourArea(cand_poly)))
+                    if cand_area > 0:
+                        _, cand_cov = _polygon_iou_and_coverage_with_mask(canonical, source_mask)
+                        in_mask_ratio = (cand_cov * mask_area) / cand_area
+                        if in_mask_ratio >= 0.88 and 0.25 <= cand_cov <= 0.88:
+                            fit_method = "topmost_contour"
                 raw_candidates.append(
                     (
                         canonical,
                         "contour",
-                        {"sourceContourIndex": candidate.source_contour_index},
+                        {
+                            "sourceContourIndex": candidate.source_contour_index,
+                            "fitMethod": fit_method,
+                        },
                         None,
                     )
                 )
@@ -565,23 +648,39 @@ def build_quadrilateral_candidates(
             )
             fit1 = quad_candidate.evidence.get("fitMethod")
             fit2 = existing_candidate.evidence.get("fitMethod")
+            is_topmost1 = fit1 in {"topmost_contour", "topmost_submask"}
+            is_topmost2 = fit2 in {"topmost_contour", "topmost_submask"}
+            is_competing_topmost_vs_full = is_topmost1 != is_topmost2
             same_fit = fit1 == fit2 and fit1 is not None
-            is_strictly_same_source = (quad_candidate.source == existing_candidate.source) and (
-                same_fit or fit1 is None or fit2 is None
+            is_strictly_same_source = (
+                (quad_candidate.source == existing_candidate.source)
+                and (same_fit or (fit1 is None and fit2 is None))
+                and not is_competing_topmost_vs_full
             )
-            is_same_mask_family = quad_candidate.source == existing_candidate.source == "mask_fit"
+            is_same_mask_family = (
+                quad_candidate.source == existing_candidate.source == "mask_fit"
+                and not is_competing_topmost_vs_full
+            )
             is_same_family = (
                 (quad_candidate.source == existing_candidate.source and same_fit)
                 or is_same_mask_family
-                or {quad_candidate.source, existing_candidate.source} == {"mixed", "mask_fit"}
+                or (
+                    {quad_candidate.source, existing_candidate.source} == {"mixed", "mask_fit"}
+                    and not is_competing_topmost_vs_full
+                )
             )
-            if is_strictly_same_source:
+            if is_competing_topmost_vs_full:
+                iou_threshold = 0.96
+            elif is_strictly_same_source:
                 iou_threshold = min(policy.dedup_same_source_iou, 0.70)
             elif is_same_family:
                 iou_threshold = policy.dedup_same_source_iou
             else:
                 iou_threshold = policy.dedup_polygon_iou
-            if max(distances) <= policy.dedup_corner_distance_px or iou >= iou_threshold:
+            if (
+                not is_competing_topmost_vs_full
+                and max(distances) <= policy.dedup_corner_distance_px
+            ) or iou >= iou_threshold:
                 preferred_mask_candidate = _preferred_mask_fit_candidate(
                     existing_candidate,
                     quad_candidate,

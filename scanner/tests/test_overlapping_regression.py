@@ -230,6 +230,62 @@ def test_cv_candidate_generation_isolates_topmost_sheet():
     assert best_cv_iou >= 0.95
 
 
+def test_topmost_candidate_generation_and_dedup_protection():
+    """Verify Stage 2: topmost candidates are generated and protected from deduplication."""
+    image_arr = _create_synthetic_overlapping_image()
+    loaded = LoadedImage(
+        path=Path("<memory>"),
+        image=image_arr,
+        metadata=LoadedImageMetadata(
+            original_width=800,
+            original_height=600,
+            width=800,
+            height=600,
+            original_mode="BGR",
+            normalized_mode="BGR",
+            has_transparency=False,
+        ),
+    )
+    cv_candidates = generate_cv_candidates(loaded)
+    gray = cv2.cvtColor(image_arr, cv2.COLOR_BGR2GRAY)
+    mask = (gray > 120).astype(np.uint8)
+
+    pool = build_quadrilateral_candidates(
+        image_size=(800, 600),
+        mask=mask,
+        cv_candidates=cv_candidates,
+    )
+
+    top_poly = np.array([[180, 120], [720, 130], [710, 530], [170, 510]], dtype=np.float32)
+    top_mask = np.zeros((600, 800), dtype=np.uint8)
+    cv2.fillConvexPoly(top_mask, np.round(top_poly).astype(np.int32), 1)
+
+    topmost_candidates = [
+        c
+        for c in pool.candidates
+        if c.evidence.get("fitMethod") in {"topmost_contour", "topmost_submask"}
+    ]
+    # 1. At least one topmost candidate is generated and retained in pool
+    assert len(topmost_candidates) >= 1
+
+    # 2. At least one topmost candidate has IoU >= 0.90 with ground truth topmost sheet
+    topmost_ious = []
+    for cand in topmost_candidates:
+        cand_poly = np.array(cand.corners.as_list(), dtype=np.float32)
+        cand_mask = np.zeros((600, 800), dtype=np.uint8)
+        cv2.fillConvexPoly(cand_mask, np.round(cand_poly).astype(np.int32), 1)
+        intersection = np.logical_and(top_mask, cand_mask).sum()
+        union = np.logical_or(top_mask, cand_mask).sum()
+        topmost_ious.append(float(intersection / max(union, 1)))
+
+    assert max(topmost_ious) >= 0.90
+
+    # 3. Both full-mask candidate and topmost candidate coexist in pool
+    fit_methods = {c.evidence.get("fitMethod") for c in pool.candidates}
+    assert "min_area_rect" in fit_methods
+    assert any(m in fit_methods for m in {"topmost_contour", "topmost_submask"})
+
+
 def test_underlying_paper_candidate_scoring_and_penalization():
     """Verify that an underlying paper candidate is scored below topmost candidate."""
     # Topmost sheet
