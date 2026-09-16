@@ -230,6 +230,9 @@ export interface DetectionPreviewCandidate {
   fitMethod?: string | null;
   rank?: number | null;
   contributions?: Record<string, number>;
+  enclosedOcclusionRidges?: number | null;
+  enclosedOcclusionLength?: number | null;
+  alignsWithOcclusionRidge?: boolean | null;
 }
 
 export interface DetectionPreview {

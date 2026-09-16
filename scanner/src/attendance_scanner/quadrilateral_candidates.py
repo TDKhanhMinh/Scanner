@@ -19,6 +19,10 @@ from attendance_scanner.geometry_validator import (
     validate_quadrilateral,
 )
 from attendance_scanner.hough_lines import HoughLineEvidence, HoughLineSegment
+from attendance_scanner.occlusion_evidence import (
+    OcclusionEvidence,
+    evaluate_candidate_occlusion,
+)
 from attendance_scanner.segmentation import SegmentationTransform
 
 QUADRILATERAL_CANDIDATE_VERSION = "1.1"
@@ -357,6 +361,20 @@ def _extract_topmost_submask_candidates(
             rect = cv2.minAreaRect(main_seg)
             (cx, cy), (w, h), angle = rect
             box = cv2.boxPoints(((cx, cy), (w, h), angle))
+            max_oob_px = max(
+                max(
+                    0.0,
+                    -float(p[0]),
+                    float(p[0]) - float(image_width - 1),
+                    -float(p[1]),
+                    float(p[1]) - float(image_height - 1),
+                )
+                for p in box
+            )
+            max_allowed_oob = 0.05 * min(image_width, image_height)
+            if max_oob_px > max_allowed_oob:
+                return candidates
+            was_out_of_bounds = max_oob_px > 0.0
             clipped_box = [
                 (
                     max(0.0, min(float(image_width - 1), float(p[0]))),
@@ -374,11 +392,103 @@ def _extract_topmost_submask_candidates(
                             "fitMethod": "topmost_submask",
                             "defectCount": len(deep_defects),
                             "maxDefectDepth": round(deep_defects[0][1], 2),
+                            "clipped": was_out_of_bounds,
+                            "maxOobPx": round(max_oob_px, 1),
                         },
                         None,
                     )
                 )
     return candidates
+
+
+def _deduplicate_candidates(
+    accepted: Sequence[QuadrilateralCandidate],
+    *,
+    policy: QuadrilateralCandidateConfig,
+    image_width: int,
+    image_height: int,
+) -> List[QuadrilateralCandidate]:
+    deduplicated: List[QuadrilateralCandidate] = []
+    for quad_candidate in accepted:
+        duplicate = False
+        for existing_candidate in deduplicated:
+            distances = [
+                math.dist(first, second)
+                for first, second in zip(
+                    quad_candidate.corners.as_list(),
+                    existing_candidate.corners.as_list(),
+                    strict=True,
+                )
+            ]
+            iou = _quad_iou(
+                quad_candidate.corners,
+                existing_candidate.corners,
+                image_width,
+                image_height,
+            )
+            fit1 = quad_candidate.evidence.get("fitMethod")
+            fit2 = existing_candidate.evidence.get("fitMethod")
+            is_topmost1 = fit1 in {"topmost_contour", "topmost_submask"}
+            is_topmost2 = fit2 in {"topmost_contour", "topmost_submask"}
+            is_competing_topmost_vs_full = is_topmost1 != is_topmost2
+            same_fit = fit1 == fit2 and fit1 is not None
+            is_strictly_same_source = (
+                (quad_candidate.source == existing_candidate.source)
+                and (same_fit or (fit1 is None and fit2 is None))
+                and not is_competing_topmost_vs_full
+            )
+            is_same_mask_family = (
+                quad_candidate.source == existing_candidate.source == "mask_fit"
+                and not is_competing_topmost_vs_full
+            )
+            is_same_family = (
+                (quad_candidate.source == existing_candidate.source and same_fit)
+                or is_same_mask_family
+                or (
+                    {quad_candidate.source, existing_candidate.source} == {"mixed", "mask_fit"}
+                    and not is_competing_topmost_vs_full
+                )
+            )
+            if is_competing_topmost_vs_full:
+                iou_threshold = 0.96
+            elif is_strictly_same_source:
+                iou_threshold = min(policy.dedup_same_source_iou, 0.70)
+            elif is_same_family:
+                iou_threshold = policy.dedup_same_source_iou
+            else:
+                iou_threshold = policy.dedup_polygon_iou
+            if (
+                not is_competing_topmost_vs_full
+                and max(distances) <= policy.dedup_corner_distance_px
+            ) or iou >= iou_threshold:
+                preferred_mask_candidate = _preferred_mask_fit_candidate(
+                    existing_candidate,
+                    quad_candidate,
+                    policy,
+                )
+                if preferred_mask_candidate is not None:
+                    idx = deduplicated.index(existing_candidate)
+                    deduplicated[idx] = preferred_mask_candidate
+                    duplicate = True
+                    break
+                exist_cov = existing_candidate.evidence.get("maskCoverage") or 0.0
+                quad_cov = quad_candidate.evidence.get("maskCoverage") or 0.0
+                if (
+                    quad_cov > exist_cov + 0.10
+                    and quad_candidate.geometry_quality
+                    >= existing_candidate.geometry_quality - 0.05
+                    and is_same_family
+                ):
+                    idx = deduplicated.index(existing_candidate)
+                    deduplicated[idx] = quad_candidate
+                duplicate = True
+                break
+
+        if not duplicate:
+            deduplicated.append(quad_candidate)
+        if len(deduplicated) >= policy.max_candidates:
+            break
+    return deduplicated
 
 
 def build_quadrilateral_candidates(
@@ -388,6 +498,7 @@ def build_quadrilateral_candidates(
     transform: Optional[SegmentationTransform] = None,
     cv_candidates: Optional[CvCandidateSet] = None,
     hough_evidence: Optional[HoughLineEvidence] = None,
+    occlusion_evidence: Optional[OcclusionEvidence] = None,
     config: Optional[QuadrilateralCandidateConfig] = None,
 ) -> QuadrilateralCandidateSet:
     """Build a bounded multi-source quad pool without choosing or warping a result."""
@@ -525,7 +636,16 @@ def build_quadrilateral_candidates(
                         _, cand_cov = _polygon_iou_and_coverage_with_mask(canonical, source_mask)
                         in_mask_ratio = (cand_cov * mask_area) / cand_area
                         if in_mask_ratio >= 0.88 and 0.25 <= cand_cov <= 0.88:
-                            fit_method = "topmost_contour"
+                            pts = canonical.as_list()
+                            w_cand = 0.5 * (math.dist(pts[0], pts[1]) + math.dist(pts[3], pts[2]))
+                            h_cand = 0.5 * (math.dist(pts[0], pts[3]) + math.dist(pts[1], pts[2]))
+                            aspect_cand = (
+                                max(w_cand, h_cand) / min(w_cand, h_cand)
+                                if min(w_cand, h_cand) > 0
+                                else 999.0
+                            )
+                            if aspect_cand <= 2.5:
+                                fit_method = "topmost_contour"
                 raw_candidates.append(
                     (
                         canonical,
@@ -587,6 +707,9 @@ def build_quadrilateral_candidates(
         cand_evidence = {**evidence, "quadAreaRatio": validation.area_ratio or 0.0}
         if mask_coverage is not None:
             cand_evidence["maskCoverage"] = mask_coverage
+        if occlusion_evidence is not None and normalized is not None:
+            occl_info = evaluate_candidate_occlusion(normalized, occlusion_evidence)
+            cand_evidence.update(occl_info)
         if not validation.valid or normalized is None:
             rejected.append(
                 RejectedQuadrilateralCandidate(
@@ -628,86 +751,12 @@ def build_quadrilateral_candidates(
             candidate.corners.model_dump_json(),
         )
     )
-    deduplicated: List[QuadrilateralCandidate] = []
-    for quad_candidate in accepted:
-        duplicate = False
-        for existing_candidate in deduplicated:
-            distances = [
-                math.dist(first, second)
-                for first, second in zip(
-                    quad_candidate.corners.as_list(),
-                    existing_candidate.corners.as_list(),
-                    strict=True,
-                )
-            ]
-            iou = _quad_iou(
-                quad_candidate.corners,
-                existing_candidate.corners,
-                image_width,
-                image_height,
-            )
-            fit1 = quad_candidate.evidence.get("fitMethod")
-            fit2 = existing_candidate.evidence.get("fitMethod")
-            is_topmost1 = fit1 in {"topmost_contour", "topmost_submask"}
-            is_topmost2 = fit2 in {"topmost_contour", "topmost_submask"}
-            is_competing_topmost_vs_full = is_topmost1 != is_topmost2
-            same_fit = fit1 == fit2 and fit1 is not None
-            is_strictly_same_source = (
-                (quad_candidate.source == existing_candidate.source)
-                and (same_fit or (fit1 is None and fit2 is None))
-                and not is_competing_topmost_vs_full
-            )
-            is_same_mask_family = (
-                quad_candidate.source == existing_candidate.source == "mask_fit"
-                and not is_competing_topmost_vs_full
-            )
-            is_same_family = (
-                (quad_candidate.source == existing_candidate.source and same_fit)
-                or is_same_mask_family
-                or (
-                    {quad_candidate.source, existing_candidate.source} == {"mixed", "mask_fit"}
-                    and not is_competing_topmost_vs_full
-                )
-            )
-            if is_competing_topmost_vs_full:
-                iou_threshold = 0.96
-            elif is_strictly_same_source:
-                iou_threshold = min(policy.dedup_same_source_iou, 0.70)
-            elif is_same_family:
-                iou_threshold = policy.dedup_same_source_iou
-            else:
-                iou_threshold = policy.dedup_polygon_iou
-            if (
-                not is_competing_topmost_vs_full
-                and max(distances) <= policy.dedup_corner_distance_px
-            ) or iou >= iou_threshold:
-                preferred_mask_candidate = _preferred_mask_fit_candidate(
-                    existing_candidate,
-                    quad_candidate,
-                    policy,
-                )
-                if preferred_mask_candidate is not None:
-                    idx = deduplicated.index(existing_candidate)
-                    deduplicated[idx] = preferred_mask_candidate
-                    duplicate = True
-                    break
-                exist_cov = existing_candidate.evidence.get("maskCoverage") or 0.0
-                quad_cov = quad_candidate.evidence.get("maskCoverage") or 0.0
-                if (
-                    quad_cov > exist_cov + 0.10
-                    and quad_candidate.geometry_quality
-                    >= existing_candidate.geometry_quality - 0.05
-                    and is_same_family
-                ):
-                    idx = deduplicated.index(existing_candidate)
-                    deduplicated[idx] = quad_candidate
-                duplicate = True
-                break
-
-        if not duplicate:
-            deduplicated.append(quad_candidate)
-        if len(deduplicated) >= policy.max_candidates:
-            break
+    deduplicated = _deduplicate_candidates(
+        accepted,
+        policy=policy,
+        image_width=image_width,
+        image_height=image_height,
+    )
     deduplicated = [
         quad_candidate.model_copy(update={"candidate_id": index})
         for index, quad_candidate in enumerate(deduplicated)

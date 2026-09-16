@@ -334,6 +334,27 @@ def _build_detection_preview(
                 for d_k, d_v in candidate.diagnostics.items():
                     if d_k.startswith("contrib") and isinstance(d_v, (int, float)):
                         contributions_dict[d_k] = float(d_v)
+
+                diag = candidate.diagnostics
+                raw_ridges = diag.get("enclosedOcclusionRidges")
+                if raw_ridges is None:
+                    raw_ridges = diag.get("enclosed_occlusion_ridges")
+                enclosed_ridges_val = (
+                    int(raw_ridges) if isinstance(raw_ridges, (int, float)) else None
+                )
+
+                raw_len = diag.get("enclosedOcclusionLength")
+                if raw_len is None:
+                    raw_len = diag.get("enclosed_occlusion_length")
+                enclosed_len_val = (
+                    float(raw_len) if isinstance(raw_len, (int, float)) else None
+                )
+
+                raw_aligns = diag.get("alignsWithOcclusionRidge")
+                if raw_aligns is None:
+                    raw_aligns = diag.get("aligns_with_occlusion_ridge")
+                aligns_val = bool(raw_aligns) if raw_aligns is not None else None
+
                 candidates.append(
                     DetectionPreviewCandidate(
                         source=candidate.source,
@@ -346,6 +367,9 @@ def _build_detection_preview(
                         ),
                         rank=rank_val,
                         contributions=contributions_dict,
+                        enclosed_occlusion_ridges=enclosed_ridges_val,
+                        enclosed_occlusion_length=enclosed_len_val,
+                        aligns_with_occlusion_ridge=aligns_val,
                     )
                 )
     elif detection is not None:

@@ -112,7 +112,20 @@ function isDetectionPreview(value: unknown): boolean {
               !Array.isArray(record.contributions) &&
               Object.values(record.contributions as Record<string, unknown>).every(
                 (v) => typeof v === "number" && Number.isFinite(v)
-              )))
+              ))) &&
+          (record.enclosedOcclusionRidges === undefined ||
+            record.enclosedOcclusionRidges === null ||
+            (typeof record.enclosedOcclusionRidges === "number" &&
+              Number.isInteger(record.enclosedOcclusionRidges) &&
+              record.enclosedOcclusionRidges >= 0)) &&
+          (record.enclosedOcclusionLength === undefined ||
+            record.enclosedOcclusionLength === null ||
+            (typeof record.enclosedOcclusionLength === "number" &&
+              Number.isFinite(record.enclosedOcclusionLength) &&
+              record.enclosedOcclusionLength >= 0)) &&
+          (record.alignsWithOcclusionRidge === undefined ||
+            record.alignsWithOcclusionRidge === null ||
+            typeof record.alignsWithOcclusionRidge === "boolean")
         );
       }));
   return (

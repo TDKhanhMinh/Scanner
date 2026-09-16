@@ -37,6 +37,7 @@ from attendance_scanner.detector import (
     GeometrySummary,
 )
 from attendance_scanner.edge_support import (
+    EdgeMap,
     EdgeSupportConfig,
     build_edge_map,
     score_quad_edge_support,
@@ -44,6 +45,10 @@ from attendance_scanner.edge_support import (
 from attendance_scanner.geometry_validator import GeometryValidationConfig, validate_quadrilateral
 from attendance_scanner.hough_lines import HoughLineConfig, HoughLineEvidence, detect_hough_lines
 from attendance_scanner.line_fitting import LineFittingConfig, fit_document_edge_lines
+from attendance_scanner.occlusion_evidence import (
+    OcclusionEvidence,
+    detect_occlusion_evidence,
+)
 from attendance_scanner.pipeline.load import LoadedImage
 from attendance_scanner.quadrilateral_candidates import (
     QuadrilateralCandidate,
@@ -148,7 +153,9 @@ class HybridDocumentDetector:
         elif self.config.segmentation_enabled:
             reason_codes.append("segmentation_provider_not_configured")
 
+        edge_map = build_edge_map(image, config=self.config.edge)
         hough_evidence: Optional[HoughLineEvidence] = None
+        occlusion_evidence: Optional[OcclusionEvidence] = None
         try:
             cv_candidates = (
                 self.cv_provider(image)
@@ -159,13 +166,20 @@ class HybridDocumentDetector:
                 hough_evidence = (
                     self.hough_provider(image)
                     if self.hough_provider is not None
-                    else detect_hough_lines(image, config=self.config.hough)
+                    else detect_hough_lines(image, config=self.config.hough, edge_map=edge_map)
+                )
+            if mask is not None:
+                occlusion_evidence = detect_occlusion_evidence(
+                    image,
+                    mask=mask,
+                    edge_map=edge_map,
                 )
             pool = build_quadrilateral_candidates(
                 image_size=(image.width, image.height),
                 mask=mask,
                 cv_candidates=cv_candidates,
                 hough_evidence=hough_evidence,
+                occlusion_evidence=occlusion_evidence,
                 config=self.config.candidates.model_copy(update={"geometry": self.config.geometry}),
             )
         except (TypeError, ValueError, RuntimeError) as exc:
@@ -176,7 +190,7 @@ class HybridDocumentDetector:
                 config=self.config.candidates.model_copy(update={"geometry": self.config.geometry}),
             )
 
-        scored_candidates = self._add_edge_evidence(image, pool)
+        scored_candidates = self._add_edge_evidence(image, pool, edge_map=edge_map)
         mask_confidence = (
             segmentation_output.detection.evidence.mask_confidence
             if segmentation_output is not None
@@ -229,6 +243,18 @@ class HybridDocumentDetector:
             for c_key, c_val in contributions.items():
                 norm_c_key = "contrib" + "".join(part.capitalize() for part in c_key.split("_"))
                 cand_diagnostics[norm_c_key] = c_val
+            if "enclosed_occlusion_ridges" in candidate.evidence:
+                cand_diagnostics["enclosedOcclusionRidges"] = candidate.evidence[
+                    "enclosed_occlusion_ridges"
+                ]
+            if "enclosed_occlusion_length" in candidate.evidence:
+                cand_diagnostics["enclosedOcclusionLength"] = candidate.evidence[
+                    "enclosed_occlusion_length"
+                ]
+            if "aligns_with_occlusion_ridge" in candidate.evidence:
+                cand_diagnostics["alignsWithOcclusionRidge"] = candidate.evidence[
+                    "aligns_with_occlusion_ridge"
+                ]
             candidate_corners_list.append(
                 CandidateCorners(
                     points=candidate.corners.as_list(),
@@ -244,6 +270,7 @@ class HybridDocumentDetector:
             selected,
             mask=mask,
             hough_evidence=hough_evidence,
+            edge_map=edge_map,
         )
         refinement_metadata = self._refinement_wire_metadata(refinement_diagnostics)
         decision_path = self._decision_path(segmentation_state, ranking, selected)
@@ -355,13 +382,17 @@ class HybridDocumentDetector:
         self,
         image: LoadedImage,
         pool: QuadrilateralCandidateSet,
+        *,
+        edge_map: Optional[EdgeMap] = None,
     ) -> QuadrilateralCandidateSet:
         if not pool.candidates:
             return pool
-        edge_map = build_edge_map(image, config=self.config.edge)
+        active_edge_map = (
+            edge_map if edge_map is not None else build_edge_map(image, config=self.config.edge)
+        )
         candidates: List[QuadrilateralCandidate] = []
         for candidate in pool.candidates:
-            support = score_quad_edge_support(edge_map, candidate.corners)
+            support = score_quad_edge_support(active_edge_map, candidate.corners)
             candidates.append(
                 candidate.model_copy(
                     update={
@@ -388,6 +419,7 @@ class HybridDocumentDetector:
         *,
         mask: Optional[np.ndarray],
         hough_evidence: Optional[HoughLineEvidence],
+        edge_map: Optional[EdgeMap] = None,
     ) -> Tuple[Optional[QuadrilateralCandidate], Dict[str, Any]]:
         """Refine a selected quad only when line evidence passes safety gates."""
         diagnostics: Dict[str, Any] = {
@@ -423,10 +455,14 @@ class HybridDocumentDetector:
                 update={"geometry": self.config.geometry}
             )
             before_support = selected.edge_support
-            edge_map = build_edge_map(image, config=self.config.edge)
+            active_edge_map = (
+                edge_map
+                if edge_map is not None
+                else build_edge_map(image, config=self.config.edge)
+            )
             if before_support is None:
                 before_support = score_quad_edge_support(
-                    edge_map,
+                    active_edge_map,
                     selected.corners,
                 ).overall_score
             provisional = refine_document_corners(
@@ -438,7 +474,7 @@ class HybridDocumentDetector:
                 after_edge_support=None,
             )
             after_support = score_quad_edge_support(
-                edge_map,
+                active_edge_map,
                 provisional.refined_corners,
             ).overall_score
             refinement = refine_document_corners(
