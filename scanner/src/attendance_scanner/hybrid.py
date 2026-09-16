@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, Tuple
 
@@ -27,6 +28,7 @@ from attendance_scanner.cv_candidates import (
 )
 from attendance_scanner.detector import (
     CandidateCorners,
+    CandidateRankingDiagnostic,
     DetectionTiming,
     DetectorDecisionTrace,
     DetectorEvidence,
@@ -51,6 +53,8 @@ from attendance_scanner.quadrilateral_candidates import (
     polygon_iou_and_coverage_with_mask,
 )
 from attendance_scanner.segmentation import SegmentationOutput
+
+logger = logging.getLogger("attendance_scanner")
 
 HybridDecisionProvider = Callable[[LoadedImage], CvCandidateSet]
 HybridLineProvider = Callable[[LoadedImage], HoughLineEvidence]
@@ -183,6 +187,57 @@ class HybridDocumentDetector:
             config=self.config.scoring,
             mask_confidence=mask_confidence,
         )
+        candidate_diag_list: List[Dict[str, Any]] = ranking.diagnostics.get("candidates", [])
+        if self.config.scoring.debug_diagnostics and candidate_diag_list:
+            logger.debug(
+                "Hybrid candidate ranking: status=%s, selected_id=%s, top_score=%s, "
+                "delta=%s, candidates=%s",
+                ranking.status,
+                ranking.selected_candidate_id,
+                ranking.top_score,
+                ranking.diagnostics.get("scoreDelta"),
+                candidate_diag_list,
+            )
+
+        candidate_diag_map = (
+            {item["candidateId"]: item for item in candidate_diag_list}
+            if candidate_diag_list
+            else {}
+        )
+        typed_candidate_rankings: List[CandidateRankingDiagnostic] = [
+            CandidateRankingDiagnostic.model_validate(item) for item in candidate_diag_list
+        ]
+        candidate_corners_list: List[CandidateCorners] = []
+        for candidate in scored_candidates.candidates:
+            diag_entry = candidate_diag_map.get(candidate.candidate_id, {})
+            cand_diagnostics: Dict[str, Any] = {
+                "candidateScore": candidate.score,
+                "fitMethod": (
+                    str(candidate.evidence["fitMethod"])
+                    if candidate.evidence.get("fitMethod") is not None
+                    else None
+                ),
+                "maskIoU": candidate.mask_quad_iou,
+                "edgeSupport": candidate.edge_support,
+                "geometryQuality": candidate.geometry_quality,
+            }
+            if "rank" in diag_entry:
+                cand_diagnostics["rank"] = diag_entry["rank"]
+            if "finalScore" in diag_entry:
+                cand_diagnostics["finalScore"] = diag_entry["finalScore"]
+            contributions = diag_entry.get("contributions", {})
+            for c_key, c_val in contributions.items():
+                norm_c_key = "contrib" + "".join(part.capitalize() for part in c_key.split("_"))
+                cand_diagnostics[norm_c_key] = c_val
+            candidate_corners_list.append(
+                CandidateCorners(
+                    points=candidate.corners.as_list(),
+                    source=candidate.source,
+                    confidence=candidate.score,
+                    diagnostics=cand_diagnostics,
+                )
+            )
+
         selected = self._selected_candidate(scored_candidates, ranking)
         selected, refinement_diagnostics = self._refine_selected_candidate(
             image,
@@ -232,15 +287,8 @@ class HybridDocumentDetector:
                     else None
                 ),
                 pipeline_version=self.pipeline_version,
-                candidate_corners=[
-                    CandidateCorners(
-                        points=candidate.corners.as_list(),
-                        source=candidate.source,
-                        confidence=candidate.score,
-                        diagnostics={"candidateScore": candidate.score},
-                    )
-                    for candidate in scored_candidates.candidates
-                ],
+                candidate_corners=candidate_corners_list,
+                candidate_rankings=typed_candidate_rankings,
                 geometry=GeometrySummary(
                     area_ratio=validation.area_ratio,
                     is_convex=validation.convex,
@@ -263,6 +311,10 @@ class HybridDocumentDetector:
                     "selectedSource": selected.source,
                     "selectedFitMethod": selected.evidence.get("fitMethod"),
                     "segmentationState": segmentation_state,
+                    "scoreDelta": ranking.diagnostics.get("scoreDelta"),
+                    "topCandidateScore": ranking.top_score,
+                    "secondCandidateScore": ranking.second_score,
+                    "candidateCount": len(scored_candidates.candidates),
                     **refinement_metadata,
                 },
                 decision_trace=trace,
@@ -280,6 +332,8 @@ class HybridDocumentDetector:
                 else None
             ),
             pipeline_version=self.pipeline_version,
+            candidate_corners=candidate_corners_list,
+            candidate_rankings=typed_candidate_rankings,
             evidence=self._evidence(segmentation_output, selected),
             fallback_used=fallback_used,
             warnings=self._warnings(segmentation_state, ranking) + reason_codes,
@@ -288,6 +342,10 @@ class HybridDocumentDetector:
             metadata={
                 "rankingStatus": ranking.status,
                 "segmentationState": segmentation_state,
+                "scoreDelta": ranking.diagnostics.get("scoreDelta"),
+                "topCandidateScore": ranking.top_score,
+                "secondCandidateScore": ranking.second_score,
+                "candidateCount": len(scored_candidates.candidates),
                 **refinement_metadata,
             },
             decision_trace=trace,
@@ -548,8 +606,18 @@ def create_detector(
     segmentation_provider: Optional[SegmentationProvider] = None,
     reference_provider: Optional[DocumentDetector] = None,
     config: Optional[HybridConfig] = None,
+    debug_diagnostics: bool = False,
 ) -> DocumentDetector:
     """Create a configured detector for A/B benchmark selection."""
+    active_config = config or HybridConfig()
+    if debug_diagnostics:
+        active_config = active_config.model_copy(
+            update={
+                "scoring": active_config.scoring.model_copy(
+                    update={"debug_diagnostics": True}
+                )
+            }
+        )
     if mode == "v1_cv":
         from attendance_scanner.detector import adapt_v1_detector
 
@@ -565,13 +633,13 @@ def create_detector(
     if mode == "cv_v2":
         return HybridDocumentDetector(
             None,
-            config=(config or HybridConfig()).model_copy(update={"segmentation_enabled": False}),
+            config=active_config.model_copy(update={"segmentation_enabled": False}),
         )
     if segmentation_provider is None:
         from attendance_scanner.segmentation import get_default_segmentation_adapter
 
         segmentation_provider = get_default_segmentation_adapter()
-    return HybridDocumentDetector(segmentation_provider, config=config)
+    return HybridDocumentDetector(segmentation_provider, config=active_config)
 
 
 __all__ = [

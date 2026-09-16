@@ -47,6 +47,7 @@ class CandidateScoringConfig(BaseContract):
     border_touch_score: float = Field(default=0.8, ge=0.0, le=1.0)
     minimum_final_score: float = Field(default=0.55, ge=0.0, le=1.0)
     ambiguity_margin: float = Field(default=0.01, ge=0.0, le=1.0)
+    debug_diagnostics: bool = False
     source_reliability: Dict[str, float] = Field(
         default_factory=lambda: {
             "mask_fit": 0.95,
@@ -379,6 +380,46 @@ def rank_candidate_pool(
     else:
         status = "selected"
         selected_id = scored[0].candidate_id
+
+    score_delta = (
+        round(float(top_score - second_score), 4)
+        if (top_score is not None and second_score is not None)
+        else None
+    )
+    ranking_diagnostics: Dict[str, Any] = {
+        "candidateCount": len(candidate_list),
+        "weightSum": sum(policy.weights.model_dump().values()),
+        "neutralMaskPolicy": policy.neutral_mask_score,
+        "neutralEdgePolicy": policy.neutral_edge_score,
+        "scoreDelta": score_delta,
+    }
+    if policy.debug_diagnostics:
+        cand_map = {c.candidate_id: c for c in candidate_list}
+        diag_candidates: List[Dict[str, Any]] = []
+        for r in ranked:
+            cand = cand_map.get(r.candidate_id)
+            if cand is None:
+                continue
+            iou = cand.mask_quad_iou
+            edge = cand.edge_support
+            diag_candidates.append(
+                {
+                    "rank": r.rank,
+                    "candidateId": r.candidate_id,
+                    "source": r.source,
+                    "fitMethod": cand.evidence.get("fitMethod"),
+                    "finalScore": round(r.score.final_score, 4),
+                    "contributions": {
+                        k: round(comp.contribution, 4) for k, comp in r.score.breakdown.items()
+                    },
+                    "corners": cand.corners.as_list(),
+                    "maskIoU": round(iou, 4) if iou is not None else None,
+                    "edgeSupport": round(edge, 4) if edge is not None else None,
+                    "geometryQuality": round(cand.geometry_quality, 4),
+                }
+            )
+        ranking_diagnostics["candidates"] = diag_candidates
+
     return CandidateRankingResult(
         status=status,
         selected_candidate_id=selected_id,
@@ -387,12 +428,7 @@ def rank_candidate_pool(
         minimum_final_score=policy.minimum_final_score,
         ambiguity_margin=policy.ambiguity_margin,
         ranked_candidates=ranked,
-        diagnostics={
-            "candidateCount": len(candidate_list),
-            "weightSum": sum(policy.weights.model_dump().values()),
-            "neutralMaskPolicy": policy.neutral_mask_score,
-            "neutralEdgePolicy": policy.neutral_edge_score,
-        },
+        diagnostics=ranking_diagnostics,
     )
 
 

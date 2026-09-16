@@ -151,6 +151,14 @@ export function DetectionPreviewPanel({
                   {preview.maskAvailable ? " · mask evidence có sẵn" : " · chưa có mask preview"}
                 </span>
               </div>
+              {preview.scoreDelta !== undefined && preview.scoreDelta !== null && (
+                <div className="rounded-lg border border-border/60 bg-secondary/30 p-3">
+                  <span className="block text-muted-foreground">Chênh lệch điểm (scoreDelta)</span>
+                  <span className="mt-1 font-mono font-medium text-foreground">
+                    {preview.scoreDelta.toFixed(4)}
+                  </span>
+                </div>
+              )}
             </>
           )}
         </div>

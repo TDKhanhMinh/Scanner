@@ -195,6 +195,9 @@ class DetectionPreviewCandidate(BaseContract):
     source: str = Field(min_length=1)
     corners: List[PreviewPoint] = Field(min_length=4, max_length=4)
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    fit_method: Optional[str] = None
+    rank: Optional[int] = Field(default=None, ge=1)
+    contributions: Dict[str, float] = Field(default_factory=dict)
 
 
 _PREVIEW_DATA_IMAGE_PREFIXES = (
@@ -240,6 +243,7 @@ class DetectionPreview(BaseContract):
     mask_overlay_url: Optional[str] = Field(default=None, max_length=_PREVIEW_DATA_IMAGE_MAX_LENGTH)
     preview_image_data_url: Optional[str] = Field(default=None, max_length=2_000_000)
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    score_delta: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     confidence_is_calibrated: bool = False
     fallback_used: bool = False
     detector_name: Optional[str] = None

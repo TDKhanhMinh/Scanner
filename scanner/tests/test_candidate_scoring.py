@@ -122,3 +122,28 @@ def test_ranking_is_deterministic_and_weight_sweep_is_configurable():
 
     assert default.model_dump(mode="json") == repeated.model_dump(mode="json")
     assert swept[0].ranked_candidates[0].candidate_id == 2
+
+
+def test_candidate_scoring_diagnostics_and_score_delta():
+    c1 = _candidate(1, "mask_fit", mask_iou=0.9, geometry=0.85, edge=0.8)
+    c2 = _candidate(2, "contour", mask_iou=0.8, geometry=0.8, edge=0.75)
+
+    # 1. Default diagnostics: scoreDelta present, no verbose candidates list
+    res_default = rank_candidate_pool([c1, c2])
+    assert "scoreDelta" in res_default.diagnostics
+    assert isinstance(res_default.diagnostics["scoreDelta"], float)
+    assert res_default.diagnostics["scoreDelta"] > 0.0
+    assert "candidates" not in res_default.diagnostics
+
+    # 2. Debug diagnostics enabled: candidates list populated with contributions and corners
+    debug_config = CandidateScoringConfig(debug_diagnostics=True)
+    res_debug = rank_candidate_pool([c1, c2], config=debug_config)
+    assert "candidates" in res_debug.diagnostics
+    candidates_diag = res_debug.diagnostics["candidates"]
+    assert len(candidates_diag) == 2
+    top = candidates_diag[0]
+    assert top["candidateId"] == res_debug.selected_candidate_id
+    assert "contributions" in top
+    assert "mask_iou" in top["contributions"]
+    assert "corners" in top
+    assert len(top["corners"]) == 4

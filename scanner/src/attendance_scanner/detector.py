@@ -203,6 +203,21 @@ class DetectorDecisionTrace(BaseContract):
     reason_codes: List[str] = Field(default_factory=list)
 
 
+class CandidateRankingDiagnostic(BaseContract):
+    """Strongly-typed diagnostic entry for a ranked candidate quad."""
+
+    rank: int = Field(ge=1)
+    candidate_id: int = Field(ge=0)
+    source: str = Field(min_length=1)
+    fit_method: Optional[str] = None
+    final_score: float = Field(ge=0.0, le=1.0)
+    contributions: Dict[str, float] = Field(default_factory=dict)
+    corners: List[DetectorPoint] = Field(min_length=4, max_length=4)
+    mask_iou: Optional[float] = None
+    edge_support: Optional[float] = None
+    geometry_quality: float = Field(ge=0.0, le=1.0)
+
+
 class DocumentDetectionResult(BaseContract):
     """Canonical detector result shared by AI, CV, hybrid, and fallback providers."""
 
@@ -223,6 +238,7 @@ class DocumentDetectionResult(BaseContract):
     timing: DetectionTiming = Field(default_factory=DetectionTiming)
     metadata: WireDiagnostics = Field(default_factory=dict)
     decision_trace: Optional[DetectorDecisionTrace] = None
+    candidate_rankings: List[CandidateRankingDiagnostic] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_result_state(self) -> "DocumentDetectionResult":

@@ -306,6 +306,7 @@ def _build_detection_preview(
     detector_model_version: Optional[str],
     fallback_used: bool,
     confidence: Optional[float],
+    score_delta: Optional[float] = None,
     reason_codes: List[DetectionFailureReason],
     warning_codes: List[str],
 ) -> DetectionPreview:
@@ -323,11 +324,28 @@ def _build_detection_preview(
         for candidate in v2_detection.candidate_corners:
             preview_candidate = _preview_points(candidate.points)
             if preview_candidate is not None:
+                cand_rank = candidate.diagnostics.get("rank")
+                rank_val = (
+                    int(cand_rank)
+                    if isinstance(cand_rank, (int, float)) and cand_rank >= 1
+                    else None
+                )
+                contributions_dict: Dict[str, float] = {}
+                for d_k, d_v in candidate.diagnostics.items():
+                    if d_k.startswith("contrib") and isinstance(d_v, (int, float)):
+                        contributions_dict[d_k] = float(d_v)
                 candidates.append(
                     DetectionPreviewCandidate(
                         source=candidate.source,
                         corners=preview_candidate,
                         confidence=candidate.confidence,
+                        fit_method=(
+                            str(candidate.diagnostics["fitMethod"])
+                            if candidate.diagnostics.get("fitMethod") is not None
+                            else None
+                        ),
+                        rank=rank_val,
+                        contributions=contributions_dict,
                     )
                 )
     elif detection is not None:
@@ -351,6 +369,7 @@ def _build_detection_preview(
         mask_available=mask_available,
         preview_image_data_url=_encode_bounded_preview(loaded.image),
         confidence=confidence,
+        score_delta=score_delta,
         fallback_used=fallback_used,
         detector_name=detector_name,
         model_version=detector_model_version,
@@ -428,7 +447,10 @@ def scan_one(
             from attendance_scanner.hybrid import create_detector
 
             assert normalized_detector_mode is not None
-            detector = create_detector(internal_detector_mode(normalized_detector_mode))
+            detector = create_detector(
+                internal_detector_mode(normalized_detector_mode),
+                debug_diagnostics=debug_diagnostics,
+            )
         v2_detection = detector.detect(loaded)
     else:
         detection = detect_document_boundary(
@@ -594,6 +616,7 @@ def scan_one(
         total_duration_ms=total_duration_ms,
     )
 
+    score_delta: Optional[float] = None
     if v2_detection is not None:
         detector_name = v2_detection.detector_version
         detector_mode_value = normalized_detector_mode
@@ -605,12 +628,17 @@ def scan_one(
             else None
         )
         detector_fallback_used = v2_detection.fallback_used or not document_detected
+        if v2_detection.metadata:
+            raw_delta = v2_detection.metadata.get("scoreDelta")
+            if isinstance(raw_delta, (int, float)):
+                score_delta = float(raw_delta)
         detection_quality_summary: Dict[str, Union[str, int, float, bool, None]] = {
             "confidence": detection_confidence,
             "areaRatio": detection_area_ratio,
             "candidateCount": len(v2_detection.candidate_corners),
             "warningCount": len(unique_warnings),
             "fallbackUsed": detector_fallback_used,
+            "scoreDelta": score_delta,
         }
         if debug_diagnostics and v2_detection.decision_trace is not None:
             detection_quality_summary.update(
@@ -643,6 +671,7 @@ def scan_one(
             detector_model_version=detector_model_version,
             fallback_used=detector_fallback_used,
             confidence=detection_confidence,
+            score_delta=score_delta,
             reason_codes=list(detection_summary.reason_codes),
             warning_codes=unique_warnings,
         )

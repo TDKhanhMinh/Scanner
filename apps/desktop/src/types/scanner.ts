@@ -227,6 +227,9 @@ export interface DetectionPreviewCandidate {
   source: string;
   corners: PreviewPoint[];
   confidence?: number | null;
+  fitMethod?: string | null;
+  rank?: number | null;
+  contributions?: Record<string, number>;
 }
 
 export interface DetectionPreview {
@@ -240,6 +243,7 @@ export interface DetectionPreview {
   maskOverlayUrl?: string | null;
   previewImageDataUrl?: string | null;
   confidence?: number | null;
+  scoreDelta?: number | null;
   confidenceIsCalibrated: boolean;
   fallbackUsed: boolean;
   detectorName?: string | null;

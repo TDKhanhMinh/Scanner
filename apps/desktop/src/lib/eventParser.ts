@@ -99,7 +99,20 @@ function isDetectionPreview(value: unknown): boolean {
           isPreviewQuad(record.corners) &&
           (record.confidence === undefined ||
             record.confidence === null ||
-            (typeof record.confidence === "number" && Number.isFinite(record.confidence)))
+            (typeof record.confidence === "number" && Number.isFinite(record.confidence))) &&
+          (record.fitMethod === undefined ||
+            record.fitMethod === null ||
+            typeof record.fitMethod === "string") &&
+          (record.rank === undefined ||
+            record.rank === null ||
+            (typeof record.rank === "number" && Number.isInteger(record.rank) && record.rank >= 1)) &&
+          (record.contributions === undefined ||
+            record.contributions === null ||
+            (typeof record.contributions === "object" &&
+              !Array.isArray(record.contributions) &&
+              Object.values(record.contributions as Record<string, unknown>).every(
+                (v) => typeof v === "number" && Number.isFinite(v)
+              )))
         );
       }));
   return (
@@ -121,6 +134,9 @@ function isDetectionPreview(value: unknown): boolean {
     (preview.confidence === undefined ||
       preview.confidence === null ||
       (typeof preview.confidence === "number" && Number.isFinite(preview.confidence))) &&
+    (preview.scoreDelta === undefined ||
+      preview.scoreDelta === null ||
+      (typeof preview.scoreDelta === "number" && Number.isFinite(preview.scoreDelta))) &&
     typeof preview.confidenceIsCalibrated === "boolean" &&
     typeof preview.fallbackUsed === "boolean" &&
     (preview.detectorName === undefined || preview.detectorName === null || typeof preview.detectorName === "string") &&
