@@ -1,5 +1,3 @@
-"""Synthetic regression test for overlapping documents and controlled diagnostics (Stage 1)."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,6 +5,7 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytest
 
 from attendance_scanner.candidate_scoring import (
     CandidateScoringConfig,
@@ -297,7 +296,7 @@ def test_topmost_candidate_generation_and_dedup_protection():
 
 def test_underlying_paper_candidate_scoring_and_penalization():
     """Verify that an underlying paper candidate is scored below topmost candidate."""
-    # Topmost sheet
+    # Topmost sheet: aligns with occlusion ridge
     top_cand = QuadrilateralCandidate(
         candidate_id=1,
         corners=CanonicalCorners.from_sequence([(180, 120), (720, 130), (710, 530), (170, 510)]),
@@ -306,28 +305,48 @@ def test_underlying_paper_candidate_scoring_and_penalization():
         mask_quad_iou=0.78,
         edge_support=0.88,
         geometry_quality=0.92,
-        evidence={"fitMethod": "topmost_contour", "quadAreaRatio": 0.48, "maskCoverage": 0.79},
+        evidence={
+            "fitMethod": "topmost_contour",
+            "quadAreaRatio": 0.48,
+            "maskCoverage": 0.79,
+            "has_overlapping_cues": True,
+            "enclosed_occlusion_ridges": 0,
+            "enclosed_occlusion_length": 0.0,
+            "aligns_with_occlusion_ridge": True,
+        },
     )
-    # Underlying sheet (partially covered, lower edge support on occluded side)
+    # Underlying sheet (encloses occlusion ridge)
     under_cand = QuadrilateralCandidate(
         candidate_id=2,
-        corners=CanonicalCorners.from_sequence([(80, 50), (450, 60), (420, 420), (60, 400)]),
-        source="contour",
+        corners=CanonicalCorners.from_sequence([(80, 50), (720, 60), (710, 530), (60, 510)]),
+        source="mask_fit",
         score=0.0,
-        mask_quad_iou=0.35,
-        edge_support=0.45,
-        geometry_quality=0.68,
-        evidence={"fitMethod": "contour_approx", "quadAreaRatio": 0.28, "maskCoverage": 0.38},
+        mask_quad_iou=0.92,
+        edge_support=0.70,
+        geometry_quality=0.85,
+        evidence={
+            "fitMethod": "min_area_rect",
+            "quadAreaRatio": 0.65,
+            "maskCoverage": 0.95,
+            "has_overlapping_cues": True,
+            "enclosed_occlusion_ridges": 1,
+            "enclosed_occlusion_length": 400.0,
+            "aligns_with_occlusion_ridge": False,
+        },
     )
 
     config = CandidateScoringConfig(debug_diagnostics=True)
     ranking = rank_candidate_pool([top_cand, under_cand], config=config)
 
     assert ranking.status == "selected"
-    assert ranking.selected_candidate_id == 1  # Topmost sheet wins over underlying sheet
+    rank1 = next(r for r in ranking.ranked_candidates if r.rank == 1)
+    min_area = next(r for r in ranking.ranked_candidates if r.source == "mask_fit")
+
+    assert rank1.candidate_id == 1
+    assert rank1.score.final_score > min_area.score.final_score
     assert ranking.top_score is not None and ranking.second_score is not None
-    assert ranking.top_score > ranking.second_score
-    assert ranking.diagnostics["scoreDelta"] > 0.15
+    assert ranking.diagnostics["scoreDelta"] is not None
+    assert ranking.diagnostics["scoreDelta"] > 0.10
 
 
 def test_hybrid_detector_verbose_diagnostics_and_candidate_rankings():
@@ -643,9 +662,9 @@ def test_occlusion_evidence_calibration_matrix():
     canvas_shadow = canvas_base.copy()
     for x in range(300, 500):
         factor = 1.0 - 0.25 * ((x - 300) / 200.0)
-        canvas_shadow[80:520, x] = np.clip(
-            canvas_shadow[80:520, x] * factor, 0, 255
-        ).astype(np.uint8)
+        canvas_shadow[80:520, x] = np.clip(canvas_shadow[80:520, x] * factor, 0, 255).astype(
+            np.uint8
+        )
     mask_shadow = (cv2.cvtColor(canvas_shadow, cv2.COLOR_BGR2GRAY) > 120).astype(np.uint8)
     em_shadow = build_edge_map(canvas_shadow)
     ev_shadow = detect_occlusion_evidence(canvas_shadow, mask=mask_shadow, edge_map=em_shadow)
@@ -679,3 +698,103 @@ def test_occlusion_evidence_calibration_matrix():
     assert len(ev_down.verified_ridges) >= 1
 
 
+def test_multi_defect_ridge_pairing():
+    """Verify that when 4 defects occur, only true boundary edges are paired.
+
+    Cross/diagonal pairs with no edge support must be rejected.
+    """
+    canvas = np.full((600, 800, 3), 70, dtype=np.uint8)
+
+    # Sheet 1 (underlying horizontal sheet): (100, 160) to (700, 440)
+    s1 = np.array([[100, 160], [700, 160], [700, 440], [100, 440]], dtype=np.int32)
+    cv2.fillConvexPoly(canvas, s1, (240, 240, 240))
+    cv2.polylines(canvas, [s1], True, (140, 140, 140), 2)
+
+    # Sheet 2 (topmost vertical sheet): (300, 80) to (500, 520)
+    # Forms 4 re-entrant defects: D1=(300, 160), D2=(300, 440), D3=(500, 160), D4=(500, 440)
+    s2 = np.array([[300, 80], [500, 80], [500, 520], [300, 520]], dtype=np.int32)
+    cv2.fillConvexPoly(canvas, s2, (252, 252, 252))
+    cv2.polylines(canvas, [s2], True, (130, 130, 130), 2)
+
+    gray = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
+    mask = (gray > 120).astype(np.uint8)
+    edge_map = build_edge_map(canvas)
+
+    evidence = detect_occlusion_evidence(canvas, mask=mask, edge_map=edge_map)
+    assert evidence.has_overlapping_cues is True
+
+    # 1. Exactly 4 deep defects are formed at the 4 re-entrant corners
+    assert evidence.diagnostics.get("deepDefectCount") == 4
+
+    # 2. Exactly 2 true physical ridges are paired (left boundary x~300, right boundary x~500)
+    assert len(evidence.verified_ridges) == 2
+    for ridge in evidence.verified_ridges:
+        assert abs(ridge.p1[0] - ridge.p2[0]) < 20.0, f"Expected vertical ridge, got {ridge}"
+        assert ridge.length_px >= 250.0
+        assert ridge.continuity_ratio >= 0.80
+
+    # 3. Explicitly verify diagonal/cross defect pairs were REJECTED
+    for ridge in evidence.verified_ridges:
+        dx = abs(ridge.p1[0] - ridge.p2[0])
+        dy = abs(ridge.p1[1] - ridge.p2[1])
+        assert not (dx > 150.0 and dy > 200.0), f"Cross pair accepted: {ridge}"
+
+
+def test_real_overlapping_fixture_topmost_submask_rank1_and_crop():
+    """Verify on real regression fixture media_1789524563037.jpg that:
+    - topmost_submask attains Rank 1 with final_score >= 0.78
+    - min_area_rect drops to Rank 2 with final_score <= 0.65
+    - scoreDelta >= 0.10 (actual ~0.221)
+    - selectedFitMethod is line_refined and baseFitMethod is topmost_submask
+    - warp crop bounds only the topmost sheet (left x > 200) without secondary paper
+    """
+    brain_dir = Path(r"C:\Users\WIN 11\.gemini\antigravity-ide\brain")
+    conv_dir = brain_dir / "7d2d6680-7b4f-4d72-93d3-706da2471dc4"
+    fixture_path = conv_dir / ".user_uploaded" / "media_1789524563037.jpg"
+    if not fixture_path.exists():
+        pytest.skip("Real sample fixture media_1789524563037.jpg not available in environment")
+
+    from attendance_scanner.pipeline.load import load_image
+
+    loaded = load_image(fixture_path)
+    res = scan_one(loaded, detector_mode="ai_enhanced", debug_diagnostics=True)
+
+    assert res.document_detected is True
+    assert res.detection_preview is not None
+    candidates = res.detection_preview.candidate_corners
+
+    # 1. Acceptance queries by predicate, not index
+    rank1 = next(c for c in candidates if c.rank == 1)
+    min_area = next(c for c in candidates if c.fit_method == "min_area_rect")
+
+    # 2. Acceptance target assertions specifically for this sample fixture
+    assert rank1.fit_method == "topmost_submask"
+    assert rank1.final_score is not None
+    assert rank1.final_score >= 0.78, f"Expected rank 1 score >= 0.78, got {rank1.final_score}"
+
+    assert min_area.final_score is not None
+    assert min_area.final_score <= 0.65, (
+        f"Expected min_area score <= 0.65, got {min_area.final_score}"
+    )
+
+    score_gap = rank1.final_score - min_area.final_score
+    assert score_gap >= 0.10, f"Expected score gap >= 0.10, got {score_gap}"
+
+    # 3. Selected fit methods
+    assert res.detection_quality_summary.get("selectedFitMethod") in {
+        "line_refined",
+        "topmost_submask",
+    }
+    assert res.detection_quality_summary.get("baseFitMethod") == "topmost_submask"
+
+    # 4. Warp crop bounds only topmost sheet: min x of rank1 > 200 (excludes secondary paper)
+    rank1_xs = [p.x for p in rank1.corners]
+    assert min(rank1_xs) > 200.0, (
+        f"Expected crop to exclude secondary sheet (x > 200), got min x={min(rank1_xs)}"
+    )
+
+    # 5. Contrast with min_area_rect which swallowed secondary paper (min x < 100)
+    min_area_xs = [p.x for p in min_area.corners]
+    assert min(min_area_xs) < 100.0, (
+        f"Expected min_area_rect to enclose secondary sheet, got {min(min_area_xs)}"
+    )

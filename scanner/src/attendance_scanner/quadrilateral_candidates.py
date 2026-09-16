@@ -20,7 +20,9 @@ from attendance_scanner.geometry_validator import (
 )
 from attendance_scanner.hough_lines import HoughLineEvidence, HoughLineSegment
 from attendance_scanner.occlusion_evidence import (
+    DEFAULT_OCCLUSION_LENGTH_SCALE_RATIO,
     OcclusionEvidence,
+    compute_occlusion_penalty_ratio,
     evaluate_candidate_occlusion,
 )
 from attendance_scanner.segmentation import SegmentationTransform
@@ -58,6 +60,11 @@ class QuadrilateralCandidateConfig(BaseContract):
     tight_fit_min_coverage: float = Field(default=0.97, ge=0.0, le=1.0)
     tight_fit_iou_gain: float = Field(default=0.03, ge=0.0, le=1.0)
     max_line_pairs: int = Field(default=32, ge=1, le=256)
+    occlusion_length_scale_ratio: float = Field(
+        default=DEFAULT_OCCLUSION_LENGTH_SCALE_RATIO, gt=0.0, le=1.0
+    )
+    preliminary_occlusion_penalty_weight: float = Field(default=0.20, ge=0.0, le=1.0)
+    preliminary_occlusion_alignment_bonus: float = Field(default=0.05, ge=0.0, le=1.0)
     geometry: GeometryValidationConfig = Field(default_factory=GeometryValidationConfig)
 
     @model_validator(mode="after")
@@ -729,6 +736,19 @@ def build_quadrilateral_candidates(
             edge_support,
             mask_coverage=mask_coverage,
         )
+        if cand_evidence.get("has_overlapping_cues", False):
+            penalty_ratio = compute_occlusion_penalty_ratio(
+                normalized,
+                float(cand_evidence.get("enclosed_occlusion_length", 0.0)),
+                scale_ratio=policy.occlusion_length_scale_ratio,
+            )
+            prelim_penalty = policy.preliminary_occlusion_penalty_weight * penalty_ratio
+            prelim_bonus = (
+                policy.preliminary_occlusion_alignment_bonus
+                if cand_evidence.get("aligns_with_occlusion_ridge", False)
+                else 0.0
+            )
+            score = max(0.0, min(1.0, score - prelim_penalty + prelim_bonus))
         accepted.append(
             QuadrilateralCandidate(
                 candidate_id=0,

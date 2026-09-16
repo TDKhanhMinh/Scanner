@@ -106,6 +106,12 @@ function isDetectionPreview(value: unknown): boolean {
           (record.rank === undefined ||
             record.rank === null ||
             (typeof record.rank === "number" && Number.isInteger(record.rank) && record.rank >= 1)) &&
+          (record.finalScore === undefined ||
+            record.finalScore === null ||
+            (typeof record.finalScore === "number" &&
+              Number.isFinite(record.finalScore) &&
+              record.finalScore >= 0 &&
+              record.finalScore <= 1)) &&
           (record.contributions === undefined ||
             record.contributions === null ||
             (typeof record.contributions === "object" &&

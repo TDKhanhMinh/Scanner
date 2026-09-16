@@ -346,14 +346,19 @@ def _build_detection_preview(
                 raw_len = diag.get("enclosedOcclusionLength")
                 if raw_len is None:
                     raw_len = diag.get("enclosed_occlusion_length")
-                enclosed_len_val = (
-                    float(raw_len) if isinstance(raw_len, (int, float)) else None
-                )
+                enclosed_len_val = float(raw_len) if isinstance(raw_len, (int, float)) else None
 
                 raw_aligns = diag.get("alignsWithOcclusionRidge")
                 if raw_aligns is None:
                     raw_aligns = diag.get("aligns_with_occlusion_ridge")
                 aligns_val = bool(raw_aligns) if raw_aligns is not None else None
+
+                raw_final_score = diag.get("finalScore")
+                if raw_final_score is None:
+                    raw_final_score = diag.get("final_score")
+                final_score_val = (
+                    float(raw_final_score) if isinstance(raw_final_score, (int, float)) else None
+                )
 
                 candidates.append(
                     DetectionPreviewCandidate(
@@ -366,6 +371,7 @@ def _build_detection_preview(
                             else None
                         ),
                         rank=rank_val,
+                        final_score=final_score_val,
                         contributions=contributions_dict,
                         enclosed_occlusion_ridges=enclosed_ridges_val,
                         enclosed_occlusion_length=enclosed_len_val,
@@ -664,6 +670,10 @@ def scan_one(
             "fallbackUsed": detector_fallback_used,
             "scoreDelta": score_delta,
         }
+        if v2_detection.metadata:
+            for k in ("selectedFitMethod", "baseFitMethod", "selectedSource"):
+                if k in v2_detection.metadata:
+                    detection_quality_summary[k] = v2_detection.metadata[k]
         if debug_diagnostics and v2_detection.decision_trace is not None:
             detection_quality_summary.update(
                 {

@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, Tuple
 
 import cv2
 import numpy as np
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from attendance_scanner.candidate_scoring import (
     CandidateRankingResult,
@@ -99,6 +99,15 @@ class HybridConfig(BaseContract):
     corner_search: CornerSearchConfig = Field(default_factory=CornerSearchConfig)
     corner_refinement: CornerRefinementConfig = Field(default_factory=CornerRefinementConfig)
 
+    @model_validator(mode="after")
+    def sync_occlusion_scale_ratio(self) -> "HybridConfig":
+        if (
+            self.scoring.occlusion_length_scale_ratio
+            != self.candidates.occlusion_length_scale_ratio
+        ):
+            self.candidates.occlusion_length_scale_ratio = self.scoring.occlusion_length_scale_ratio
+        return self
+
 
 class SegmentationProvider(Protocol):
     """Minimal mask provider needed by the hybrid policy."""
@@ -180,14 +189,28 @@ class HybridDocumentDetector:
                 cv_candidates=cv_candidates,
                 hough_evidence=hough_evidence,
                 occlusion_evidence=occlusion_evidence,
-                config=self.config.candidates.model_copy(update={"geometry": self.config.geometry}),
+                config=self.config.candidates.model_copy(
+                    update={
+                        "geometry": self.config.geometry,
+                        "occlusion_length_scale_ratio": (
+                            self.config.scoring.occlusion_length_scale_ratio
+                        ),
+                    }
+                ),
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             reason_codes.append(f"candidate_generation_{type(exc).__name__.lower()}")
             pool = QuadrilateralCandidateSet(
                 image_width=image.width,
                 image_height=image.height,
-                config=self.config.candidates.model_copy(update={"geometry": self.config.geometry}),
+                config=self.config.candidates.model_copy(
+                    update={
+                        "geometry": self.config.geometry,
+                        "occlusion_length_scale_ratio": (
+                            self.config.scoring.occlusion_length_scale_ratio
+                        ),
+                    }
+                ),
             )
 
         scored_candidates = self._add_edge_evidence(image, pool, edge_map=edge_map)
@@ -337,6 +360,7 @@ class HybridDocumentDetector:
                     "rankingStatus": ranking.status,
                     "selectedSource": selected.source,
                     "selectedFitMethod": selected.evidence.get("fitMethod"),
+                    "baseFitMethod": selected.evidence.get("baseFitMethod"),
                     "segmentationState": segmentation_state,
                     "scoreDelta": ranking.diagnostics.get("scoreDelta"),
                     "topCandidateScore": ranking.top_score,
@@ -456,9 +480,7 @@ class HybridDocumentDetector:
             )
             before_support = selected.edge_support
             active_edge_map = (
-                edge_map
-                if edge_map is not None
-                else build_edge_map(image, config=self.config.edge)
+                edge_map if edge_map is not None else build_edge_map(image, config=self.config.edge)
             )
             if before_support is None:
                 before_support = score_quad_edge_support(
@@ -648,11 +670,7 @@ def create_detector(
     active_config = config or HybridConfig()
     if debug_diagnostics:
         active_config = active_config.model_copy(
-            update={
-                "scoring": active_config.scoring.model_copy(
-                    update={"debug_diagnostics": True}
-                )
-            }
+            update={"scoring": active_config.scoring.model_copy(update={"debug_diagnostics": True})}
         )
     if mode == "v1_cv":
         from attendance_scanner.detector import adapt_v1_detector

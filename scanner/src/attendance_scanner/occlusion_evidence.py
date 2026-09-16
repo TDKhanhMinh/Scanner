@@ -161,9 +161,7 @@ def _find_corner_ridges(
                 path_len = float(np.sum(np.linalg.norm(np.diff(sub, axis=0), axis=1)))
                 # An internal L-corner path has length <= 1.8 * direct_dist (sqrt(2) approx 1.41)
                 if path_len <= 1.8 * direct_dist_det:
-                    approx = cv2.approxPolyDP(
-                        sub.astype(np.float32), max(3.0, 5.0 * scale), False
-                    )
+                    approx = cv2.approxPolyDP(sub.astype(np.float32), max(3.0, 5.0 * scale), False)
                     verts = approx.reshape(-1, 2)
                     if len(verts) >= 3:
                         for corner_det in verts[1:-1]:
@@ -171,12 +169,8 @@ def _find_corner_ridges(
                                 float(corner_det[0] / scale),
                                 float(corner_det[1] / scale),
                             )
-                            v1 = np.array(
-                                [pt1[0] - c_src[0], pt1[1] - c_src[1]], dtype=np.float64
-                            )
-                            v2 = np.array(
-                                [pt2[0] - c_src[0], pt2[1] - c_src[1]], dtype=np.float64
-                            )
+                            v1 = np.array([pt1[0] - c_src[0], pt1[1] - c_src[1]], dtype=np.float64)
+                            v2 = np.array([pt2[0] - c_src[0], pt2[1] - c_src[1]], dtype=np.float64)
                             angle = _angle_between_vectors(v1, v2)
                             if not (50.0 <= angle <= 130.0):
                                 continue
@@ -242,9 +236,7 @@ def detect_occlusion_evidence(
 ) -> OcclusionEvidence:
     """Extract physical paper boundary occlusion ridges and T-junctions."""
     policy = config or OcclusionEvidenceConfig()
-    active_edge_map = (
-        edge_map if edge_map is not None else build_edge_map(image)
-    )
+    active_edge_map = edge_map if edge_map is not None else build_edge_map(image)
 
     if mask is None or int(mask.sum()) == 0:
         return OcclusionEvidence(
@@ -305,6 +297,18 @@ def detect_occlusion_evidence(
     candidate_defects = deep_defects[: policy.max_t_junctions]
 
     contour_len = len(contour)
+    diffs = np.diff(contour[:, 0], axis=0, append=contour[:1, 0])
+    segment_lengths = np.linalg.norm(diffs, axis=1)
+    total_arc_length = float(np.sum(segment_lengths))
+    if total_arc_length <= 1e-6:
+        return OcclusionEvidence(
+            diagnostics={
+                "reason": "degenerate_contour",
+                "scaleFactor": active_edge_map.scale_factor,
+            }
+        )
+    cumsum_arc = np.insert(np.cumsum(segment_lengths), 0, 0.0)
+
     verified_ridges: List[OcclusionRidge] = []
     t_junctions: List[DetectorPoint] = []
     ridge_id_counter = 0
@@ -316,9 +320,10 @@ def detect_occlusion_evidence(
             idx1, depth1, pt1 = candidate_defects[i]
             idx2, depth2, pt2 = candidate_defects[j]
 
-            # 1. Cyclic distance check on contour: must be >= 15% of contour points
-            cyclic_dist = min(abs(idx1 - idx2), contour_len - abs(idx1 - idx2))
-            if cyclic_dist < 0.15 * contour_len:
+            # 1. Cyclic arc-length distance check: must be >= 15% of total contour perimeter
+            arc_between = abs(cumsum_arc[idx1] - cumsum_arc[idx2])
+            cyclic_dist = min(arc_between, total_arc_length - arc_between)
+            if cyclic_dist < 0.15 * total_arc_length:
                 continue
 
             # 2. Euclidean distance check
@@ -326,22 +331,36 @@ def detect_occlusion_evidence(
             if dist < min_dist_px or dist < policy.min_ridge_length_px:
                 continue
 
-            # 3. Local angle / T-junction check at defect points
-            # For pt1: measure angle between incoming and outgoing contour tangents
+            # 3. Symmetric T-junction angle check at both defect points (<= 170 deg indentation)
             step = max(3, contour_len // 50)
             prev1 = contour[(idx1 - step) % contour_len][0]
             next1 = contour[(idx1 + step) % contour_len][0]
             v_in1 = np.array(prev1 - contour[idx1][0], dtype=np.float64)
             v_out1 = np.array(next1 - contour[idx1][0], dtype=np.float64)
             corner_angle1 = _angle_between_vectors(v_in1, v_out1)
-            if corner_angle1 > 165.0:  # Not a significant indentation
+            if corner_angle1 > 170.0:  # Not a significant indentation
                 continue
 
-            # Verify ridge direction is transverse to contour tangents (> 15 deg)
+            prev2 = contour[(idx2 - step) % contour_len][0]
+            next2 = contour[(idx2 + step) % contour_len][0]
+            v_in2 = np.array(prev2 - contour[idx2][0], dtype=np.float64)
+            v_out2 = np.array(next2 - contour[idx2][0], dtype=np.float64)
+            corner_angle2 = _angle_between_vectors(v_in2, v_out2)
+            if corner_angle2 > 170.0:  # Not a significant indentation
+                continue
+
+            # Verify ridge direction is transverse to contour tangents (>= 25 deg) at both endpoints
             v_ridge = np.array([pt2[0] - pt1[0], pt2[1] - pt1[1]], dtype=np.float64)
             angle_with_in1 = _angle_between_vectors(v_ridge, v_in1)
             angle_with_out1 = _angle_between_vectors(v_ridge, v_out1)
-            if angle_with_in1 < 15.0 or angle_with_out1 < 15.0:
+            angle_with_in2 = _angle_between_vectors(-v_ridge, v_in2)
+            angle_with_out2 = _angle_between_vectors(-v_ridge, v_out2)
+            if (
+                angle_with_in1 < 25.0
+                or angle_with_out1 < 25.0
+                or angle_with_in2 < 25.0
+                or angle_with_out2 < 25.0
+            ):
                 continue
 
             # 4. Measure edge continuity and support along ridge in detection space
@@ -479,11 +498,37 @@ def evaluate_candidate_occlusion(
     }
 
 
+DEFAULT_OCCLUSION_LENGTH_SCALE_RATIO: float = 0.25
+
+
+def compute_occlusion_penalty_ratio(
+    candidate_corners: Any,
+    enclosed_length: float,
+    scale_ratio: float = DEFAULT_OCCLUSION_LENGTH_SCALE_RATIO,
+) -> float:
+    """Calculate the ratio of enclosed occlusion ridge length relative to candidate scale.
+
+    Formula:
+      perimeter = polygon perimeter of candidate corners
+      denom = max(1e-6, scale_ratio * perimeter)
+      penalty_ratio = min(1.0, enclosed_length / denom)
+    """
+    if enclosed_length <= 0.0:
+        return 0.0
+    points = _coerce_points(candidate_corners)
+    poly = np.array(points, dtype=np.float32)
+    perimeter = float(cv2.arcLength(poly, closed=True))
+    denom = max(1e-6, scale_ratio * perimeter)
+    return float(min(1.0, max(0.0, enclosed_length / denom)))
+
+
 __all__ = [
+    "DEFAULT_OCCLUSION_LENGTH_SCALE_RATIO",
     "OCCLUSION_EVIDENCE_VERSION",
     "OcclusionEvidence",
     "OcclusionEvidenceConfig",
     "OcclusionRidge",
+    "compute_occlusion_penalty_ratio",
     "detect_occlusion_evidence",
     "evaluate_candidate_occlusion",
 ]

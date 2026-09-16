@@ -229,6 +229,7 @@ export interface DetectionPreviewCandidate {
   confidence?: number | null;
   fitMethod?: string | null;
   rank?: number | null;
+  finalScore?: number | null;
   contributions?: Record<string, number>;
   enclosedOcclusionRidges?: number | null;
   enclosedOcclusionLength?: number | null;

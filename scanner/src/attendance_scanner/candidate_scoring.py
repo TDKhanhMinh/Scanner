@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Literal, Optional, Sequence
 from pydantic import Field, model_validator
 
 from attendance_scanner.contracts import BaseContract
+from attendance_scanner.occlusion_evidence import (
+    DEFAULT_OCCLUSION_LENGTH_SCALE_RATIO,
+    compute_occlusion_penalty_ratio,
+)
 from attendance_scanner.quadrilateral_candidates import (
     QuadrilateralCandidate,
     QuadrilateralCandidateSet,
@@ -47,6 +51,11 @@ class CandidateScoringConfig(BaseContract):
     border_touch_score: float = Field(default=0.8, ge=0.0, le=1.0)
     minimum_final_score: float = Field(default=0.55, ge=0.0, le=1.0)
     ambiguity_margin: float = Field(default=0.01, ge=0.0, le=1.0)
+    occlusion_penalty_weight: float = Field(default=0.25, ge=0.0, le=1.0)
+    occlusion_alignment_bonus: float = Field(default=0.08, ge=0.0, le=1.0)
+    occlusion_length_scale_ratio: float = Field(
+        default=DEFAULT_OCCLUSION_LENGTH_SCALE_RATIO, gt=0.0, le=1.0
+    )
     debug_diagnostics: bool = False
     source_reliability: Dict[str, float] = Field(
         default_factory=lambda: {
@@ -70,7 +79,7 @@ class ScoreComponent(BaseContract):
     value: float = Field(ge=0.0, le=1.0)
     weight: float = Field(ge=0.0)
     normalized_weight: float = Field(ge=0.0, le=1.0)
-    contribution: float = Field(ge=0.0, le=1.0)
+    contribution: float = Field(ge=-1.0, le=1.0)
     applicable: bool
     policy: str
 
@@ -236,9 +245,47 @@ def score_candidate(
             policy="source_reliability",
         ),
     }
-    final_score = max(
-        0.0, min(1.0, sum(component.contribution for component in components.values()))
+    base_score = sum(component.contribution for component in components.values())
+    has_overlapping = bool(candidate.evidence.get("has_overlapping_cues", False))
+    if has_overlapping:
+        enclosed_len = float(candidate.evidence.get("enclosed_occlusion_length", 0.0))
+        aligns = bool(candidate.evidence.get("aligns_with_occlusion_ridge", False))
+        penalty_ratio = compute_occlusion_penalty_ratio(
+            candidate.corners,
+            enclosed_len,
+            scale_ratio=policy.occlusion_length_scale_ratio,
+        )
+        penalty = policy.occlusion_penalty_weight * penalty_ratio
+        bonus = policy.occlusion_alignment_bonus if aligns else 0.0
+    else:
+        penalty = 0.0
+        bonus = 0.0
+        penalty_ratio = 0.0
+        aligns = False
+
+    components["occlusion_penalty"] = ScoreComponent(
+        value=penalty_ratio,
+        weight=policy.occlusion_penalty_weight,
+        normalized_weight=0.0,
+        contribution=-penalty,
+        applicable=has_overlapping,
+        policy=("verified_occlusion_ridge_penalty" if has_overlapping else "neutral:no_occlusion"),
     )
+    align_policy = (
+        "verified_occlusion_ridge_alignment"
+        if (has_overlapping and aligns)
+        else "neutral:no_occlusion"
+    )
+    components["occlusion_alignment"] = ScoreComponent(
+        value=1.0 if aligns else 0.0,
+        weight=policy.occlusion_alignment_bonus,
+        normalized_weight=0.0,
+        contribution=bonus,
+        applicable=has_overlapping and aligns,
+        policy=align_policy,
+    )
+
+    final_score = max(0.0, min(1.0, base_score - penalty + bonus))
     return CandidateScore(
         candidate_id=candidate.candidate_id,
         source=candidate.source,

@@ -1,4 +1,5 @@
-"""AS-45 candidate score and ranking tests."""
+import math
+from typing import Optional
 
 from attendance_scanner.candidate_scoring import (
     CandidateScoreWeights,
@@ -9,6 +10,59 @@ from attendance_scanner.candidate_scoring import (
 )
 from attendance_scanner.detector import CanonicalCorners
 from attendance_scanner.quadrilateral_candidates import QuadrilateralCandidate
+
+
+def compute_legacy_base_score(
+    candidate: QuadrilateralCandidate,
+    *,
+    config: Optional[CandidateScoringConfig] = None,
+    mask_confidence: Optional[float] = None,
+    aspect_hint: Optional[float] = None,
+) -> float:
+    """Test oracle computing candidate score using strictly the 9 legacy base components."""
+    policy = config or CandidateScoringConfig()
+    weights = policy.weights
+    total_weight = sum(weights.model_dump().values())
+    border_val = 1.0
+    if "borderContact" in candidate.evidence:
+        border_val = policy.border_touch_score if candidate.evidence["borderContact"] else 1.0
+    convexity = 1.0
+    if "convex" in candidate.evidence and candidate.evidence["convex"] is not None:
+        convexity = float(candidate.evidence["convex"])
+    source_val = policy.source_reliability.get(candidate.source, 0.5)
+
+    def _comp(val: Optional[float], weight: float, neutral: float) -> float:
+        v = val if val is not None else neutral
+        norm_w = weight / total_weight if total_weight else 0.0
+        return v * norm_w
+
+    aspect_score: Optional[float] = None
+    if aspect_hint is not None:
+        pts = candidate.corners.as_list()
+        w = (math.dist(pts[0], pts[1]) + math.dist(pts[2], pts[3])) / 2.0
+        h = (math.dist(pts[1], pts[2]) + math.dist(pts[3], pts[0])) / 2.0
+        if h > 1e-9:
+            ratio = w / h
+            aspect_score = max(0.0, min(1.0, 1.0 - abs(ratio - aspect_hint) / aspect_hint))
+
+    raw = [
+        _comp(candidate.mask_quad_iou, weights.mask_iou, policy.neutral_mask_score),
+        _comp(
+            float(candidate.evidence["maskCoverage"])
+            if "maskCoverage" in candidate.evidence
+            else None,
+            weights.mask_coverage,
+            policy.neutral_mask_score,
+        ),
+        _comp(mask_confidence, weights.mask_confidence, policy.neutral_mask_score),
+        _comp(candidate.edge_support, weights.edge_support, policy.neutral_edge_score),
+        _comp(candidate.geometry_quality, weights.geometry, 0.0),
+        _comp(convexity, weights.convexity, 0.0),
+        _comp(border_val, weights.border, 1.0),
+        _comp(aspect_score, weights.aspect, policy.neutral_aspect_score),
+        _comp(source_val, weights.source_reliability, 0.5),
+    ]
+    return max(0.0, min(1.0, sum(raw)))
 
 
 def _candidate(
@@ -47,10 +101,18 @@ def test_score_breakdown_contains_all_components_and_neutral_cv_policy():
         "border",
         "aspect",
         "source_reliability",
+        "occlusion_penalty",
+        "occlusion_alignment",
     }
     assert score.breakdown["mask_iou"].applicable is False
     assert score.breakdown["mask_iou"].value == 0.5
     assert score.breakdown["edge_support"].policy == "neutral:edge_support"
+    assert score.breakdown["occlusion_penalty"].contribution == 0.0
+    assert score.breakdown["occlusion_penalty"].applicable is False
+    assert score.breakdown["occlusion_penalty"].normalized_weight == 0.0
+    assert score.breakdown["occlusion_alignment"].contribution == 0.0
+    assert score.breakdown["occlusion_alignment"].applicable is False
+    assert score.breakdown["occlusion_alignment"].normalized_weight == 0.0
     assert 0.0 <= score.final_score <= 1.0
 
 
@@ -147,3 +209,86 @@ def test_candidate_scoring_diagnostics_and_score_delta():
     assert "mask_iou" in top["contributions"]
     assert "corners" in top
     assert len(top["corners"]) == 4
+
+
+def test_non_overlapping_document_score_identical_to_legacy_baseline():
+    """Verify clean, non-overlapping documents retain 100% exact absolute score
+    identical to legacy baseline."""
+    candidates = [
+        _candidate(1, "mask_fit", mask_iou=0.92, geometry=0.88, edge=0.85, area_ratio=0.7),
+        _candidate(2, "contour", mask_iou=0.75, geometry=0.80, edge=0.70, area_ratio=0.6),
+        _candidate(3, "hough", mask_iou=None, geometry=0.65, edge=0.90, area_ratio=0.5),
+    ]
+    config = CandidateScoringConfig()
+    for cand in candidates:
+        legacy_score = compute_legacy_base_score(cand, config=config)
+        new_score = score_candidate(cand, config=config).final_score
+        assert math.isclose(new_score, legacy_score, rel_tol=1e-9, abs_tol=1e-9)
+
+
+def test_penalty_applied_only_once_and_preliminary_score_isolated():
+    """Verify preliminary score does not leak into final score (no double penalty)."""
+    corners = CanonicalCorners.from_sequence([(0, 0), (100, 0), (100, 100), (0, 100)])
+    c_low_prelim = QuadrilateralCandidate(
+        candidate_id=1,
+        corners=corners,
+        source="mask_fit",
+        score=0.10,
+        mask_quad_iou=0.85,
+        edge_support=0.80,
+        geometry_quality=0.90,
+        evidence={
+            "has_overlapping_cues": True,
+            "enclosed_occlusion_length": 50.0,
+            "aligns_with_occlusion_ridge": False,
+        },
+    )
+    c_high_prelim = QuadrilateralCandidate(
+        candidate_id=2,
+        corners=corners,
+        source="mask_fit",
+        score=0.95,
+        mask_quad_iou=0.85,
+        edge_support=0.80,
+        geometry_quality=0.90,
+        evidence={
+            "has_overlapping_cues": True,
+            "enclosed_occlusion_length": 50.0,
+            "aligns_with_occlusion_ridge": False,
+        },
+    )
+
+    s1 = score_candidate(c_low_prelim)
+    s2 = score_candidate(c_high_prelim)
+
+    assert s1.final_score == s2.final_score
+    base = compute_legacy_base_score(c_low_prelim)
+    assert s1.final_score < base
+    assert s1.breakdown["occlusion_penalty"].contribution < 0.0
+
+
+def test_occlusion_penalty_not_applied_without_verified_cues():
+    """Verify penalty is strictly guarded by has_overlapping_cues=True
+    (no unverified defect penalty)."""
+    corners = CanonicalCorners.from_sequence([(0, 0), (100, 0), (100, 100), (0, 100)])
+    c_unverified = QuadrilateralCandidate(
+        candidate_id=1,
+        corners=corners,
+        source="mask_fit",
+        score=0.85,
+        mask_quad_iou=0.85,
+        edge_support=0.80,
+        geometry_quality=0.90,
+        evidence={
+            "has_overlapping_cues": False,
+            "enclosed_occlusion_length": 150.0,
+            "aligns_with_occlusion_ridge": True,
+        },
+    )
+
+    score = score_candidate(c_unverified)
+    legacy = compute_legacy_base_score(c_unverified)
+
+    assert score.final_score == legacy
+    assert score.breakdown["occlusion_penalty"].contribution == 0.0
+    assert score.breakdown["occlusion_alignment"].contribution == 0.0

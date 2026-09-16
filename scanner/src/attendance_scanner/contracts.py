@@ -197,6 +197,7 @@ class DetectionPreviewCandidate(BaseContract):
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     fit_method: Optional[str] = None
     rank: Optional[int] = Field(default=None, ge=1)
+    final_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     contributions: Dict[str, float] = Field(default_factory=dict)
     enclosed_occlusion_ridges: Optional[int] = Field(default=None, ge=0)
     enclosed_occlusion_length: Optional[float] = Field(default=None, ge=0.0)
