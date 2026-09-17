@@ -1,5 +1,11 @@
 """Scan pipeline modules for image loading, detection, perspective warp, and enhancement."""
 
+from attendance_scanner.grid_dewarp import (
+    GRID_DEWARP_VERSION,
+    GridDewarpConfig,
+    GridDewarpResult,
+    dewarp_document_grid,
+)
 from attendance_scanner.pipeline.detect import (
     BoundaryCollisionResult,
     DetectionConfig,
@@ -63,6 +69,10 @@ __all__ = [
     "enhance_bw",
     "enhance_color",
     "enhance_smart_document",
+    "GRID_DEWARP_VERSION",
+    "GridDewarpConfig",
+    "GridDewarpResult",
+    "dewarp_document_grid",
     "ResizeConfig",
     "PipelineConfig",
     "SingleScanDiagnostics",

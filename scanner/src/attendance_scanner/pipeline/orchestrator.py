@@ -4,9 +4,10 @@ Composes the discrete scanning stages into a unified, pure in-memory pipeline:
 1. Load image (with EXIF rotation and transparency handling)
 2. Detect document boundary (OpenCV edge/contour/quadrilateral detection)
 3. Optional Warp (rectify perspective if quad detected; safe fallback if not)
-4. Enhance (Gray, B&W, Color Enhanced, or Smart Document filters)
-5. Size Normalization (no upscaling, proportional downscaling if oversized)
-6. Result assembly (SingleScanResult with typed diagnostics and warnings)
+4. Optional grid-guided dewarp (safe non-rigid correction for curved forms)
+5. Enhance (Gray, B&W, Color Enhanced, or Smart Document filters)
+6. Size Normalization (no upscaling, proportional downscaling if oversized)
+7. Result assembly (SingleScanResult with typed diagnostics and warnings)
 """
 
 import base64
@@ -37,6 +38,7 @@ from attendance_scanner.contracts import (
 from attendance_scanner.detector import DocumentDetectionResult, DocumentDetector
 from attendance_scanner.detector_modes import internal_detector_mode, normalize_detector_mode
 from attendance_scanner.diagnostics import summarize_detection_failure
+from attendance_scanner.grid_dewarp import GridDewarpConfig, dewarp_document_grid
 from attendance_scanner.page_classification import classify_page
 from attendance_scanner.pipeline.detect import (
     DetectionConfig,
@@ -78,6 +80,7 @@ class PipelineConfig(BaseContract):
         default_factory=lambda: PerspectiveConfig(target_aspect_ratio=math.sqrt(2.0))
     )
     enhancement: EnhancementConfig = Field(default_factory=EnhancementConfig)
+    grid_dewarp: GridDewarpConfig = Field(default_factory=GridDewarpConfig)
     resize: ResizeConfig = Field(default_factory=ResizeConfig)
     warp_fallback_to_full: bool = True
     # Attendance forms use a landscape output canvas; generic documents can opt
@@ -432,8 +435,9 @@ def scan_one(
     2. Detect: finds 4-corner document quad. Returns None if unconfident or degenerate.
     3. Optional Warp: rectifies document perspective. If detector returned None,
        safely falls back to full normalized image with warning DOCUMENT_NOT_DETECTED.
-    4. Enhance: applies the selected scan mode, including Smart Document.
-    5. Resize: downscales oversized images proportionally without upscaling.
+    4. Optional grid dewarp: applies only when the inverse map passes safety gates.
+    5. Enhance: applies the selected scan mode, including Smart Document.
+    6. Resize: downscales oversized images proportionally without upscaling.
 
     Args:
         source: File path, LoadedImage instance, or uint8 NumPy array.
@@ -591,7 +595,51 @@ def scan_one(
 
     stage_durations["warp_ms"] = (time.perf_counter() - t_warp_start) * 1000.0
 
-    # Stage 4: Scan enhancement filters
+    # Stage 4: Grid-guided non-rigid dewarp. The stage is fail-safe: weak or
+    # non-monotone evidence keeps the planar warp unchanged.
+    t_grid_dewarp_start = time.perf_counter()
+    grid_dewarp_diagnostics: Dict[str, Union[str, int, float, bool, None]] = {
+        "gridDewarpApplied": False,
+        "gridDewarpReason": "not_run",
+    }
+    if accepted_corners is not None and document_detected:
+        try:
+            grid_input = np.asarray(getattr(warped_or_full, "image", warped_or_full))
+            grid_result = dewarp_document_grid(
+                grid_input,
+                config=pipeline_cfg.grid_dewarp,
+            )
+            grid_dewarp_diagnostics.update(
+                {
+                    "gridDewarpApplied": grid_result.applied,
+                    "gridDewarpReason": str(grid_result.diagnostics.get("reason", "unknown")),
+                }
+            )
+            for source_key, wire_key in (
+                ("horizontalLines", "gridDewarpHorizontalLines"),
+                ("verticalLines", "gridDewarpVerticalLines"),
+                ("validMapRatio", "gridDewarpValidMapRatio"),
+                ("maxDisplacementPx", "gridDewarpMaxDisplacementPx"),
+                ("horizontalSupport", "gridDewarpHorizontalSupport"),
+                ("verticalSupport", "gridDewarpVerticalSupport"),
+                ("maximumCrossStep", "gridDewarpMaximumCrossStep"),
+                ("minimumJacobian", "gridDewarpMinimumJacobian"),
+                ("maximumJacobian", "gridDewarpMaximumJacobian"),
+            ):
+                value = grid_result.diagnostics.get(source_key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    grid_dewarp_diagnostics[wire_key] = value
+            if grid_result.applied:
+                warped_or_full = grid_result.image
+        except (TypeError, ValueError, cv2.error) as exc:
+            grid_dewarp_diagnostics["gridDewarpReason"] = f"error_{type(exc).__name__.lower()}"
+    elif not pipeline_cfg.grid_dewarp.enabled:
+        grid_dewarp_diagnostics["gridDewarpReason"] = "disabled"
+    else:
+        grid_dewarp_diagnostics["gridDewarpReason"] = "no_valid_document_warp"
+    stage_durations["grid_dewarp_ms"] = (time.perf_counter() - t_grid_dewarp_start) * 1000.0
+
+    # Stage 5: Scan enhancement filters
     t_enhance_start = time.perf_counter()
     try:
         enhanced = enhance_image(
@@ -682,6 +730,7 @@ def scan_one(
         detection_quality_summary["occlusionRisk"] = bool(
             v2_detection.metadata.get("occlusionRisk", False)
         )
+        detection_quality_summary.update(grid_dewarp_diagnostics)
         if debug_diagnostics and v2_detection.decision_trace is not None:
             detection_quality_summary.update(
                 {
@@ -701,6 +750,7 @@ def scan_one(
             "areaRatio": detection_area_ratio,
             "warningCount": len(unique_warnings),
             "occlusionRisk": False,
+            **grid_dewarp_diagnostics,
         }
 
     detection_preview = None
