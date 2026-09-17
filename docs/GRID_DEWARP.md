@@ -1,8 +1,7 @@
 # Grid-guided dewarp
 
-The scanner now contains an opt-in, fail-safe dewarp stage for photographed
-forms whose rows and columns are locally curved after the planar perspective
-warp.
+The scanner contains a fail-safe dewarp stage for photographed forms whose rows
+and columns are locally curved after the planar perspective warp.
 
 ## Pipeline behavior
 
@@ -13,20 +12,24 @@ enhancement:
    resolution.
 2. Track each line as a smooth curve without using document-specific pixel
    coordinates.
-3. Build one inverse mesh and remap the complete image canvas. The stage does
-   not apply a fixed crop or synthesize missing pixels.
-4. Reject the map when evidence is weak, curves cross, pixels leave the source,
-   local steps fold, cross-axis movement tears, or the local Jacobian becomes
-   degenerate.
+3. Regularize neighboring curves as one smooth displacement field so a single
+   noisy row or column cannot shear nearby content.
+4. Build an inverse mesh with identity anchors at every canvas boundary. The
+   stage does not apply a fixed crop or synthesize missing pixels.
+5. Reduce column-correction strength progressively when the full two-axis map
+   is unsafe; if necessary, keep only the independently validated row map.
+6. Reject the map when evidence is weak, curves cross, pixels leave the source,
+   local steps fold, cross-axis movement tears, the local Jacobian becomes
+   degenerate, or measured row/column straightness does not improve.
 
 When a map is rejected, the original planar-warped image is returned unchanged
 and a scalar reason is recorded in `detection_quality_summary`.
 
 ## Activation
 
-The feature is deliberately disabled by default until a representative,
-anonymized corpus passes visual review. It can be enabled by an explicit
-pipeline configuration:
+The desktop product pipeline enables the guarded stage by default. Direct
+library calls to `dewarp_document_grid` remain opt-in and can enable it with an
+explicit configuration:
 
 ```python
 from attendance_scanner import GridDewarpConfig, PipelineConfig, scan_one
@@ -37,18 +40,19 @@ config = PipelineConfig(
 result = scan_one(source, config=config)
 ```
 
-The default-disabled behavior prevents an experimental curve tracker from
-changing existing production output. The activation decision should be made
-only after checking both the image and the diagnostics, especially
+The stage changes production output only after every safety and quality gate
+passes. Review both the image and diagnostics, especially
 `gridDewarpApplied`, `gridDewarpReason`, `gridDewarpMinimumJacobian`, and
-`gridDewarpMaximumCrossStep`.
+`gridDewarpMaximumCrossStep`. The straightness scores provide before/after
+evidence for both axes. `gridDewarpAppliedAxes` and `gridDewarpColumnBlend`
+show whether the accepted result used both axes, a reduced column correction,
+or rows only.
 
 ## Current verification boundary
 
-Automated tests cover identity maps, mild curved synthetic grids, out-of-bounds
-maps, folds, cross-axis tearing, weak evidence, and invalid configuration.
-The current real-image probe keeps the stage in fallback for unsafe maps. This
-is an intentional safety result, not evidence that the photographed pages are
-already fully dewarped. A future rollout needs anonymized real fixtures and a
-visual acceptance gate proving that row/column straightness improves without
-losing side content or introducing seams.
+Automated tests cover identity and boundary-anchored maps, mild curved
+synthetic grids, out-of-bounds maps, folds, cross-axis tearing, weak evidence,
+side-content retention, and invalid configuration. The current real-image
+probe accepts only pages that satisfy all gates and otherwise preserves the
+planar-warped image unchanged. This conservative fallback is intentional: a
+page that cannot be corrected reliably is safer than a silently distorted one.

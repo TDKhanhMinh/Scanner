@@ -80,7 +80,7 @@ class PipelineConfig(BaseContract):
         default_factory=lambda: PerspectiveConfig(target_aspect_ratio=math.sqrt(2.0))
     )
     enhancement: EnhancementConfig = Field(default_factory=EnhancementConfig)
-    grid_dewarp: GridDewarpConfig = Field(default_factory=GridDewarpConfig)
+    grid_dewarp: GridDewarpConfig = Field(default_factory=lambda: GridDewarpConfig(enabled=True))
     resize: ResizeConfig = Field(default_factory=ResizeConfig)
     warp_fallback_to_full: bool = True
     # Attendance forms use a landscape output canvas; generic documents can opt
@@ -616,6 +616,13 @@ def scan_one(
                 }
             )
             for source_key, wire_key in (
+                ("appliedAxes", "gridDewarpAppliedAxes"),
+                ("fallbackReason", "gridDewarpFallbackReason"),
+            ):
+                value = grid_result.diagnostics.get(source_key)
+                if isinstance(value, str):
+                    grid_dewarp_diagnostics[wire_key] = value
+            for source_key, wire_key in (
                 ("horizontalLines", "gridDewarpHorizontalLines"),
                 ("verticalLines", "gridDewarpVerticalLines"),
                 ("validMapRatio", "gridDewarpValidMapRatio"),
@@ -625,6 +632,11 @@ def scan_one(
                 ("maximumCrossStep", "gridDewarpMaximumCrossStep"),
                 ("minimumJacobian", "gridDewarpMinimumJacobian"),
                 ("maximumJacobian", "gridDewarpMaximumJacobian"),
+                ("horizontalScoreBefore", "gridDewarpHorizontalScoreBefore"),
+                ("horizontalScoreAfter", "gridDewarpHorizontalScoreAfter"),
+                ("verticalScoreBefore", "gridDewarpVerticalScoreBefore"),
+                ("verticalScoreAfter", "gridDewarpVerticalScoreAfter"),
+                ("columnBlend", "gridDewarpColumnBlend"),
             ):
                 value = grid_result.diagnostics.get(source_key)
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
